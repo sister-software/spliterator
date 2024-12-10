@@ -1,0 +1,61 @@
+node_modules
+
+# ignore all of whosonfirst/dictionaries
+resources/whosonfirst/dictionaries/*/*.txt
+
+# whitelist certain files
+!resources/whosonfirst/dictionaries/country/wof:country.txt
+!resources/whosonfirst/dictionaries/country/wof:country_alpha3.txt
+!resources/whosonfirst/dictionaries/country/name:eng_x_preferred.txt
+!resources/whosonfirst/dictionaries/dependency/wof:shortcode.txt
+!resources/whosonfirst/dictionaries/dependency/name:eng_x_preferred.txt
+!resources/whosonfirst/dictionaries/region/wof:shortcode.txt
+!resources/whosonfirst/dictionaries/region/name:eng_x_preferred.txt
+!resources/whosonfirst/dictionaries/region/abrv:eng_x_preferred.txt
+!resources/whosonfirst/dictionaries/locality/name:eng_x_preferred.txt
+!resources/whosonfirst/dictionaries/locality/name:fra_x_preferred.txt
+
+# ignore all custom dictionaries
+resources/custom/dictionaries
+
+# ignore any openaddresses test cases
+test/oa
+
+# OS X
+.DS_Store
+._*
+
+## Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+## Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+## Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+
+# Yarn (without zero-installs)
+# https://yarnpkg.com/getting-started/qa
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+
+## Build asset directories
+dist
+out
+/build
+schema/generated

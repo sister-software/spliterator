@@ -1,0 +1,105 @@
+{
+	"name": "@sister.software/ribbon",
+	"version": "1.0.0",
+	"description": "Line-delimited file utilities",
+	"keywords": [
+		"csv",
+		"ndjson",
+		"jsonl",
+		"iterator",
+		"line-delimited",
+		"delimited"
+	],
+	"homepage": "https://github.com/sister-software/ribbon",
+	"bugs": {
+		"url": "https://github.com/sister-software/ribbon/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/sister-software/ribbon.git"
+	},
+	"license": "AGPL-3.0-only",
+	"contributors": [
+		{
+			"name": "Teffen Ellis",
+			"email": "teffen@sister.software"
+		}
+	],
+	"type": "module",
+	"exports": {
+		"./package.json": "./package.json",
+		".": "./out/index.js",
+		"./basename": "./out/lib/basename.js",
+		"./dirname": "./out/lib/dirname.js",
+		"./extname": "./out/lib/extname.js",
+		"./format": "./out/lib/format.js",
+		"./join": "./out/lib/join.js",
+		"./parse": "./out/lib/parse.js",
+		"./path-builder": "./out/lib/path-builder.js",
+		"./resolve": "./out/lib/resolve.js",
+		"./type-utils": "./out/lib/type-utils.js"
+	},
+	"files": [
+		"out/index.d.ts",
+		"out/index.d.ts.map",
+		"out/index.js.map",
+		"out/index.js",
+		"out/lib/**/*"
+	],
+	"scripts": {
+		"compile": "NODE_OPTIONS=\"--max-old-space-size=3000\" tsc -b",
+		"test": "vitest",
+		"lint": "run-s lint:prettier:check lint:eslint:check",
+		"lint:fix": "run-s lint:prettier:fix lint:eslint:fix",
+		"lint:prettier:check": "prettier --cache --check -u .",
+		"lint:prettier:fix": "prettier --cache --write -u .",
+		"lint:prettier": "eslint .",
+		"lint:eslint:check": "eslint .",
+		"lint:eslint:fix": "eslint --fix .",
+		"release": "release-it"
+	},
+	"prettier": "@sister.software/prettier-config",
+	"dependencies": {
+		"change-case": "^5.4.4"
+	},
+	"devDependencies": {
+		"@sister.software/eslint-config": "7.1.3",
+		"@sister.software/prettier-config": "7.1.3",
+		"@sister.software/tsconfig": "7.1.3",
+		"@types/node": "^22.8.1",
+		"eslint": "^9.13.0",
+		"eslint-config-prettier": "^9.1.0",
+		"npm-run-all": "^4.1.5",
+		"path-ts": "^1.0.5",
+		"prettier": "^3.3.3",
+		"prettier-plugin-jsdoc": "^1.3.0",
+		"prettier-plugin-organize-imports": "^4.1.0",
+		"prettier-plugin-packagejson": "^2.5.3",
+		"release-it": "^17.10.0",
+		"type-fest": "^4.30.0",
+		"typescript": "^5.6.3",
+		"typescript-eslint": "^8.11.0",
+		"vitest": "2.1.3"
+	},
+	"peerDependencies": {
+		"type-fest": "^4.30.0"
+	},
+	"peerDependenciesMeta": {
+		"type-fest": {
+			"optional": true
+		}
+	},
+	"packageManager": "yarn@4.5.1",
+	"engines": {
+		"node": ">= 10.0.0"
+	},
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org"
+	},
+	"release-it": {
+		"npm": {
+			"publish": true
+		}
+	}
+}

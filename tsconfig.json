@@ -1,0 +1,7 @@
+{
+	"extends": "@sister.software/tsconfig",
+	"compilerOptions": {
+		"baseUrl": "."
+	},
+	"exclude": ["./out/**/*"]
+}
