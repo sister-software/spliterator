@@ -16,7 +16,7 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/sister-software/ribbon.git"
+		"url": "git+https://github.com/sister-software/ribbon.git"
 	},
 	"license": "AGPL-3.0-only",
 	"contributors": [
@@ -29,15 +29,10 @@
 	"exports": {
 		"./package.json": "./package.json",
 		".": "./out/index.js",
-		"./basename": "./out/lib/basename.js",
-		"./dirname": "./out/lib/dirname.js",
-		"./extname": "./out/lib/extname.js",
-		"./format": "./out/lib/format.js",
-		"./join": "./out/lib/join.js",
-		"./parse": "./out/lib/parse.js",
-		"./path-builder": "./out/lib/path-builder.js",
-		"./resolve": "./out/lib/resolve.js",
-		"./type-utils": "./out/lib/type-utils.js"
+		"./common": "./out/lib/common.js",
+		"./reader": "./out/lib/reader.js",
+		"./splitters": "./out/lib/splitters.js",
+		"./writer": "./out/lib/writer.js"
 	},
 	"files": [
 		"out/index.d.ts",

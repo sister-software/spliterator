@@ -2,27 +2,28 @@
 
 Ribbon makes newline-delimited files easy to work with.
 
-Let's say you have a newline-delimited JSON file called `example.csv`:
+Let's say you have a huge newline-delimited JSON file that can't fit into memory.
 
-```json
-{"name": "Alice", "age": 30}
-{"name": "Bob", "age": 40}
-{"name": "Charlie", "age": 50}
+```js
+{"name": "Jessie", "age": 30}
+{"name": "Kelly", "age": 40}
+{"name": "Loren", "age": 50}
+// Several hundred thousand more lines...
 ```
 
-LineReaders extend native [ReadableStreams](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream), so you can use them in `for await...of` loops:
+Ribbon can help you read it line-by-line:
 
 ```ts
 import { LineReader } from "@sister.software/ribbon"
 
-const reader = new LineReader("example.csv")
+const reader = new LineReader("example.ndjson")
 
 for await (const line of reader) {
-	console.log(line.toString())
+	console.log(line.toString()) // {"name": "Alice", "age": 30}, etc.
 }
 ```
 
-[![npm version](https://img.shields.io/npm/v/ribbon.svg)](https://www.npmjs.com/package/ribbon)
+[![NPM Version](https://img.shields.io/npm/v/%40sister.software%2Fribbon)](https://www.npmjs.com/package/@sister.software/ribbon)
 
 # Installation
 
@@ -40,10 +41,12 @@ While Ribbon supports any line-delimited file, it's particularly useful for char
 
 ```csv
 Full Name, Occupation, Age
-Jessie, Developer, 30
-Kelly, Designer, 40
-Loren, Manager, 50
+Morgan, Developer, 30
+Nataly, Designer, 40
+Orlando, Manager, 50
 ```
+
+LineReaders extend web-native [ReadableStreams](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream), so you can use them in `for await...of` loops, as well as piping them through transformations to avoid nested and partially materialized streams.
 
 ```ts
 import { LineReader, DelimiterTransformer, Delimiter } from "@sister.software/ribbon"
@@ -58,6 +61,8 @@ for await (const columns of reader) {
 	console.log(columns) // ["Full Name", "Occupation", "Age"]
 }
 ```
+
+## Extras
 
 Ribbon also includes some quality-of-life features, such as normalizing CSV headers:
 

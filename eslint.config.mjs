@@ -9,11 +9,11 @@ import { createESLintPackageConfig } from "@sister.software/eslint-config"
 // @ts-check
 
 /**
- * ESLint configuration for the Typed Path Builder package.
+ * ESLint configuration for the Ribbon package.
  */
 const ESLintConfig = createESLintPackageConfig({
 	copyrightHolder: "Sister Software",
-	packageTitle: "Typed Path Builder",
+	packageTitle: "Ribbon",
 	spdxLicenseIdentifier: "AGPL-3.0",
 })
 
