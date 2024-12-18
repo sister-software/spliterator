@@ -1,6 +1,6 @@
 {
 	"name": "@sister.software/ribbon",
-	"version": "1.0.1",
+	"version": "1.1.0",
 	"description": "Line-delimited file utilities",
 	"keywords": [
 		"csv",
