@@ -6,81 +6,89 @@
  *   Utilities for working with newline-delimited files.
  */
 
-import { PathLike, read } from "node:fs"
+import { read } from "node:fs"
 import { open } from "node:fs/promises"
 import { ReadableStream, ReadableStreamController } from "node:stream/web"
-import { Delimiter, FileHandleLike, isFileHandleLike } from "./common.js"
+import { Delimiter, DelimiterInput } from "./delmiter.js"
+import {
+	AsynchronousDataResource as AsyncDataResource,
+	FileHandleLike,
+	isFileHandleLike,
+	TextDecoderLike,
+	TypedArray,
+} from "./shared.js"
+
+//#region Common
 
 /**
- * Given a buffer containing newline-delimited data, yield each line.
- *
- * @param input The buffer containing newline-delimited data.
- * @yields Each line in the buffer.
+ * A tuple representing a window of bytes in a buffer.
  */
-export function* takeBufferLines(input: Buffer, delimiterCharacterCode: number = Delimiter.LineFeed): Iterable<string> {
-	let currentByteIndex = 0
-	let lastNewlineIndex = 0
-
-	while (currentByteIndex < input.length) {
-		const byte = input[currentByteIndex]
-
-		if (byte === delimiterCharacterCode) {
-			const line = input.subarray(lastNewlineIndex, currentByteIndex).toString()
-			yield line
-
-			lastNewlineIndex = currentByteIndex + 1
-		}
-
-		currentByteIndex++
-	}
-
-	if (lastNewlineIndex < currentByteIndex) {
-		const line = input.subarray(lastNewlineIndex, currentByteIndex).toString()
-		yield line
-	}
-}
+export type DelimitedWindow = [
+	/**
+	 * The starting byte index of the window.
+	 */
+	start: number,
+	/**
+	 * The ending byte index of the window.
+	 */
+	end: number,
+]
 
 /**
- * Given a file handle and a range of bytes, read the range into a buffer.
- *
- * @param fileHandle The file handle to read from.
- * @param start The starting byte index.
- * @param end The ending byte index.
- * @param buffer A buffer to write the data to. If not provided, a new buffer will be created.
+ * Options for the delimited iterator.
  */
-export function readRange(fileHandle: FileHandleLike, start: number, end: number, buffer?: Buffer): Promise<Buffer> {
-	const size = end - start
-
-	if (size <= 0) {
-		throw new Error(`Invalid range. Start: ${start}, End: ${end}`)
-	}
-
-	buffer ||= Buffer.alloc(end - start)
-
-	return new Promise((resolve, reject) => {
-		read(fileHandle.fd, buffer, 0, end - start, start, (error) => {
-			if (error) {
-				reject(error)
-			} else {
-				resolve(buffer)
-			}
-		})
-	})
-}
-
-/**
- * An input for reading newline-delimited files, which can be a file handle or a path to a file.
- */
-export type LineReaderInput = FileHandleLike | PathLike
-
-/**
- * Options for reading newline-delimited files.
- */
-export interface LineReaderOptions {
+export interface DelimitedIteratorOptions {
 	/**
 	 * The character to use for newlines. Defaults to the system's newline character.
 	 */
-	delimiter?: number
+	delimiter?: DelimiterInput
+
+	/**
+	 * The `TextDecoder`-like object to use for decoding incoming data.
+	 *
+	 * This is not set by default, beec
+	 */
+	decoder?: TextDecoderLike
+
+	/**
+	 * The byte offset to start reading from.
+	 *
+	 * This is an advanced option that is not typically used.
+	 *
+	 * @default 0
+	 */
+	byteOffset?: number
+
+	/**
+	 * Whether to emit repeated delimiters as empty buffers.
+	 *
+	 * Setting this to `false` matches the behavior of `String.prototype.split`.
+	 *
+	 * @default true
+	 */
+	skipEmpty?: boolean
+
+	/**
+	 * Count of skipped matches before emitting a data.
+	 *
+	 * @default 0
+	 */
+	drop?: number
+
+	/**
+	 * The maximum number of data slices to yield. Useful for limiting the number of lines read from a
+	 * file.
+	 *
+	 * Note that skipped slices are not counted towards the limit.
+	 *
+	 * @default Infinity
+	 */
+	limit?: number
+
+	/**
+	 * An `AbortSignal` to cancel the read operation.
+	 */
+	signal?: AbortSignal
 
 	/**
 	 * Whether to close the file handle after completion.
@@ -88,35 +96,297 @@ export interface LineReaderOptions {
 	 * @default true
 	 */
 	closeFileHandle?: boolean
-
-	/**
-	 * Whether to skip empty lines, i.e., lines that contain only a newline character.
-	 */
-	skipEmptyLines?: boolean
-
-	/**
-	 * The maximum number of lines to yield. Useful for limiting the number of lines read from a file.
-	 *
-	 * Note that skipped lines are not counted towards the limit.
-	 *
-	 * @default Infinity
-	 */
-	lineLimit?: number
-
-	/**
-	 * An `AbortSignal` to cancel the read operation.
-	 */
-	signal?: AbortSignal
 }
 
-const codeToPrintable = (charCode: number | undefined) => {
-	if (typeof charCode === "undefined") return "␀"
-	if (charCode === Delimiter.LineFeed) return "␤"
-	if (charCode === Delimiter.CarriageReturn) return "␍"
-	if (charCode === 0) return "␀"
+//#endregion
 
-	return String.fromCharCode(charCode)
+//#region Delimited Synchronous
+
+/**
+ * A static class for iterator of async delimited data.
+ */
+export class DelimitedIterator {
+	/**
+	 * Given a byte array containing delimited data, yield a sliding window of indexes.
+	 *
+	 * This a low-level utility function that can be used to implement more complex parsing logic.
+	 *
+	 * @param haystack The buffer containing newline-delimited data.
+	 * @param needle The delimiter to use. Defaults to a line feed.
+	 * @param offset The byte index to start searching from.
+	 * @param byteLimit The byte index to stop searching at.
+	 * @yields Each window of the buffer that contains a delimiter.
+	 */
+	static *slidingWindow<T extends TypedArray>(
+		haystack: T,
+		needle: DelimiterInput = Delimiter.LineFeed,
+		offset = 0,
+		byteLimit = haystack.length
+	): Generator<DelimitedWindow> {
+		// First, we normalize the delimiter into an array of bytes.
+		const delimiter = Delimiter.from(needle)
+		// Our cursor starts at the offset and increments every time we find a matching sub array.
+		let cursor = offset
+
+		while (offset < byteLimit) {
+			let i = 0
+
+			// We walk through as many bytes as the delimiter has...
+			for (i = 0; i < delimiter.length; i++) {
+				if (haystack[offset + i] !== delimiter[i]) {
+					break // Character doesn't match the delimiter.
+				}
+			}
+
+			if (i !== delimiter.length) {
+				offset++
+
+				continue // We didn't find a match, so we continue.
+			}
+
+			yield [cursor, offset]
+
+			offset += delimiter.length
+			cursor = offset
+		}
+
+		if (cursor <= byteLimit) {
+			yield [cursor, byteLimit]
+		}
+	}
+
+	/**
+	 * Given a byte array containing delimited data, yield a slice of the buffer between delimiters.
+	 *
+	 * This a low-level utility function that can be used to implement more complex parsing logic.
+	 *
+	 * @yields Each slice of the buffer separated by a delimiter.
+	 */
+	static *from<T extends TypedArray>(
+		/**
+		 * The buffer containing newline-delimited data.
+		 */
+		haystack: T,
+		{ limit = Infinity, skipEmpty = true, drop = 0, byteOffset = 0, signal, ...options }: DelimitedIteratorOptions = {}
+	): Generator<T> {
+		const delimiter = Delimiter.from(options.delimiter ?? Delimiter.LineFeed)
+		let emittedCount = 0
+
+		if (byteOffset > haystack.length) {
+			return
+		}
+
+		if (limit === 0) {
+			return
+		}
+
+		const windowIterator = DelimitedIterator.slidingWindow(haystack, delimiter, byteOffset, haystack.length)
+
+		for (const [start, end] of windowIterator) {
+			const slice = haystack.subarray(start, end)
+
+			if (slice.length === 0 && skipEmpty) {
+				continue
+			} else if (
+				slice.length === delimiter.length &&
+				slice.every((_byte, i) => slice[i] === delimiter[i]) &&
+				skipEmpty
+			) {
+				continue
+			}
+
+			if (emittedCount < drop) {
+				emittedCount++
+				continue
+			}
+
+			yield slice as T
+
+			emittedCount++
+
+			if (signal?.aborted) {
+				break
+			}
+
+			if (emittedCount === limit) {
+				break
+			}
+		}
+	}
 }
+
+//#endregion
+
+//#region Delimited Asynchronous
+
+/**
+ * Given a file handle and a range of bytes, read the range into a buffer.
+ *
+ * @param fileHandle The file handle to read from.
+ * @param position The initial byte position to start reading from.
+ * @param end The ending byte index.
+ * @param destination A buffer to write the data to. If not provided, a new buffer will be created.
+ */
+export function readRange<Destination extends TypedArray = Uint8Array>(
+	fileHandle: FileHandleLike,
+	position: number,
+	end: number,
+	destination?: Destination
+): Promise<Destination> {
+	const length = end - position
+
+	if (length <= 0) {
+		throw new Error(`Invalid range length ${length}. Start: ${position}, End: ${end}`)
+	}
+
+	destination ||= new Uint8Array(length) as Destination
+
+	return new Promise((resolve, reject) => {
+		read(
+			// ---
+			fileHandle.fd,
+			destination,
+			0,
+			length,
+			position,
+			(error) => {
+				if (error) {
+					reject(error)
+				} else {
+					resolve(destination)
+				}
+			}
+		)
+	})
+}
+
+/**
+ * A static class for iterator of async delimited data.
+ */
+export class AsyncDelimitedIterator {
+	/**
+	 * Given a byte array containing delimited data, yield a sliding window of indexes.
+	 *
+	 * This a low-level utility function that can be used to implement more complex parsing logic.
+	 *
+	 * @param haystack The buffer containing newline-delimited data.
+	 * @param needle The delimiter to use. Defaults to a line feed.
+	 * @param offset The byte index to start searching from.
+	 * @param byteLimit The byte index to stop searching at.
+	 * @yields Each window of the buffer that contains a delimiter.
+	 */
+	static async *slidingWindow<T extends AsyncDataResource>(
+		haystack: T,
+		needle: DelimiterInput = Delimiter.LineFeed,
+		offset = 0,
+		byteLimit: number = Infinity
+	): AsyncGenerator<DelimitedWindow> {
+		const fileHandle = isFileHandleLike(haystack) ? haystack : await open(haystack)
+		const stats = await fileHandle.stat()
+
+		byteLimit = Math.min(byteLimit, stats.size)
+
+		const delimiter = Delimiter.from(needle)
+		let cursor = offset
+
+		while (offset < byteLimit) {
+			const buffer = await readRange(fileHandle, offset, offset + delimiter.length)
+
+			let i = 0
+
+			for (i = 0; i < delimiter.length; i++) {
+				if (buffer[i] !== delimiter[i]) {
+					break
+				}
+			}
+
+			if (i !== delimiter.length) {
+				offset++
+
+				continue
+			}
+
+			yield [cursor, offset]
+
+			offset += delimiter.length
+			cursor = offset
+		}
+	}
+
+	/**
+	 * Given a byte array containing delimited data, yield a slice of the buffer between delimiters.
+	 *
+	 * This a low-level utility function that can be used to implement more complex parsing logic.
+	 *
+	 * @yields Each slice of the buffer separated by a delimiter.
+	 */
+	static async *from<T extends TypedArray = Uint8Array>(
+		/**
+		 * The buffer containing newline-delimited data.
+		 */
+		haystack: AsyncDataResource,
+		{ limit = Infinity, skipEmpty = true, drop = 0, byteOffset = 0, signal, ...options }: DelimitedIteratorOptions = {}
+	): AsyncGenerator<T> {
+		const fileHandle = isFileHandleLike(haystack) ? haystack : await open(haystack)
+		const stats = await fileHandle.stat()
+
+		byteOffset = Math.min(byteOffset, stats.size)
+
+		const delimiter = Delimiter.from(options.delimiter ?? Delimiter.LineFeed)
+		let emittedCount = 0
+
+		if (limit === 0) {
+			return
+		}
+
+		const windowIterator = AsyncDelimitedIterator.slidingWindow(haystack, delimiter, byteOffset, Infinity)
+
+		for await (const [start, end] of windowIterator) {
+			if (start === end) {
+				if (skipEmpty) continue
+
+				yield new Uint8Array(0) as T
+
+				emittedCount++
+
+				continue
+			}
+
+			const slice = await readRange(fileHandle, start, end)
+
+			if (slice.length === 0 && skipEmpty) {
+				continue
+			} else if (
+				slice.length === delimiter.length &&
+				slice.every((_byte, i) => slice[i] === delimiter[i]) &&
+				skipEmpty
+			) {
+				continue
+			}
+
+			if (emittedCount < drop) {
+				emittedCount++
+				continue
+			}
+
+			yield slice as T
+
+			emittedCount++
+
+			if (signal?.aborted) {
+				break
+			}
+
+			if (emittedCount === limit) {
+				break
+			}
+		}
+	}
+}
+
+//#endregion
+
+//#region LineReader
 
 /**
  * A reader for newline-delimited files.
@@ -129,147 +399,47 @@ const codeToPrintable = (charCode: number | undefined) => {
  * }
  * ```
  */
-export class LineReader<T = Buffer> extends ReadableStream<T> implements AsyncDisposable {
+export class LineReader<T extends TypedArray = Uint8Array> extends ReadableStream<T> implements AsyncDisposable {
+	/**
+	 * Create a new `LineReader` instance.
+	 */
 	constructor(
 		/**
 		 * The path to the CSV, NDJSON, or other newline-delimited file.
 		 */
-		input: LineReaderInput,
-		{
-			delimiter = Delimiter.LineFeed,
-			lineLimit = Infinity,
-			closeFileHandle = true,
-			skipEmptyLines = true,
-			signal,
-		}: LineReaderOptions = {}
+		source: TypedArray | AsyncDataResource,
+		/**
+		 * Options for the reader.
+		 */
+		options: DelimitedIteratorOptions = {}
 	) {
-		let fileHandle: FileHandleLike | null = null
+		const { skipEmpty = true } = options
+		let generator: Generator<T, T, T> | AsyncGenerator<T, T, T>
 
-		const release = async () => {
-			if (fileHandle && closeFileHandle) {
-				await fileHandle[Symbol.asyncDispose]?.()
-				fileHandle = null
-			}
+		if (Array.isArray(source)) {
+			generator = DelimitedIterator.from(source as unknown as T, options)
+		} else {
+			generator = AsyncDelimitedIterator.from(source as AsyncDataResource, options)
 		}
-
-		if (signal) {
-			signal.addEventListener("abort", release)
-		}
-
-		const start = async (controller: ReadableStreamController<T>) => {
-			fileHandle = isFileHandleLike(input) ? input : await open(input, "r")
-			const stats = await fileHandle.stat()
-			inputSize = stats.size
-
-			if (inputSize === 0) {
-				controller.close()
-				return
-			}
-		}
-
-		let inputSize = 0
-		let offset = 0
-		let cursor = 0
-		let lineCount = 0
-
-		const characterBuffer = Buffer.alloc(4)
 
 		const pull = async (controller: ReadableStreamController<T>) => {
-			// If we don't have a file handle, we close the controller...
-			if (!fileHandle) {
-				controller.close()
-				return
-			}
+			const { value, done } = await generator.next()
 
-			if (lineCount === lineLimit) {
-				controller.close()
-				return
-			}
-
-			let currentCharacter: number | undefined
-			let nextCharacter: number | undefined
-
-			while (cursor < inputSize) {
-				const clampedStart = Math.max(cursor - 1, 0)
-				const clampedEnd = Math.min(cursor + 3, inputSize)
-
-				await readRange(fileHandle, clampedStart, clampedEnd, characterBuffer)
-
-				if (clampedStart === 0) {
-					currentCharacter = characterBuffer[0]
-					nextCharacter = characterBuffer[1]
-				} else {
-					currentCharacter = characterBuffer[1]
-					nextCharacter = characterBuffer[2]
+			if (typeof value === "undefined") {
+				if (!skipEmpty) {
+					controller.enqueue(new Uint8Array(0) as T)
 				}
-
-				if (currentCharacter === Delimiter.CarriageReturn) {
-					if (nextCharacter !== Delimiter.LineFeed) {
-						throw new Error(`Expected carriage return character at ${cursor}: ${currentCharacter}`)
-					}
-				} else if (currentCharacter === delimiter) {
-					break
-				}
-
-				cursor++
-			}
-
-			// Looks like we're at the end of a line, so we can read the contents.
-			let line = await readRange(fileHandle, offset, cursor)
-
-			let empty = false
-
-			switch (line.length) {
-				case 0:
-					empty = true
-					break
-				case 1:
-					empty = line[0] === delimiter || line[0] === Delimiter.CarriageReturn
-					break
-				case 2:
-					empty = line[0] === Delimiter.CarriageReturn && line[1] === delimiter
-					break
-				default:
-					empty = /^\s*$/.test(line.toString())
-			}
-
-			if (nextCharacter === Delimiter.CarriageReturn || nextCharacter === delimiter) {
-				offset = cursor
 			} else {
-				offset = cursor + 1
+				controller.enqueue(value)
 			}
 
-			// console.log(
-			// 	`>> #${lineCount} (${line.length} bytes) (start: ${offset}, end: ${cursor}):`,
-			// 	"^" + Array.from(line, codeToPrintable).join("·") + "$"
-			// )
-
-			if (empty) {
-				// If we're not skipping empty lines, we need to emit an empty buffer,
-				// This matches the behavior of splitting a string with extra newlines.
-				line = Buffer.alloc(0)
-			}
-
-			if (!empty || !skipEmptyLines) {
-				// We enqueue the line, emitting it to the consumer.
-				controller.enqueue(line as T)
-			}
-
-			// If we've reached the end of the file...
-			if (cursor === inputSize) {
-				// console.log(">> EOF")
+			if (done) {
 				controller.close()
 			}
-
-			// Finally, we update our indexes.
-			cursor++
-			lineCount++
 		}
 
 		super({
-			start,
 			pull,
-			cancel: release,
 		})
 	}
 

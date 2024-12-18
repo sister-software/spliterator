@@ -54,3 +54,27 @@ export function smartCapitalCase(input: string): string {
 
 	return capitalCase(input)
 }
+
+/**
+ * Given an array of column names, normalize them to ensure they are unique and usable as object
+ * keys.
+ */
+export function normalizeColumnNames(columnHeaders: Iterable<string>): string[] {
+	const columnInputCountMap = new Map<string, number>()
+	const distinctColumns = new Set<string>()
+	const keyableColumnNames = Iterator.from(columnHeaders).map(smartSnakeCase)
+
+	for (const columnHeader of keyableColumnNames) {
+		if (distinctColumns.has(columnHeader)) {
+			const headerCount = (columnInputCountMap.get(columnHeader) ?? 1) + 1
+			columnInputCountMap.set(columnHeader, headerCount)
+
+			const uniqueColumnName = `${columnHeader}_${headerCount}`
+			distinctColumns.add(uniqueColumnName)
+		} else {
+			distinctColumns.add(columnHeader)
+		}
+	}
+
+	return Array.from(distinctColumns)
+}

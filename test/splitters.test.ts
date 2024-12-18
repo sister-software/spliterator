@@ -4,7 +4,12 @@
  * @author Teffen Ellis, et al.
  */
 
-import { DelimiterTransformer, LineReader, normalizeColumnNames } from "@sister.software/ribbon"
+import {
+	DelimitedTextDecoderTransformer,
+	DelimiterTransformer,
+	LineReader,
+	normalizeColumnNames,
+} from "@sister.software/ribbon"
 import * as fs from "node:fs/promises"
 import { test } from "vitest"
 import { fixturesDirectory } from "./utils.js"
@@ -15,7 +20,11 @@ test("CSV parsing", async ({ expect, onTestFinished }) => {
 	const fileHandle = await fs.open(fixturePath, "r")
 
 	onTestFinished(() => fileHandle.close())
-	const reader = new LineReader(fileHandle).pipeThrough(new DelimiterTransformer())
+	const reader = new LineReader(fileHandle)
+		// ---
+		.pipeThrough(new DelimiterTransformer())
+		.pipeThrough(new DelimitedTextDecoderTransformer())
+
 	const iterator = reader[Symbol.asyncIterator]()
 
 	const headerResult = await iterator.next()

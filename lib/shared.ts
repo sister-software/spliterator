@@ -27,52 +27,57 @@ export interface FileHandleLike extends AsyncDisposable {
 }
 
 /**
- * Commonly used ASCII character codes for newline-delimited files.
+ * Typed arrays that may be used as sources for byte streams.
  */
-export enum Delimiter {
-	/**
-	 * Newline character – ␊
-	 */
-	LineFeed = 10,
-	/**
-	 * Carriage return character – ␍
-	 */
-	CarriageReturn = 13,
-	/**
-	 * Comma character – ,
-	 */
-	Comma = 44,
-	/**
-	 * Tab character – ␉
-	 */
-	Tab = 9,
-	/**
-	 * Space character – ␠
-	 */
-	Space = 32,
-	/**
-	 * One character – 1
-	 */
-	One = 49,
-	/**
-	 * Zero character – 0
-	 */
-	Zero = 48,
-	/**
-	 * Double quote character – "
-	 */
-	DoubleQuote = 34,
-	/**
-	 * Record separator character – ␞
-	 */
-	RecordSeparator = 30,
-}
+export type TypedArray =
+	| Uint8Array
+	| Uint8ClampedArray
+	| Uint16Array
+	| Uint32Array
+	| Int8Array
+	| Int16Array
+	| Int32Array
+	| BigUint64Array
+	| BigInt64Array
+	| Float32Array
+	| Float64Array
+
+/**
+ * A source of bytes that can be read from.
+ */
+export type ReadableSource = FileHandleLike | TypedArray
 
 /**
  * Type-predicate to determine if a value is a file handle.
  */
 export function isFileHandleLike(input: unknown): input is FileHandleLike {
 	return Boolean(input && typeof input === "object" && "fd" in input)
+}
+
+/**
+ * An asynchronous resource to a delimited byte stream, which can be a...
+ *
+ * - `string` representing a file path.
+ * - `URL` object representing a file path.
+ * - `Buffer` containing the file contents.
+ * - `TypedArray` containing the file contents.
+ * - `FileHandleLike` object representing an open file handle.
+ */
+export type AsynchronousDataResource = string | URL | FileHandleLike
+
+/**
+ * A resource to a delimited byte stream, i.e., a file buffer, handle, or path.
+ *
+ * @see {@link AsynchronousDataResource} : File paths, URLs, and handles.
+ * @see {@link TypedArray} : Buffers and typed arrays.
+ */
+export type DataResource = AsynchronousDataResource | TypedArray
+
+/**
+ * A trimmed-down version of the text decoder interface.
+ */
+export interface TextDecoderLike {
+	decode(input: Uint8Array): string
 }
 
 /**
