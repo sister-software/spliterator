@@ -1,4 +1,4 @@
-# What is Ribbon?
+# Ribbon 🎀
 
 Ribbon makes newline-delimited files easy to work with.
 
@@ -14,12 +14,17 @@ Let's say you have a huge newline-delimited JSON file that can't fit into memory
 Ribbon can help you read it line-by-line:
 
 ```ts
-import { LineReader } from "@sister.software/ribbon"
+import { DelimitedJSONGenerator } from "@sister.software/ribbon"
 
-const reader = new LineReader("example.ndjson")
+interface Person {
+	name: string
+	age: number
+}
+
+const reader = DelimitedJSONGenerator.fromAsync("example.jsonl")
 
 for await (const line of reader) {
-	console.log(line.toString()) // {"name": "Alice", "age": 30}, etc.
+	console.log(line) // {"name": "Alice", "age": 30}, etc.
 }
 ```
 
@@ -37,7 +42,7 @@ npm install @sister.software/ribbon
 
 ## Character-delimited files
 
-While Ribbon supports any line-delimited file, it's particularly useful for character-delimited content such as comma-separated values (CSV), tab-separated values (TSV) – or any other delimiter you can think of.
+While Ribbon supports any delimited byte stream, it's particularly useful for character-delimited content such as comma-separated values (CSV), tab-separated values (TSV) – or any other delimiter you can think of.
 
 ```csv
 Full Name, Occupation, Age
@@ -46,48 +51,63 @@ Nataly, Designer, 40
 Orlando, Manager, 50
 ```
 
-LineReaders extend web-native [ReadableStreams](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream), so you can use them in `for await...of` loops, as well as piping them through transformations to avoid nested and partially materialized streams.
-
 ```ts
-import { LineReader, DelimiterTransformer, Delimiter } from "@sister.software/ribbon"
+import { CSVGenerator } from "@sister.software/ribbon"
 
-const reader = new LineReader(fileHandle).pipeThrough(
-	new DelimiterTransformer({
-		delimiter: Delimiter.Comma,
-	})
-)
+const reader = CSVGenerator.fromAsync("people.csv")
 
 for await (const columns of reader) {
-	console.log(columns) // ["Full Name", "Occupation", "Age"]
+	console.log(columns) // ["Full Name", "Occupation", "Age"], ["Morgan", "Developer", 30], etc.
 }
 ```
 
-## Extras
-
-Ribbon also includes some quality-of-life features, such as normalizing CSV headers:
+CSV files can also be emitted as objects with headers as keys, with some quality-of-life features, such as normalizing property keys:
 
 ```ts
-import { LineReader, DelimiterTransformer, Delimiter, normalizeColumnNames } from "@sister.software/ribbon"
+import { CSVGenerator } from "@sister.software/ribbon"
 
-const reader = new LineReader(fileHandle).pipeThrough(
-	new DelimiterTransformer({
-		delimiter: Delimiter.Comma,
-	})
-)
+interface Person {
+	full_name: string
+	occupation: string
+	age: number
+}
 
-// Same as before, but we grab the iterator.
-const iterator = reader[Symbol.asyncIterator]()
+const reader = CSVGenerator.fromAsync<Person>("people.csv", { mode: "object" })
 
-const headerResult = await iterator.next()
-
-const headerColumns = normalizeColumnNames(headerResult.value)
-
-console.log(headerColumns) // ["full_name", "occupation", "age"]
+for await (const columns of reader) {
+	console.log(columns) // { full_name: "Morgan", occupation: "Developer", age: 30 }, etc.
+}
 ```
 
 ## Advanced usage
 
+Ribbon is designed to be simple to use, but also flexible and powerful.
 For more advanced use cases, check out our tests in the `test` directory, or our fully-annotated source code.
+
+### Reading from a stream
+
+All Ribbon generators implement the `Generator` and `AsyncGenerator` interfaces, so you can use them in `for...of` and `for await...of` loops, as well the web-native [ReadableStreams](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream), so you can use them in `for await...of` loops, as well as piping them through transformations to avoid nested and partially materialized streams.
+
+```ts
+import { DelimitedJSONGenerator } from "@sister.software/ribbon"
+
+const people = [
+	{ name: "Alice", age: 30 },
+	{ name: "Bob", age: 40 },
+	{ name: "Charlie", age: 50 },
+]
+
+const generator = DelimitedJSONGenerator.from(people.map(JSON.stringify).join("\n"))
+const stream = ReadableStream.from(generator)
+
+for await (const line of stream) {
+	console.log(line) // {"name": "Alice", "age": 30}, etc.
+}
+```
+
+### Custom generators
+
+While Ribbon includes premade exports for most use-cases, custom generators can be created via `DelimitedGenerator`. This class is a low-level interface that allows you to create your own generators for any kind of delimited content.
 
 # License
 

@@ -5,8 +5,10 @@
  */
 
 export * from "./lib/casing.js"
+export * from "./lib/CSVParser.js"
+export * from "./lib/DelimitedGenerator.js"
+export * from "./lib/DelimitedJSONGenerator.js"
+export * from "./lib/DelimitedTextGenerator.js"
 export * from "./lib/DelimiterTransformer.js"
-export * from "./lib/reader.js"
 export * from "./lib/shared.js"
-export * from "./lib/TextDecoderTransformer.js"
 export * from "./lib/writer.js"

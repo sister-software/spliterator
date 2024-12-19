@@ -63,15 +63,37 @@ export function isFileHandleLike(input: unknown): input is FileHandleLike {
  * - `TypedArray` containing the file contents.
  * - `FileHandleLike` object representing an open file handle.
  */
-export type AsynchronousDataResource = string | URL | FileHandleLike
+export type AsyncDataResource = string | URL | FileHandleLike
+
+/**
+ * An interface for working with asynchronous data resources.
+ */
+export interface FileSystemProvider {
+	/**
+	 * Open an asynchronous data resource.
+	 *
+	 * In Node.js, this is typically `fs.promises.open`.
+	 */
+	open(resource: AsyncDataResource, flags?: string): Promise<FileHandleLike>
+
+	/**
+	 * Read a range of bytes from a file handle.
+	 */
+	read<Destination extends TypedArray = Uint8Array>(
+		fileHandle: FileHandleLike,
+		position: number,
+		end: number,
+		destination?: Destination
+	): Promise<Destination>
+}
 
 /**
  * A resource to a delimited byte stream, i.e., a file buffer, handle, or path.
  *
- * @see {@link AsynchronousDataResource} : File paths, URLs, and handles.
+ * @see {@link AsyncDataResource} : File paths, URLs, and handles.
  * @see {@link TypedArray} : Buffers and typed arrays.
  */
-export type DataResource = AsynchronousDataResource | TypedArray
+export type DataResource = AsyncDataResource | TypedArray
 
 /**
  * A trimmed-down version of the text decoder interface.
@@ -80,6 +102,13 @@ export interface TextDecoderLike {
 	decode(input: Uint8Array): string
 }
 
+export type Zipped<T, U> = [a: T | undefined, b: U | undefined, idx: number]
+
+export type ZippedEntries<Z> = Z extends Zipped<infer T, infer U> ? [T, U] : never
+
+export function zippedEntries<T, U>(zipped: Zipped<T, U>): ZippedEntries<Zipped<T, U>> {
+	return zipped.slice(0, 2) as ZippedEntries<Zipped<T, U>>
+}
 /**
  * Given two iterables, zip them together into a single iterable which yields pairs of elements.
  *
@@ -90,10 +119,7 @@ export interface TextDecoderLike {
  * @yields Pairs of elements from the two iterables.
  * @see {@linkcode zipAsync} for the asynchronous version.
  */
-export function* zipSync<T, U>(
-	a: Iterable<T>,
-	b: Iterable<U>
-): Generator<[a: T | undefined, b: U | undefined, idx: number]> {
+export function* zipSync<T, U>(a: Iterable<T>, b: Iterable<U>): Generator<Zipped<T, U>> {
 	const aIterator = a[Symbol.iterator]()
 	const bIterator = b[Symbol.iterator]()
 

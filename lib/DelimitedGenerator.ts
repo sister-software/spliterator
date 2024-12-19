@@ -2,23 +2,10 @@
  * @copyright Sister Software
  * @license AGPL-3.0
  * @author Teffen Ellis, et al.
- *
- *   Utilities for working with newline-delimited files.
  */
 
-import { read } from "node:fs"
-import { open } from "node:fs/promises"
-import { ReadableStream, ReadableStreamController } from "node:stream/web"
 import { Delimiter, DelimiterInput } from "./delmiter.js"
-import {
-	AsynchronousDataResource as AsyncDataResource,
-	FileHandleLike,
-	isFileHandleLike,
-	TextDecoderLike,
-	TypedArray,
-} from "./shared.js"
-
-//#region Common
+import { AsyncDataResource, FileHandleLike, FileSystemProvider, TypedArray } from "./shared.js"
 
 /**
  * A tuple representing a window of bytes in a buffer.
@@ -37,18 +24,11 @@ export type DelimitedWindow = [
 /**
  * Options for the delimited iterator.
  */
-export interface DelimitedIteratorOptions {
+export interface DelimitedGeneratorOptions {
 	/**
-	 * The character to use for newlines. Defaults to the system's newline character.
+	 * The character to use for newlines.
 	 */
 	delimiter?: DelimiterInput
-
-	/**
-	 * The `TextDecoder`-like object to use for decoding incoming data.
-	 *
-	 * This is not set by default, beec
-	 */
-	decoder?: TextDecoderLike
 
 	/**
 	 * The byte offset to start reading from.
@@ -89,7 +69,13 @@ export interface DelimitedIteratorOptions {
 	 * An `AbortSignal` to cancel the read operation.
 	 */
 	signal?: AbortSignal
+}
 
+export interface AsyncDelimitedGeneratorOptions extends DelimitedGeneratorOptions {
+	/**
+	 * A file system provider for reading data.
+	 */
+	fs?: FileSystemProvider
 	/**
 	 * Whether to close the file handle after completion.
 	 *
@@ -98,14 +84,16 @@ export interface DelimitedIteratorOptions {
 	closeFileHandle?: boolean
 }
 
-//#endregion
-
-//#region Delimited Synchronous
-
 /**
  * A static class for iterator of async delimited data.
  */
-export class DelimitedIterator {
+export abstract class DelimitedGenerator {
+	constructor() {
+		throw new TypeError("Static class cannot be instantiated. Did you mean `DelimitedGenerator.from`?")
+	}
+
+	//#region Synchrnous methods
+
 	/**
 	 * Given a byte array containing delimited data, yield a sliding window of indexes.
 	 *
@@ -162,13 +150,16 @@ export class DelimitedIterator {
 	 *
 	 * @yields Each slice of the buffer separated by a delimiter.
 	 */
-	static *from<T extends TypedArray>(
+	static *from<T extends TypedArray | string>(
 		/**
-		 * The buffer containing newline-delimited data.
+		 * The byte array or string containing delimited data.
 		 */
-		haystack: T,
-		{ limit = Infinity, skipEmpty = true, drop = 0, byteOffset = 0, signal, ...options }: DelimitedIteratorOptions = {}
-	): Generator<T> {
+		source: T,
+		{ limit = Infinity, skipEmpty = true, drop = 0, byteOffset = 0, signal, ...options }: DelimitedGeneratorOptions = {}
+	): Generator<T extends string ? Uint8Array : T> {
+		const haystack = (typeof source === "string" ? new TextEncoder().encode(source) : source) as
+			| Exclude<T, string>
+			| Uint8Array
 		const delimiter = Delimiter.from(options.delimiter ?? Delimiter.LineFeed)
 		let emittedCount = 0
 
@@ -180,7 +171,7 @@ export class DelimitedIterator {
 			return
 		}
 
-		const windowIterator = DelimitedIterator.slidingWindow(haystack, delimiter, byteOffset, haystack.length)
+		const windowIterator = DelimitedGenerator.slidingWindow(haystack, delimiter, byteOffset, haystack.length)
 
 		for (const [start, end] of windowIterator) {
 			const slice = haystack.subarray(start, end)
@@ -200,7 +191,7 @@ export class DelimitedIterator {
 				continue
 			}
 
-			yield slice as T
+			yield slice as T extends string ? Uint8Array : T
 
 			emittedCount++
 
@@ -213,94 +204,39 @@ export class DelimitedIterator {
 			}
 		}
 	}
-}
 
-//#endregion
+	//#endregion
 
-//#region Delimited Asynchronous
+	//#region Asynchronous methods
 
-/**
- * Given a file handle and a range of bytes, read the range into a buffer.
- *
- * @param fileHandle The file handle to read from.
- * @param position The initial byte position to start reading from.
- * @param end The ending byte index.
- * @param destination A buffer to write the data to. If not provided, a new buffer will be created.
- */
-export function readRange<Destination extends TypedArray = Uint8Array>(
-	fileHandle: FileHandleLike,
-	position: number,
-	end: number,
-	destination?: Destination
-): Promise<Destination> {
-	const length = end - position
-
-	if (length <= 0) {
-		throw new Error(`Invalid range length ${length}. Start: ${position}, End: ${end}`)
-	}
-
-	destination ||= new Uint8Array(length) as Destination
-
-	return new Promise((resolve, reject) => {
-		read(
-			// ---
-			fileHandle.fd,
-			destination,
-			0,
-			length,
-			position,
-			(error) => {
-				if (error) {
-					reject(error)
-				} else {
-					resolve(destination)
-				}
-			}
-		)
-	})
-}
-
-/**
- * A static class for iterator of async delimited data.
- */
-export class AsyncDelimitedIterator {
 	/**
 	 * Given a byte array containing delimited data, yield a sliding window of indexes.
 	 *
 	 * This a low-level utility function that can be used to implement more complex parsing logic.
 	 *
-	 * @param haystack The buffer containing newline-delimited data.
+	 * @param fileHandle The file handle to read from.
+	 * @param fs A file system provider for reading data.
 	 * @param needle The delimiter to use. Defaults to a line feed.
 	 * @param offset The byte index to start searching from.
 	 * @param byteLimit The byte index to stop searching at.
 	 * @yields Each window of the buffer that contains a delimiter.
 	 */
-	static async *slidingWindow<T extends AsyncDataResource>(
-		haystack: T,
+	static async *slidingWindowAsync(
+		fileHandle: FileHandleLike,
+		fs: FileSystemProvider,
 		needle: DelimiterInput = Delimiter.LineFeed,
 		offset = 0,
 		byteLimit: number = Infinity
 	): AsyncGenerator<DelimitedWindow> {
-		const fileHandle = isFileHandleLike(haystack) ? haystack : await open(haystack)
-		const stats = await fileHandle.stat()
-
-		byteLimit = Math.min(byteLimit, stats.size)
-
 		const delimiter = Delimiter.from(needle)
 		let cursor = offset
 
 		while (offset < byteLimit) {
-			const buffer = await readRange(fileHandle, offset, offset + delimiter.length)
+			const range = await fs.read(fileHandle, offset, offset + delimiter.length)
 
-			let i = 0
+			const match = range.every((byte, i) => byte === delimiter[i])
 
-			for (i = 0; i < delimiter.length; i++) {
-				if (buffer[i] !== delimiter[i]) {
-					break
-				}
-			}
-
-			if (i !== delimiter.length) {
+			if (!match) {
 				offset++
 
 				continue
@@ -311,6 +247,10 @@ export class AsyncDelimitedIterator {
 			offset += delimiter.length
 			cursor = offset
 		}
+
+		if (cursor <= byteLimit) {
+			yield [cursor, byteLimit]
+		}
 	}
 
 	/**
@@ -320,30 +260,38 @@ export class AsyncDelimitedIterator {
 	 *
 	 * @yields Each slice of the buffer separated by a delimiter.
 	 */
-	static async *from<T extends TypedArray = Uint8Array>(
+	static async *fromAsync<T extends TypedArray = Uint8Array>(
 		/**
 		 * The buffer containing newline-delimited data.
 		 */
-		haystack: AsyncDataResource,
-		{ limit = Infinity, skipEmpty = true, drop = 0, byteOffset = 0, signal, ...options }: DelimitedIteratorOptions = {}
-	): AsyncGenerator<T> {
-		const fileHandle = isFileHandleLike(haystack) ? haystack : await open(haystack)
-		const stats = await fileHandle.stat()
+		source: AsyncDataResource,
+		{
+			limit = Infinity,
+			skipEmpty = true,
+			drop = 0,
+			byteOffset = 0,
+			signal,
+			fs,
+			...options
+		}: AsyncDelimitedGeneratorOptions = {}
+	): AsyncGenerator<T, any, unknown> {
+		fs ||= await import("@sister.software/ribbon/node/fs")
 
-		byteOffset = Math.min(byteOffset, stats.size)
+		const fileHandle = await fs.open(source)
+		const stats = await fileHandle.stat()
 
 		const delimiter = Delimiter.from(options.delimiter ?? Delimiter.LineFeed)
 		let emittedCount = 0
 
-		if (limit === 0) {
-			return
-		}
+		if (limit === 0) return
 
-		const windowIterator = AsyncDelimitedIterator.slidingWindow(haystack, delimiter, byteOffset, Infinity)
+		const windowIterator = DelimitedGenerator.slidingWindowAsync(fileHandle, fs, delimiter, byteOffset, stats.size)
 
 		for await (const [start, end] of windowIterator) {
 			if (start === end) {
-				if (skipEmpty) continue
+				if (skipEmpty) {
+					continue
+				}
 
 				yield new Uint8Array(0) as T
 
@@ -352,7 +300,7 @@ export class AsyncDelimitedIterator {
 				continue
 			}
 
-			const slice = await readRange(fileHandle, start, end)
+			const slice = await fs.read(fileHandle, start, end)
 
 			if (slice.length === 0 && skipEmpty) {
 				continue
@@ -366,6 +314,7 @@ export class AsyncDelimitedIterator {
 
 			if (emittedCount < drop) {
 				emittedCount++
+
 				continue
 			}
 
@@ -382,68 +331,6 @@ export class AsyncDelimitedIterator {
 			}
 		}
 	}
-}
 
-//#endregion
-
-//#region LineReader
-
-/**
- * A reader for newline-delimited files.
- *
- * ```js
- * const reader = new LineReader("example.csv")
- *
- * for await (const line of reader) {
- *   console.log(line.toString())
- * }
- * ```
- */
-export class LineReader<T extends TypedArray = Uint8Array> extends ReadableStream<T> implements AsyncDisposable {
-	/**
-	 * Create a new `LineReader` instance.
-	 */
-	constructor(
-		/**
-		 * The path to the CSV, NDJSON, or other newline-delimited file.
-		 */
-		source: TypedArray | AsyncDataResource,
-		/**
-		 * Options for the reader.
-		 */
-		options: DelimitedIteratorOptions = {}
-	) {
-		const { skipEmpty = true } = options
-		let generator: Generator<T, T, T> | AsyncGenerator<T, T, T>
-
-		if (Array.isArray(source)) {
-			generator = DelimitedIterator.from(source as unknown as T, options)
-		} else {
-			generator = AsyncDelimitedIterator.from(source as AsyncDataResource, options)
-		}
-
-		const pull = async (controller: ReadableStreamController<T>) => {
-			const { value, done } = await generator.next()
-
-			if (typeof value === "undefined") {
-				if (!skipEmpty) {
-					controller.enqueue(new Uint8Array(0) as T)
-				}
-			} else {
-				controller.enqueue(value)
-			}
-
-			if (done) {
-				controller.close()
-			}
-		}
-
-		super({
-			pull,
-		})
-	}
-
-	public async [Symbol.asyncDispose](): Promise<void> {
-		await this.cancel()
-	}
+	//#endregion
 }

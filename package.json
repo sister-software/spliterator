@@ -29,10 +29,8 @@
 	"exports": {
 		"./package.json": "./package.json",
 		".": "./out/index.js",
-		"./common": "./out/lib/common.js",
-		"./reader": "./out/lib/reader.js",
-		"./splitters": "./out/lib/splitters.js",
-		"./writer": "./out/lib/writer.js"
+		"./node/fs": "./out/lib/node/fs.js",
+		"./test/utils": "./out/test/utils.js"
 	},
 	"files": [
 		"out/index.d.ts",
@@ -61,7 +59,9 @@
 		"@sister.software/eslint-config": "7.1.3",
 		"@sister.software/prettier-config": "7.1.3",
 		"@sister.software/tsconfig": "7.1.3",
-		"@types/node": "^22.8.1",
+		"@types/core-js": "^2.5.8",
+		"@types/node": "^22.10.2",
+		"core-js": "^3.39.0",
 		"eslint": "^9.13.0",
 		"eslint-config-prettier": "^9.1.0",
 		"npm-run-all": "^4.1.5",

@@ -9,8 +9,27 @@ import { PathBuilder, PathBuilderLike } from "path-ts"
 
 export const fixturesDirectory = PathBuilder.from("test/fixtures")
 
-export function loadFixture(fixturePath: PathBuilderLike): Promise<Buffer>
-export function loadFixture(fixturePath: PathBuilderLike, encoding: BufferEncoding): Promise<string>
-export function loadFixture(fixturePath: PathBuilderLike, encoding?: BufferEncoding): Promise<Buffer | string> {
-	return fs.readFile(fixturePath, encoding)
+const encoder = new TextEncoder()
+const decoder = new TextDecoder()
+
+export interface FixtureResult {
+	bytes: Uint8Array
+	text: string
+	encodedLines: Uint8Array[]
+	decodedLines: string[]
+}
+
+export async function loadFixture(fixturePath: PathBuilderLike): Promise<FixtureResult> {
+	const bytes = await fs.readFile(fixturePath).then((buffer) => new Uint8Array(buffer))
+	const text = decoder.decode(bytes)
+
+	const decodedLines = text.split("\n")
+	const encodedLines = decodedLines.map((line) => encoder.encode(line))
+
+	return {
+		bytes,
+		text,
+		encodedLines,
+		decodedLines,
+	}
 }
