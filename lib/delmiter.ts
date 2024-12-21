@@ -96,10 +96,6 @@ export class Delimiter {
 
 				return Uint8Array.from([input])
 			case "string":
-				// return Array.from(input, (char) => {
-				// 	return Array.from({ length: char.length }, (_, index) => char.charCodeAt(index))
-				// }).flat()
-
 				return new TextEncoder().encode(input)
 			case "object":
 				if (isArrayLike(input)) {

@@ -58,6 +58,7 @@
 		"**/dist": true,
 		"**/out": true,
 		"**/scratch": true,
+		"test/fixtures": true,
 		".docusaurus": true,
 		"./functions": true,
 		".editorconfig": false,

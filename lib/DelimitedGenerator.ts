@@ -5,28 +5,15 @@
  */
 
 import { Delimiter, DelimiterInput } from "./delmiter.js"
-import { AsyncDataResource, FileHandleLike, FileSystemProvider, TypedArray } from "./shared.js"
-
-/**
- * A tuple representing a window of bytes in a buffer.
- */
-export type DelimitedWindow = [
-	/**
-	 * The starting byte index of the window.
-	 */
-	start: number,
-	/**
-	 * The ending byte index of the window.
-	 */
-	end: number,
-]
+import { AsyncDataResource, FileSystemProvider, TypedArray } from "./shared.js"
+import { AsyncSlidingWindow, SlidingWindow } from "./SlidingWindow.js"
 
 /**
  * Options for the delimited iterator.
  */
 export interface DelimitedGeneratorOptions {
 	/**
-	 * The character to use for newlines.
+	 * The character to delimit by. Typically a newline or comma.
 	 */
 	delimiter?: DelimiterInput
 
@@ -92,56 +79,7 @@ export abstract class DelimitedGenerator {
 		throw new TypeError("Static class cannot be instantiated. Did you mean `DelimitedGenerator.from`?")
 	}
 
-	//#region Synchrnous methods
-
-	/**
-	 * Given a byte array containing delimited data, yield a sliding window of indexes.
-	 *
-	 * This a low-level utility function that can be used to implement more complex parsing logic.
-	 *
-	 * @param haystack The buffer containing newline-delimited data.
-	 * @param needle The delimiter to use. Defaults to a line feed.
-	 * @param offset The byte index to start searching from.
-	 * @param byteLimit The byte index to stop searching at.
-	 * @yields Each window of the buffer that contains a delimiter.
-	 */
-	static *slidingWindow<T extends TypedArray>(
-		haystack: T,
-		needle: DelimiterInput = Delimiter.LineFeed,
-		offset = 0,
-		byteLimit = haystack.length
-	): Generator<DelimitedWindow> {
-		// First, we normalize the delimiter into an array of bytes.
-		const delimiter = Delimiter.from(needle)
-		// Our cursor starts at the offset and increments every time we find a matching sub array.
-		let cursor = offset
-
-		while (offset < byteLimit) {
-			let i = 0
-
-			// We walk through as many bytes as the delimiter has...
-			for (i = 0; i < delimiter.length; i++) {
-				if (haystack[offset + i] !== delimiter[i]) {
-					break // Character doesn't match the delimiter.
-				}
-			}
-
-			if (i !== delimiter.length) {
-				offset++
-
-				continue // We didn't find a match, so we continue.
-			}
-
-			yield [cursor, offset]
-
-			offset += delimiter.length
-			cursor = offset
-		}
-
-		if (cursor <= byteLimit) {
-			yield [cursor, byteLimit]
-		}
-	}
+	//#region Synchronous methods
 
 	/**
 	 * Given a byte array containing delimited data, yield a slice of the buffer between delimiters.
@@ -160,30 +98,36 @@ export abstract class DelimitedGenerator {
 		const haystack = (typeof source === "string" ? new TextEncoder().encode(source) : source) as
 			| Exclude<T, string>
 			| Uint8Array
+
+		if (byteOffset > haystack.length) return
+
 		const delimiter = Delimiter.from(options.delimiter ?? Delimiter.LineFeed)
 		let emittedCount = 0
+		const fallbackEmpty = new Uint8Array(0) as T extends string ? Uint8Array : T
 
-		if (byteOffset > haystack.length) {
-			return
-		}
+		if (limit === 0) return
 
-		if (limit === 0) {
-			return
-		}
+		const slidingWindow = new SlidingWindow(haystack, delimiter, byteOffset, haystack.length)
 
-		const windowIterator = DelimitedGenerator.slidingWindow(haystack, delimiter, byteOffset, haystack.length)
+		for (const [start, end] of slidingWindow) {
+			if (start === end) {
+				if (skipEmpty) continue
 
-		for (const [start, end] of windowIterator) {
+				yield fallbackEmpty
+
+				emittedCount++
+
+				continue
+			}
+
 			const slice = haystack.subarray(start, end)
 
-			if (slice.length === 0 && skipEmpty) {
-				continue
-			} else if (
-				slice.length === delimiter.length &&
-				slice.every((_byte, i) => slice[i] === delimiter[i]) &&
-				skipEmpty
-			) {
-				continue
+			if (skipEmpty) {
+				if (slice.length === 0) continue
+
+				if (slice.length === delimiter.length && slice.every((byte, i) => byte === delimiter[i])) {
+					continue
+				}
 			}
 
 			if (emittedCount < drop) {
@@ -210,51 +154,7 @@ export abstract class DelimitedGenerator {
 	//#region Asynchronous methods
 
 	/**
-	 * Given a byte array containing delimited data, yield a sliding window of indexes.
-	 *
-	 * This a low-level utility function that can be used to implement more complex parsing logic.
-	 *
-	 * @param fileHandle The file handle to read from.
-	 * @param fs A file system provider for reading data.
-	 * @param needle The delimiter to use. Defaults to a line feed.
-	 * @param offset The byte index to start searching from.
-	 * @param byteLimit The byte index to stop searching at.
-	 * @yields Each window of the buffer that contains a delimiter.
-	 */
-	static async *slidingWindowAsync(
-		fileHandle: FileHandleLike,
-		fs: FileSystemProvider,
-		needle: DelimiterInput = Delimiter.LineFeed,
-		offset = 0,
-		byteLimit: number = Infinity
-	): AsyncGenerator<DelimitedWindow> {
-		const delimiter = Delimiter.from(needle)
-		let cursor = offset
-
-		while (offset < byteLimit) {
-			const range = await fs.read(fileHandle, offset, offset + delimiter.length)
-
-			const match = range.every((byte, i) => byte === delimiter[i])
-
-			if (!match) {
-				offset++
-
-				continue
-			}
-
-			yield [cursor, offset]
-
-			offset += delimiter.length
-			cursor = offset
-		}
-
-		if (cursor <= byteLimit) {
-			yield [cursor, byteLimit]
-		}
-	}
-
-	/**
-	 * Given a byte array containing delimited data, yield a slice of the buffer between delimiters.
+	 * Given a file handle containing delimited data, yield a slice of the buffer between delimiters.
 	 *
 	 * This a low-level utility function that can be used to implement more complex parsing logic.
 	 *
@@ -275,25 +175,24 @@ export abstract class DelimitedGenerator {
 			...options
 		}: AsyncDelimitedGeneratorOptions = {}
 	): AsyncGenerator<T, any, unknown> {
+		if (limit === 0) return
+
 		fs ||= await import("@sister.software/ribbon/node/fs")
 
 		const fileHandle = await fs.open(source)
 		const stats = await fileHandle.stat()
+		const fallbackEmpty = new Uint8Array(0) as T
 
 		const delimiter = Delimiter.from(options.delimiter ?? Delimiter.LineFeed)
 		let emittedCount = 0
 
-		if (limit === 0) return
+		const slidingWindow = new AsyncSlidingWindow(fileHandle, fs, delimiter, byteOffset, stats.size)
 
-		const windowIterator = DelimitedGenerator.slidingWindowAsync(fileHandle, fs, delimiter, byteOffset, stats.size)
-
-		for await (const [start, end] of windowIterator) {
+		for await (const [start, end] of slidingWindow) {
 			if (start === end) {
-				if (skipEmpty) {
-					continue
-				}
+				if (skipEmpty) continue
 
-				yield new Uint8Array(0) as T
+				yield fallbackEmpty
 
 				emittedCount++
 
@@ -302,14 +201,10 @@ export abstract class DelimitedGenerator {
 
 			const slice = await fs.read(fileHandle, start, end)
 
-			if (slice.length === 0 && skipEmpty) {
-				continue
-			} else if (
-				slice.length === delimiter.length &&
-				slice.every((_byte, i) => slice[i] === delimiter[i]) &&
-				skipEmpty
-			) {
-				continue
+			if (skipEmpty) {
+				if (slice.length === delimiter.length && slice.every((byte, i) => byte === delimiter[i])) {
+					continue
+				}
 			}
 
 			if (emittedCount < drop) {

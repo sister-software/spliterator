@@ -36,7 +36,7 @@ test("Synchronous parity with present lines", async ({ expect }) => {
 	const encodedLines = Array.from(generator)
 	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
 
-	expect(encodedLines.length, `Async delimiter matches line length`).equal(presentFixtureLines.length)
+	expect(encodedLines.length, `Delimiter matches line length`).equal(presentFixtureLines.length)
 
 	expect(decodedLines, `Decoded lines match`).toMatchObject(presentFixtureLines)
 })
@@ -54,6 +54,7 @@ test("Asynchronous content parity with String.prototype.split", async ({ expect,
 	const encodedLines = await Array.fromAsync(lineGenerator)
 	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
 
+	expect(decodedLines.length, "Decoded line count matches").equal(fixture.decodedLines.length)
 	expect(decodedLines, "Decoded lines match").toMatchObject(fixture.decodedLines)
 	expect(encodedLines, "Encoded lines match").toMatchObject(fixture.encodedLines)
 
