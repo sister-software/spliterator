@@ -4,46 +4,60 @@
  * @author Teffen Ellis, et al.
  */
 
-import { AsyncSlidingWindow } from "@sister.software/ribbon"
+import { DelimitedChunkReader, Delimiter } from "@sister.software/ribbon"
+import * as fsProvider from "@sister.software/ribbon/node/fs"
 import { fixturesDirectory } from "@sister.software/ribbon/test/utils"
 import { createReadStream, createWriteStream } from "node:fs"
 import * as fs from "node:fs/promises"
+import { pipeline } from "node:stream/promises"
 
 const fixturePath = fixturesDirectory("bdc_06_Cable_fixed_broadband_J24_10dec2024.csv")
-const ranges = await AsyncSlidingWindow.slice(fixturePath, 4)
+const handle = await fsProvider.open(fixturePath, "r")
+
+const delimiter = Delimiter.from("\n")
+const chunkReader = await DelimitedChunkReader.fromAsync(handle, {
+	fs: fsProvider,
+	chunks: 12,
+})
 
 const fileSize = await fs.stat(fixturePath).then((stat) => stat.size)
 
+console.log(`Expected File Size: ${fileSize} bytes`)
+
 let totalByteLength = 0
+let previousRangeEnd = 0
 let idx = 0
 
-for (const [start, end] of ranges) {
+for (const [start, end] of chunkReader) {
 	idx++
 
 	const byteLength = end - start
 	totalByteLength += byteLength
+	const rangeDistance = previousRangeEnd - start + idx * delimiter.length
 	const percentage = (byteLength / fileSize) * 100
 
-	console.log(`Range ${idx}: ${JSON.stringify({ start, end, byteLength })}, ${percentage.toFixed(8)}%`)
+	console.log(
+		`#${idx}: [${start}, ${end}] (${totalByteLength.toLocaleString()}) ${rangeDistance}, ${percentage.toFixed(8)}%`
+	)
 
 	const rangeFilename = fixturesDirectory(`range-${idx}.csv`)
 
-	const readStream = createReadStream(fixturePath, { start, end })
+	const readStream = createReadStream(fixturePath, { start, end, autoClose: true })
 
-	const writeStream = createWriteStream(rangeFilename)
+	const writeStream = createWriteStream(rangeFilename, { autoClose: true })
+	await pipeline(readStream, writeStream)
 
-	readStream.pipe(writeStream)
-
-	await new Promise((resolve) => {
-		writeStream.on("close", resolve)
-	})
-
-	console.log(`Wrote range ${idx} to ${rangeFilename}`)
-
-	await new Promise((resolve) => readStream.close(resolve))
-	await new Promise((resolve) => writeStream.close(resolve))
+	previousRangeEnd = totalByteLength
+	// console.log(`Wrote range ${idx} to ${rangeFilename}`)
 }
+
+await handle.close()
+
+const omittedDelimiterByteLength = idx * delimiter.length
+totalByteLength += omittedDelimiterByteLength
+const shortage = fileSize - totalByteLength - (idx - 1) * delimiter.length
 
 console.log("---")
 console.log(`Total Ranges: ${idx}`)
 console.log(`Total Byte Length: ${totalByteLength} bytes (${((totalByteLength / fileSize) * 100).toFixed(8)}%)`)
+console.log(`Total Byte Shortage: ${shortage} bytes (${((shortage / fileSize) * 100).toFixed(8)}%)`)

@@ -5,7 +5,7 @@
  */
 
 import { normalizeColumnNames } from "./casing.js"
-import { AsyncDelimitedGeneratorOptions, DelimitedGenerator, DelimitedGeneratorOptions } from "./DelimitedGenerator.js"
+import { AsyncDelimitedGeneratorInit, DelimitedGenerator, DelimitedGeneratorInit } from "./DelimitedGenerator.js"
 import { Delimiter, DelimiterInput, takeDelimited } from "./delmiter.js"
 import { AsyncDataResource, TypedArray, zipSync } from "./shared.js"
 
@@ -92,7 +92,7 @@ export abstract class CSVGenerator {
 
 	static from<T extends CSVGeneratorEmittedRecord = CSVGeneratorEmittedRecord>(
 		source: TypedArray | string,
-		options: CSVGeneratorOptions & DelimitedGeneratorOptions & { mode: "object" }
+		options: CSVGeneratorOptions & DelimitedGeneratorInit & { mode: "object" }
 	): Generator<T>
 	/**
 	 * @yields Each row as a 3-tuple [key, value, idx].
@@ -100,7 +100,7 @@ export abstract class CSVGenerator {
 
 	static from<T extends RowTuple[] = RowTuple[]>(
 		source: TypedArray | string,
-		options: CSVGeneratorOptions & DelimitedGeneratorOptions & { mode: "entries" }
+		options: CSVGeneratorOptions & DelimitedGeneratorInit & { mode: "entries" }
 	): Generator<T>
 	/**
 	 * Given a byte array or string, yield each row as an array of columns.
@@ -109,14 +109,14 @@ export abstract class CSVGenerator {
 	 */
 	static from<T extends string[] = string[]>(
 		source: TypedArray | string,
-		options: CSVGeneratorOptions & DelimitedGeneratorOptions & { mode?: "array" }
+		options: CSVGeneratorOptions & DelimitedGeneratorInit & { mode?: "array" }
 	): Generator<T>
 	/**
 	 * Given a byte array or string, yield each row as an array of columns.
 	 *
 	 * @yields Each row as an array of columns.
 	 */
-	static *from(source: TypedArray | string, options: CSVGeneratorOptions & DelimitedGeneratorOptions = {}) {
+	static *from(source: TypedArray | string, options: CSVGeneratorOptions & DelimitedGeneratorInit = {}) {
 		const {
 			// ---
 			header = true,
@@ -156,7 +156,7 @@ export abstract class CSVGenerator {
 
 	static fromAsync<T extends CSVGeneratorEmittedRecord = CSVGeneratorEmittedRecord>(
 		source: AsyncDataResource,
-		options?: CSVGeneratorOptions & AsyncDelimitedGeneratorOptions & { mode: "object" }
+		options?: CSVGeneratorOptions & AsyncDelimitedGeneratorInit & { mode: "object" }
 	): AsyncGenerator<T>
 	/**
 	 * @yields Each row as a 3-tuple [key, value, idx].
@@ -164,7 +164,7 @@ export abstract class CSVGenerator {
 
 	static fromAsync<T extends RowTuple[] = RowTuple[]>(
 		source: AsyncDataResource,
-		options?: CSVGeneratorOptions & AsyncDelimitedGeneratorOptions & { mode: "entries" }
+		options?: CSVGeneratorOptions & AsyncDelimitedGeneratorInit & { mode: "entries" }
 	): AsyncGenerator<T>
 	/**
 	 * Given a byte array or string, yield each row as an array of columns.
@@ -173,17 +173,14 @@ export abstract class CSVGenerator {
 	 */
 	static fromAsync<T extends string[] = string[]>(
 		source: AsyncDataResource,
-		options?: CSVGeneratorOptions & AsyncDelimitedGeneratorOptions & { mode?: "array" }
+		options?: CSVGeneratorOptions & AsyncDelimitedGeneratorInit & { mode?: "array" }
 	): AsyncGenerator<T>
 	/**
 	 * Given a byte array or string, yield each row as an array of columns.
 	 *
 	 * @yields Each row as an array of columns.
 	 */
-	static async *fromAsync(
-		source: AsyncDataResource,
-		options: CSVGeneratorOptions & AsyncDelimitedGeneratorOptions = {}
-	) {
+	static async *fromAsync(source: AsyncDataResource, options: CSVGeneratorOptions & AsyncDelimitedGeneratorInit = {}) {
 		const {
 			// ---
 			header = true,

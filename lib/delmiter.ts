@@ -16,7 +16,7 @@ export function isArrayLike<T>(input: unknown): input is ArrayLike<T> {
 /**
  * A delimiter used to separate fields in a record.
  */
-export type DelimiterArray = Uint8Array
+export type DelimiterBytes = Uint8Array
 
 /**
  * A possible input for a delimiter:
@@ -27,7 +27,7 @@ export type DelimiterArray = Uint8Array
  * - A buffer.
  * - An iterable of character codes.
  */
-export type DelimiterInput = number | string | DelimiterArray | Buffer | Iterable<number>
+export type DelimiterInput = number | string | DelimiterBytes | Buffer | Iterable<number>
 
 /**
  * A static class that provides common delimiter values, and methods for normalizing delimiter
@@ -87,7 +87,7 @@ export class Delimiter {
 	/**
 	 * Normalize a delimiter input into an array of character codes.
 	 */
-	static from(input: DelimiterInput): DelimiterArray {
+	static from(input: DelimiterInput): DelimiterBytes {
 		switch (typeof input) {
 			case "number":
 				if (!Number.isInteger(input)) {
@@ -113,7 +113,7 @@ export class Delimiter {
 		}
 	}
 
-	static printable(delimiter: DelimiterArray): string {
+	static printable(delimiter: DelimiterBytes): string {
 		return Array.from(delimiter)
 			.map((charCode) => {
 				switch (charCode) {
@@ -157,7 +157,7 @@ const encoder = new TextEncoder()
  * @param needle The character that separates fields.
  * @yields Each field in the line.
  */
-export function* takeDelimited<T extends TypedArray | string>(source: T, needle: DelimiterArray = Delimiter.from(",")) {
+export function* takeDelimited<T extends TypedArray | string>(source: T, needle: DelimiterBytes = Delimiter.from(",")) {
 	const haystack = (typeof source === "string" ? encoder.encode(source) : source) as Exclude<T, string>
 
 	const contentDelimiters: number[] = []

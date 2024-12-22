@@ -4,7 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import { AsyncDelimitedGeneratorOptions, DelimitedGenerator, DelimitedGeneratorOptions } from "./DelimitedGenerator.js"
+import { AsyncDelimitedGeneratorInit, DelimitedGenerator, DelimitedGeneratorInit } from "./DelimitedGenerator.js"
 import { AsyncDataResource, TypedArray } from "./shared.js"
 
 export interface DelimitedTextGeneratorOptions {
@@ -38,7 +38,7 @@ export abstract class DelimitedTextGenerator {
 	 */
 	static *from(
 		source: TypedArray | string,
-		{ encoding, fatal, ignoreBOM, ...options }: DelimitedTextGeneratorOptions & DelimitedGeneratorOptions = {}
+		{ encoding, fatal, ignoreBOM, ...options }: DelimitedTextGeneratorOptions & DelimitedGeneratorInit = {}
 	): Generator<string> {
 		const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
 		let rowCursor = 0
@@ -68,7 +68,7 @@ export abstract class DelimitedTextGenerator {
 	 */
 	static async *fromAsync(
 		source: AsyncDataResource,
-		{ encoding, fatal, ignoreBOM, ...options }: DelimitedTextGeneratorOptions & AsyncDelimitedGeneratorOptions = {}
+		{ encoding, fatal, ignoreBOM, ...options }: DelimitedTextGeneratorOptions & AsyncDelimitedGeneratorInit = {}
 	): AsyncGenerator<string> {
 		const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
 		let rowCursor = 0

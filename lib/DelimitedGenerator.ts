@@ -11,7 +11,7 @@ import { AsyncSlidingWindow, SlidingWindow } from "./SlidingWindow.js"
 /**
  * Options for the delimited iterator.
  */
-export interface DelimitedGeneratorOptions {
+export interface DelimitedGeneratorInit {
 	/**
 	 * The character to delimit by. Typically a newline or comma.
 	 */
@@ -24,7 +24,7 @@ export interface DelimitedGeneratorOptions {
 	 *
 	 * @default 0
 	 */
-	byteOffset?: number
+	offset?: number
 
 	/**
 	 * Whether to emit repeated delimiters as empty buffers.
@@ -58,7 +58,7 @@ export interface DelimitedGeneratorOptions {
 	signal?: AbortSignal
 }
 
-export interface AsyncDelimitedGeneratorOptions extends DelimitedGeneratorOptions {
+export interface AsyncDelimitedGeneratorInit extends DelimitedGeneratorInit {
 	/**
 	 * A file system provider for reading data.
 	 */
@@ -93,13 +93,13 @@ export abstract class DelimitedGenerator {
 		 * The byte array or string containing delimited data.
 		 */
 		source: T,
-		{ limit = Infinity, skipEmpty = true, drop = 0, byteOffset = 0, signal, ...options }: DelimitedGeneratorOptions = {}
+		{ limit = Infinity, skipEmpty = true, drop = 0, offset = 0, signal, ...options }: DelimitedGeneratorInit = {}
 	): Generator<T extends string ? Uint8Array : T> {
 		const haystack = (typeof source === "string" ? new TextEncoder().encode(source) : source) as
 			| Exclude<T, string>
 			| Uint8Array
 
-		if (byteOffset > haystack.length) return
+		if (offset > haystack.length) return
 
 		const delimiter = Delimiter.from(options.delimiter ?? Delimiter.LineFeed)
 		let emittedCount = 0
@@ -107,7 +107,7 @@ export abstract class DelimitedGenerator {
 
 		if (limit === 0) return
 
-		const slidingWindow = new SlidingWindow(haystack, delimiter, byteOffset, haystack.length)
+		const slidingWindow = new SlidingWindow(haystack, { delimiter, offset })
 
 		for (const [start, end] of slidingWindow) {
 			if (start === end) {
@@ -169,11 +169,11 @@ export abstract class DelimitedGenerator {
 			limit = Infinity,
 			skipEmpty = true,
 			drop = 0,
-			byteOffset = 0,
+			offset: byteOffset = 0,
 			signal,
 			fs,
 			...options
-		}: AsyncDelimitedGeneratorOptions = {}
+		}: AsyncDelimitedGeneratorInit = {}
 	): AsyncGenerator<T, any, unknown> {
 		if (limit === 0) return
 
@@ -186,7 +186,12 @@ export abstract class DelimitedGenerator {
 		const delimiter = Delimiter.from(options.delimiter ?? Delimiter.LineFeed)
 		let emittedCount = 0
 
-		const slidingWindow = new AsyncSlidingWindow(fileHandle, fs, delimiter, byteOffset, stats.size)
+		const slidingWindow = new AsyncSlidingWindow(fileHandle, {
+			fs,
+			delimiter,
+			offset: byteOffset,
+			limit: stats.size,
+		})
 
 		for await (const [start, end] of slidingWindow) {
 			if (start === end) {

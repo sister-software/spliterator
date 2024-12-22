@@ -4,7 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import { AsyncDelimitedGeneratorOptions, DelimitedGenerator, DelimitedGeneratorOptions } from "./DelimitedGenerator.js"
+import { AsyncDelimitedGeneratorInit, DelimitedGenerator, DelimitedGeneratorInit } from "./DelimitedGenerator.js"
 import { AsyncDataResource, TypedArray } from "./shared.js"
 
 export abstract class DelimitedJSONGenerator {
@@ -12,7 +12,7 @@ export abstract class DelimitedJSONGenerator {
 		throw new TypeError("Static class cannot be instantiated. Did you mean `DelimitedJSONGenerator.from`?")
 	}
 
-	static *from<T = unknown>(source: TypedArray | string, options: DelimitedGeneratorOptions = {}): Generator<T> {
+	static *from<T = unknown>(source: TypedArray | string, options: DelimitedGeneratorInit = {}): Generator<T> {
 		const decoder = new TextDecoder()
 		let rowCursor = 0
 
@@ -41,7 +41,7 @@ export abstract class DelimitedJSONGenerator {
 	 *
 	 * @yields Each row as an array of columns.
 	 */
-	static async *fromAsync<T = unknown>(source: AsyncDataResource, options: AsyncDelimitedGeneratorOptions = {}) {
+	static async *fromAsync<T = unknown>(source: AsyncDataResource, options: AsyncDelimitedGeneratorInit = {}) {
 		const decoder = new TextDecoder()
 		let rowCursor = 0
 
