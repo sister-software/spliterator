@@ -24,7 +24,7 @@ export interface DelimitedGeneratorInit {
 	 *
 	 * @default 0
 	 */
-	offset?: number
+	position?: number
 
 	/**
 	 * Whether to emit repeated delimiters as empty buffers.
@@ -93,13 +93,13 @@ export abstract class DelimitedGenerator {
 		 * The byte array or string containing delimited data.
 		 */
 		source: T,
-		{ limit = Infinity, skipEmpty = true, drop = 0, offset = 0, signal, ...options }: DelimitedGeneratorInit = {}
+		{ limit = Infinity, skipEmpty = true, drop = 0, position = 0, signal, ...options }: DelimitedGeneratorInit = {}
 	): Generator<T extends string ? Uint8Array : T> {
 		const haystack = (typeof source === "string" ? new TextEncoder().encode(source) : source) as
 			| Exclude<T, string>
 			| Uint8Array
 
-		if (offset > haystack.length) return
+		if (position > haystack.length) return
 
 		const delimiter = Delimiter.from(options.delimiter ?? Delimiter.LineFeed)
 		let emittedCount = 0
@@ -107,7 +107,7 @@ export abstract class DelimitedGenerator {
 
 		if (limit === 0) return
 
-		const slidingWindow = new SlidingWindow(haystack, { delimiter, offset })
+		const slidingWindow = new SlidingWindow(haystack, { delimiter, position })
 
 		for (const [start, end] of slidingWindow) {
 			if (start === end) {
@@ -169,7 +169,7 @@ export abstract class DelimitedGenerator {
 			limit = Infinity,
 			skipEmpty = true,
 			drop = 0,
-			offset: byteOffset = 0,
+			position: byteOffset = 0,
 			signal,
 			fs,
 			...options
@@ -189,7 +189,7 @@ export abstract class DelimitedGenerator {
 		const slidingWindow = new AsyncSlidingWindow(fileHandle, {
 			fs,
 			delimiter,
-			offset: byteOffset,
+			position: byteOffset,
 			limit: stats.size,
 		})
 

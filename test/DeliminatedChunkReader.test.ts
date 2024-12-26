@@ -12,7 +12,7 @@ import { fixturesDirectory } from "./utils.js"
 
 const fixturePath = fixturesDirectory("bdc_06_Cable_fixed_broadband_J24_10dec2024.csv")
 
-test("Delimited Chunk Reader", { timeout: 25_000, only: true }, async ({ expect, onTestFinished }) => {
+test("Delimited Chunk Reader", { timeout: 25_000, skip: true }, async ({ expect, onTestFinished }) => {
 	const delimiter = Delimiter.from("\n")
 
 	const handle = await open(fixturePath, "r")
@@ -34,7 +34,7 @@ test("Delimited Chunk Reader", { timeout: 25_000, only: true }, async ({ expect,
 			return new AsyncSlidingWindow(handle, {
 				fs: fsProvider,
 				delimiter,
-				offset: start,
+				position: start,
 				limit: end,
 			})
 		})

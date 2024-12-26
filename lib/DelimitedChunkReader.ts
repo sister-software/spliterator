@@ -104,10 +104,10 @@ export class DelimitedChunkReader {
 			const reverse = new AsyncSlidingWindow(fileHandle, {
 				fs,
 				delimiter,
-				offset: searchStart,
+				position: searchStart,
 				limit: searchEnd,
 			})
-			const forward = new AsyncSlidingWindow(fileHandle, { fs, delimiter, offset: searchStart, limit: searchEnd })
+			const forward = new AsyncSlidingWindow(fileHandle, { fs, delimiter, position: searchStart, limit: searchEnd })
 
 			const [previousRange, nextRange] = await Promise.all([
 				// We look backward to find the previous delimiter at a midpoint in the chunk...

@@ -5,6 +5,7 @@
  */
 
 export * from "./lib/casing.js"
+export * from "./lib/CompositeTypedArray.js"
 export * from "./lib/CSVParser.js"
 export * from "./lib/DelimitedChunkReader.js"
 export * from "./lib/DelimitedGenerator.js"

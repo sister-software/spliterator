@@ -30,7 +30,7 @@ export interface SlidingWindowInit {
 	/**
 	 * The byte index to start searching from.
 	 */
-	offset?: number
+	position?: number
 
 	/**
 	 * The byte index to stop searching at.
@@ -75,7 +75,7 @@ export class SlidingWindow<T extends TypedArray> implements IterableIterator<Byt
 	) {
 		this.source = source
 		this.#delimiter = Delimiter.from(init.delimiter ?? Delimiter.LineFeed)
-		this.#cursor = init.offset ?? 0
+		this.#cursor = init.position ?? 0
 		this.#limit = Math.min(init.limit ?? source.length)
 	}
 
@@ -164,7 +164,7 @@ export class AsyncSlidingWindow implements AsyncIterableIterator<ByteRange>, Asy
 		this.#fs = init.fs
 		this.#limit = init.limit ?? Infinity
 		this.#delimiter = Delimiter.from(init.delimiter ?? Delimiter.LineFeed)
-		this.#cursor = init.offset ?? 0
+		this.#cursor = init.position ?? 0
 		this.#autoClose = init.autoClose ?? false
 	}
 
