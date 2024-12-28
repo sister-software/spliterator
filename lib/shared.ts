@@ -4,27 +4,20 @@
  * @author Teffen Ellis, et al.
  */
 
+// eslint-disable-next-line no-restricted-imports
+import type { Stats } from "node:fs"
+// eslint-disable-next-line no-restricted-imports
+import type { FileHandle } from "node:fs/promises"
+
 /**
  * A trimmed-down version of the Node.js `Stats` interface.
  */
-
-export interface StatsLike {
-	size: number
-}
+export type StatsLike = Pick<Stats, "size" | "blksize" | "mtimeMs">
 
 /**
  * A trimmed-down version of the Node.js `FileHandle` interface.
  */
-export interface FileHandleLike extends AsyncDisposable {
-	/**
-	 * The file descriptor, typically an integer provided by the operating system.
-	 */
-	fd: number
-
-	stat(): Promise<StatsLike>
-
-	close(): Promise<void>
-}
+export type FileHandleLike = Pick<FileHandle, "fd" | "stat" | "close" | "read" | "readableWebStream">
 
 /**
  * Typed arrays that may be used as sources for byte streams.
@@ -54,6 +47,21 @@ export function isFileHandleLike(input: unknown): input is FileHandleLike {
 	return Boolean(input && typeof input === "object" && "fd" in input)
 }
 
+export interface FileResourceLike extends File {
+	bytes(): Promise<Uint8Array>
+
+	slice(start: number, end: number): FileResourceLike
+
+	[Symbol.asyncDispose]?(): PromiseLike<void>
+}
+
+/**
+ * Type-predicate to determine if a value is a file resource.
+ */
+export function isFileResourceLike(input: unknown): input is FileResourceLike {
+	return Boolean(input && typeof input === "object" && "slice" in input)
+}
+
 /**
  * An asynchronous resource to a delimited byte stream, which can be a...
  *
@@ -63,29 +71,7 @@ export function isFileHandleLike(input: unknown): input is FileHandleLike {
  * - `TypedArray` containing the file contents.
  * - `FileHandleLike` object representing an open file handle.
  */
-export type AsyncDataResource = string | URL | FileHandleLike
-
-/**
- * An interface for working with asynchronous data resources.
- */
-export interface FileSystemProvider {
-	/**
-	 * Open an asynchronous data resource.
-	 *
-	 * In Node.js, this is typically `fs.promises.open`.
-	 */
-	open(resource: AsyncDataResource, flags?: string): Promise<FileHandleLike>
-
-	/**
-	 * Read a range of bytes from a file handle.
-	 */
-	read<Destination extends TypedArray = Uint8Array>(
-		fileHandle: FileHandleLike,
-		position: number,
-		end: number,
-		destination?: Destination
-	): Promise<Destination>
-}
+export type AsyncDataResource = string | URL | FileHandleLike | FileResourceLike
 
 /**
  * A resource to a delimited byte stream, i.e., a file buffer, handle, or path.

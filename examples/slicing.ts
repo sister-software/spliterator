@@ -5,18 +5,17 @@
  */
 
 import { DelimitedChunkReader, Delimiter } from "@sister.software/ribbon"
-import * as fsProvider from "@sister.software/ribbon/node/fs"
+import { NodeFileResource } from "@sister.software/ribbon/node/fs"
 import { fixturesDirectory } from "@sister.software/ribbon/test/utils"
 import { createReadStream, createWriteStream } from "node:fs"
 import * as fs from "node:fs/promises"
 import { pipeline } from "node:stream/promises"
 
 const fixturePath = fixturesDirectory("bdc_06_Cable_fixed_broadband_J24_10dec2024.csv")
-const handle = await fsProvider.open(fixturePath, "r")
+const handle = await NodeFileResource.open(fixturePath)
 
 const delimiter = Delimiter.from("\n")
 const chunkReader = await DelimitedChunkReader.fromAsync(handle, {
-	fs: fsProvider,
 	chunks: 12,
 })
 
@@ -51,7 +50,7 @@ for (const [start, end] of chunkReader) {
 	// console.log(`Wrote range ${idx} to ${rangeFilename}`)
 }
 
-await handle.close()
+await handle.dispose()
 
 const omittedDelimiterByteLength = idx * delimiter.length
 totalByteLength += omittedDelimiterByteLength

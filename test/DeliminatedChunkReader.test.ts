@@ -5,8 +5,7 @@
  */
 
 import { AsyncSlidingWindow, DelimitedChunkReader, Delimiter } from "@sister.software/ribbon"
-import * as fsProvider from "@sister.software/ribbon/node/fs"
-import { open } from "node:fs/promises"
+import { NodeFileResource } from "@sister.software/ribbon/node/fs"
 import { test } from "vitest"
 import { fixturesDirectory } from "./utils.js"
 
@@ -15,15 +14,14 @@ const fixturePath = fixturesDirectory("bdc_06_Cable_fixed_broadband_J24_10dec202
 test("Delimited Chunk Reader", { timeout: 25_000, skip: true }, async ({ expect, onTestFinished }) => {
 	const delimiter = Delimiter.from("\n")
 
-	const handle = await open(fixturePath, "r")
-	onTestFinished(() => handle.close())
+	const handle = await NodeFileResource.open(fixturePath)
+	onTestFinished(() => handle.dispose())
 
 	let lineCount = 0
 
 	const desiredChunks = 6
 
 	const chunks = await DelimitedChunkReader.fromAsync(handle, {
-		fs: fsProvider,
 		chunks: desiredChunks,
 	})
 
@@ -32,10 +30,9 @@ test("Delimited Chunk Reader", { timeout: 25_000, skip: true }, async ({ expect,
 	const slidingWindows = AsyncSlidingWindow.collect(
 		Array.from(chunks, ([start, end]) => {
 			return new AsyncSlidingWindow(handle, {
-				fs: fsProvider,
 				delimiter,
 				position: start,
-				limit: end,
+				byteLength: end,
 			})
 		})
 	)

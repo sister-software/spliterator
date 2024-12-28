@@ -4,53 +4,178 @@
  * @author Teffen Ellis, et al.
  */
 
-import { read as readRange } from "node:fs"
-import { open as openHandle } from "node:fs/promises"
-import { type AsyncDataResource, type FileHandleLike, type TypedArray, isFileHandleLike } from "../shared.js"
+import { read, type PathLike } from "node:fs"
+import { open } from "node:fs/promises"
+import * as path from "node:path"
+import { fileURLToPath } from "node:url"
+import { isFileHandleLike, StatsLike, type FileHandleLike, type FileResourceLike } from "../shared.js"
 
-export async function open(resource: AsyncDataResource, flags = "r"): Promise<FileHandleLike> {
-	if (isFileHandleLike(resource)) return resource
-
-	return openHandle(resource, flags)
+export interface NodeFileResourceInit {
+	name?: string
+	type?: string
+	position?: number
+	byteLength?: number
+	lastModified?: number
 }
 
 /**
- * Given a file handle and a range of bytes, read the range into a buffer.
- *
- * @param fileHandle The file handle to read from.
- * @param position The initial byte position to start reading from.
- * @param end The ending byte index.
- * @param destination A buffer to write the data to. If not provided, a new buffer will be created.
+ * An isomorphic file resource which can be read from and disposed.
  */
-export function read<Destination extends TypedArray = Uint8Array>(
-	fileHandle: FileHandleLike,
-	position: number,
-	end: number,
-	destination?: Destination
-): Promise<Destination> {
-	const length = end - position
+export class NodeFileResource implements FileResourceLike, AsyncDisposable {
+	readonly #handle: FileHandleLike
 
-	if (length <= 0) {
-		throw new Error(`Invalid range length ${length}. Start: ${position}, End: ${end}`)
+	/**
+	 * The last modified timestamp of the file.
+	 */
+	public readonly lastModified: number
+	/**
+	 * The name of the file.
+	 */
+	public readonly name: string
+	/**
+	 * @deprecated This property is not supported in Node.js.
+	 */
+	public readonly webkitRelativePath = ""
+
+	/**
+	 * The byte length of the file.
+	 */
+	readonly #byteLength: number
+
+	/**
+	 * The byte length of the file.
+	 *
+	 * Alias for {@linkcode #byteLength}.
+	 */
+	public get size(): number {
+		return this.#byteLength
 	}
 
-	destination ||= new Uint8Array(length) as Destination
+	/**
+	 * The byte position of the file.
+	 */
+	readonly #position: number
+	public readonly type: string
 
-	return new Promise((resolve, reject) => {
-		readRange(
-			// ---
-			fileHandle.fd,
-			destination,
-			0,
-			length,
-			position,
-			(error) => {
-				if (error) {
-					reject(error)
-				} else {
-					resolve(destination)
+	constructor(handle: FileHandleLike, init: NodeFileResourceInit) {
+		this.#handle = handle
+
+		this.lastModified = init.lastModified ?? Date.now()
+		this.name = init.name ?? ""
+		this.#position = init.position ?? 0
+		this.#byteLength = (init.byteLength ?? 0) - this.#position
+		this.type = init.type ?? ""
+	}
+
+	/**
+	 * Read the entire file as a byte array.
+	 *
+	 * @see {@linkcode slice} to create a sliced view of the file.
+	 * @see {@linkcode arrayBuffer} to read the file as an array buffer.
+	 */
+	public async bytes(): Promise<Uint8Array> {
+		const buffer = new Uint8Array(this.#byteLength)
+
+		await new Promise<void>((resolve, reject) =>
+			read(
+				this.#handle.fd,
+				{
+					buffer,
+					position: this.#position,
+				},
+				(error: unknown) => {
+					if (error) reject(error)
+					else resolve()
 				}
-			}
+			)
 		)
-	})
+
+		return buffer
+	}
+
+	/**
+	 * Read the entire file as an array buffer.
+	 *
+	 * @see {@linkcode slice} to create a sliced view of the file.
+	 * @see {@linkcode bytes} to read the file as a byte array.
+	 */
+	public arrayBuffer(): Promise<ArrayBuffer> {
+		return this.bytes().then((bytes) => bytes.buffer)
+	}
+
+	/**
+	 * Slice the file into a new file resource.
+	 *
+	 * Note that the slice is a view of the original file, thus we're really just creating a new file
+	 * resource with a different byte range.
+	 *
+	 * @param start - The starting byte offset.
+	 * @param end - The ending byte offset.
+	 * @param contentType - The content type of the slice.
+	 *
+	 * @returns A new file resource representing the sliced view of the file.
+	 */
+	public slice(start?: number, end?: number, contentType?: string): NodeFileResource {
+		start = start ?? 0
+		end = end ?? this.#byteLength
+
+		const byteLength = Math.max(0, end - start)
+
+		return new NodeFileResource(this.#handle, {
+			name: this.name,
+			type: contentType ?? this.type,
+			position: this.#position + start,
+			byteLength,
+			lastModified: this.lastModified,
+		})
+	}
+
+	/**
+	 * Read the entire file as a string.
+	 */
+	public async text(): Promise<string> {
+		const buffer = await this.bytes()
+		const decoder = new TextDecoder()
+
+		return decoder.decode(buffer)
+	}
+
+	/**
+	 * Create a readable stream of the file.
+	 */
+	public stream(): ReadableStream<Uint8Array> {
+		return this.#handle.readableWebStream() as unknown as ReadableStream<Uint8Array>
+	}
+
+	public async [Symbol.asyncDispose](): Promise<void> {
+		return this.#handle.close()
+	}
+
+	public dispose(): Promise<void> {
+		return this.#handle.close()
+	}
+
+	/**
+	 * Create a new file resource from a file handle or path.
+	 */
+	static async open(
+		input: FileHandleLike | PathLike,
+		stats?: StatsLike,
+		init: NodeFileResourceInit = {}
+	): Promise<NodeFileResource> {
+		const handle = isFileHandleLike(input) ? input : await open(input, "r")
+
+		stats = stats ?? (await handle.stat())
+
+		const name = init.name ?? path.basename(fileURLToPath(input.toString()))
+
+		return new NodeFileResource(handle, {
+			lastModified: stats.mtimeMs,
+			byteLength: stats.size,
+			...init,
+			name,
+		})
+	}
 }
+
+export default NodeFileResource

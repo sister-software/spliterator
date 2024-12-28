@@ -5,7 +5,7 @@
  */
 
 import { DelimitedGenerator } from "@sister.software/ribbon"
-import * as fs from "@sister.software/ribbon/node/fs"
+import { NodeFileResource } from "@sister.software/ribbon/node/fs"
 import { test } from "vitest"
 import { fixturesDirectory, loadFixture } from "./utils.js"
 
@@ -41,16 +41,16 @@ test("Synchronous parity with present lines", async ({ expect }) => {
 	expect(decodedLines, `Decoded lines match`).toMatchObject(presentFixtureLines)
 })
 
-test("Asynchronous content parity with String.prototype.split", async ({ expect, onTestFinished }) => {
+test("Asynchronous content parity with String.prototype.split", { only: true }, async ({ expect, onTestFinished }) => {
 	const decoder = new TextDecoder()
 
 	const fixturePath = fixturesDirectory("phonetic.txt")
 	const fixture = await loadFixture(fixturePath)
 
-	const fileHandle = await fs.open(fixturePath, "r")
-	onTestFinished(() => fileHandle.close())
+	const file = await NodeFileResource.open(fixturePath)
+	onTestFinished(() => file.dispose())
 
-	const lineGenerator = DelimitedGenerator.fromAsync(fileHandle, { skipEmpty: false })
+	const lineGenerator = DelimitedGenerator.fromAsync(file, { skipEmpty: false, highWaterMark: 3 })
 	const encodedLines = await Array.fromAsync(lineGenerator)
 	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
 
@@ -63,7 +63,7 @@ test("Asynchronous content parity with String.prototype.split", async ({ expect,
 	const encodedStreamLines = await Array.fromAsync(encodedReadStream)
 	expect(encodedStreamLines, "Encoded stream lines match").toMatchObject(fixture.encodedLines)
 
-	const decodedReaderSource = DelimitedGenerator.fromAsync(fileHandle)
+	const decodedReaderSource = DelimitedGenerator.fromAsync(file)
 
 	const decodedReadStream = ReadableStream
 		// ---
@@ -84,8 +84,8 @@ test("Asynchronous parity with present lines", async ({ expect, onTestFinished }
 	const fixture = await loadFixture(fixturePath)
 	const presentFixtureLines = fixture.decodedLines.map((line) => line.trim()).filter(Boolean)
 
-	const fileHandle = await fs.open(fixturePath, "r")
-	onTestFinished(() => fileHandle.close())
+	const fileHandle = await NodeFileResource.open(fixturePath)
+	onTestFinished(() => fileHandle.dispose())
 	const generator = DelimitedGenerator.fromAsync(fileHandle)
 
 	const encodedLines = await Array.fromAsync(generator)

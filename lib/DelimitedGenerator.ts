@@ -5,8 +5,8 @@
  */
 
 import { Delimiter, DelimiterInput } from "./delmiter.js"
-import { AsyncDataResource, FileSystemProvider, TypedArray } from "./shared.js"
-import { AsyncSlidingWindow, SlidingWindow } from "./SlidingWindow.js"
+import { AsyncDataResource, FileResourceLike, isFileResourceLike, TypedArray } from "./shared.js"
+import { SlidingWindow } from "./SlidingWindow.js"
 
 /**
  * Options for the delimited iterator.
@@ -43,14 +43,15 @@ export interface DelimitedGeneratorInit {
 	drop?: number
 
 	/**
-	 * The maximum number of data slices to yield. Useful for limiting the number of lines read from a
-	 * file.
+	 * The maximum number of data slices to yield.
+	 *
+	 * Useful for limiting the number of emitted slices, i.e. lines in a file.
 	 *
 	 * Note that skipped slices are not counted towards the limit.
 	 *
 	 * @default Infinity
 	 */
-	limit?: number
+	take?: number
 
 	/**
 	 * An `AbortSignal` to cancel the read operation.
@@ -60,15 +61,22 @@ export interface DelimitedGeneratorInit {
 
 export interface AsyncDelimitedGeneratorInit extends DelimitedGeneratorInit {
 	/**
-	 * A file system provider for reading data.
+	 * The total number of bytes to be buffered between reads.
+	 *
+	 * Typically, this is a multiple of the source's block size or a power of 2.
+	 *
+	 * @default BlockSize * 16
+	 * @minimum The delimiter byte length * 4 or block size of the file system. Whichever is greater.
+	 * @maximum The byte length of the file.
 	 */
-	fs?: FileSystemProvider
+	highWaterMark?: number
+
 	/**
 	 * Whether to close the file handle after completion.
 	 *
 	 * @default true
 	 */
-	closeFileHandle?: boolean
+	autoClose?: boolean
 }
 
 /**
@@ -78,8 +86,6 @@ export abstract class DelimitedGenerator {
 	constructor() {
 		throw new TypeError("Static class cannot be instantiated. Did you mean `DelimitedGenerator.from`?")
 	}
-
-	//#region Synchronous methods
 
 	/**
 	 * Given a byte array containing delimited data, yield a slice of the buffer between delimiters.
@@ -93,7 +99,7 @@ export abstract class DelimitedGenerator {
 		 * The byte array or string containing delimited data.
 		 */
 		source: T,
-		{ limit = Infinity, skipEmpty = true, drop = 0, position = 0, signal, ...options }: DelimitedGeneratorInit = {}
+		{ take = Infinity, skipEmpty = true, drop = 0, position = 0, signal, ...options }: DelimitedGeneratorInit = {}
 	): Generator<T extends string ? Uint8Array : T> {
 		const haystack = (typeof source === "string" ? new TextEncoder().encode(source) : source) as
 			| Exclude<T, string>
@@ -102,10 +108,10 @@ export abstract class DelimitedGenerator {
 		if (position > haystack.length) return
 
 		const delimiter = Delimiter.from(options.delimiter ?? Delimiter.LineFeed)
-		let emittedCount = 0
+		let taken = 0
 		const fallbackEmpty = new Uint8Array(0) as T extends string ? Uint8Array : T
 
-		if (limit === 0) return
+		if (take === 0) return
 
 		const slidingWindow = new SlidingWindow(haystack, { delimiter, position })
 
@@ -115,7 +121,7 @@ export abstract class DelimitedGenerator {
 
 				yield fallbackEmpty
 
-				emittedCount++
+				taken++
 
 				continue
 			}
@@ -130,28 +136,18 @@ export abstract class DelimitedGenerator {
 				}
 			}
 
-			if (emittedCount < drop) {
-				emittedCount++
-				continue
-			}
+			taken++
+			if (taken < drop) continue
 
 			yield slice as T extends string ? Uint8Array : T
 
-			emittedCount++
+			taken++
 
-			if (signal?.aborted) {
-				break
-			}
+			if (signal?.aborted) break
 
-			if (emittedCount === limit) {
-				break
-			}
+			if (taken === take) break
 		}
 	}
-
-	//#endregion
-
-	//#region Asynchronous methods
 
 	/**
 	 * Given a file handle containing delimited data, yield a slice of the buffer between delimiters.
@@ -165,72 +161,124 @@ export abstract class DelimitedGenerator {
 		 * The buffer containing newline-delimited data.
 		 */
 		source: AsyncDataResource,
-		{
-			limit = Infinity,
-			skipEmpty = true,
-			drop = 0,
-			position: byteOffset = 0,
-			signal,
-			fs,
-			...options
-		}: AsyncDelimitedGeneratorInit = {}
+		{ take = Infinity, skipEmpty = true, drop = 0, signal, ...init }: Partial<AsyncDelimitedGeneratorInit> = {}
 	): AsyncGenerator<T, any, unknown> {
-		if (limit === 0) return
+		// Anything to take?
+		if (take === 0) return
 
-		fs ||= await import("@sister.software/ribbon/node/fs")
+		let fileHandle: FileResourceLike
 
-		const fileHandle = await fs.open(source)
-		const stats = await fileHandle.stat()
-		const fallbackEmpty = new Uint8Array(0) as T
+		if (isFileResourceLike(source)) {
+			fileHandle = source
+		} else {
+			const { NodeFileResource } = await import("@sister.software/ribbon/node/fs")
+			fileHandle = await NodeFileResource.open(source)
+		}
 
-		const delimiter = Delimiter.from(options.delimiter ?? Delimiter.LineFeed)
-		let emittedCount = 0
+		const byteLength = fileHandle.size
+		const delimiter = Delimiter.from(init.delimiter ?? Delimiter.LineFeed)
 
-		const slidingWindow = new AsyncSlidingWindow(fileHandle, {
-			fs,
-			delimiter,
-			position: byteOffset,
-			limit: stats.size,
-		})
-
-		for await (const [start, end] of slidingWindow) {
-			if (start === end) {
-				if (skipEmpty) continue
-
-				yield fallbackEmpty
-
-				emittedCount++
-
-				continue
+		const findDelimiterStartIndex = (buffer: Uint8Array, searchStart: number) => {
+			for (let i = searchStart; i < buffer.length; i++) {
+				if (buffer[i] === delimiter[0]) return i
 			}
 
-			const slice = await fs.read(fileHandle, start, end)
+			return -1
+		}
 
-			if (skipEmpty) {
-				if (slice.length === delimiter.length && slice.every((byte, i) => byte === delimiter[i])) {
-					continue
+		const blockSize = 4096
+		const highWaterMark = init.highWaterMark ?? blockSize * 16
+
+		// The cursor is where we are in the file.
+		let cursor = init.position ?? 0
+		const autoClose = init.autoClose ?? false
+		let buffers = new Uint8Array(0)
+
+		let taken = 0
+
+		// Our task is similar to the synchronous version, but we can't use SlidingWindow.
+		// We need to read from the file handle in chunks and look for the delimiter.
+		// 1. Fill our buffer up to the high water mark.
+		// 2. Read from the buffer one byte at time, looking for the delimiter.
+		// 3. If we find the delimiter, yield a subarray starting from our last delimiter to the current position.
+		// 4. If we reach the end of the buffer before the end of the file, read another chunk and concatenate it with the previous buffer. Continue from step 2 until we reach the end of the file.
+		// 5. If we reach the end of the file without finding the delimiter, yield the remaining buffer.
+
+		while (cursor < byteLength) {
+			// Abort signal check
+			if (signal?.aborted) {
+				throw new Error("Operation aborted")
+			}
+
+			// Read the next chunk into the buffer
+			const readSize = Math.min(highWaterMark, byteLength - cursor)
+			// const chunk = new Uint8Array(readSize)
+
+			// await fileHandle.read({ buffer: chunk, position: cursor, length: readSize })
+			const chunk = await fileHandle.slice(cursor, cursor + readSize).bytes()
+			// await fs.read(fileHandle, cursor, readSize, chunk)
+			const bytesRead = chunk.byteLength
+
+			cursor += bytesRead
+
+			// Append the new chunk to the buffer
+			const combinedBuffer = new Uint8Array(buffers.length + bytesRead)
+			combinedBuffer.set(buffers)
+			combinedBuffer.set(chunk.subarray(0, bytesRead), buffers.length)
+			buffers = combinedBuffer
+
+			// Look for delimiters within the buffer
+			let delimiterIndex = 0
+			let start = 0
+
+			while ((delimiterIndex = findDelimiterStartIndex(buffers, start)) !== -1) {
+				delimiterIndex += start
+
+				// Check if the full delimiter matches
+				if (
+					buffers.subarray(delimiterIndex, delimiterIndex + delimiter.length).every((byte, i) => byte === delimiter[i])
+				) {
+					const slice = buffers.subarray(0, delimiterIndex)
+					buffers = buffers.subarray(delimiterIndex + delimiter.length)
+
+					// Skip empty slices if needed
+					if (skipEmpty && slice.length === 0) {
+						start = 0
+						continue
+					}
+
+					// Drop slices if required
+					if (taken < drop) {
+						taken++
+						start = 0
+						continue
+					}
+
+					// Yield the slice
+					console.debug(">>>", new TextDecoder().decode(slice))
+					yield slice as T
+
+					taken++
+					if (taken === take) return
+
+					start = 0
+				} else {
+					// If not a complete delimiter, continue searching
+					start = delimiterIndex + 1
 				}
 			}
-
-			if (emittedCount < drop) {
-				emittedCount++
-
-				continue
-			}
-
-			yield slice as T
-
-			emittedCount++
-
-			if (signal?.aborted) {
-				break
-			}
-
-			if (emittedCount === limit) {
-				break
-			}
 		}
-	}
 
-	//#endregion
+		// Yield the remaining buffer
+		if (buffers.length > 0 && !skipEmpty) {
+			console.log("Final >>>", new TextDecoder().decode(buffers))
+			yield buffers as T
+		}
+
+		// Auto-close the file handle if needed
+		// if (autoClose) {
+		// 	fileHandle.
+		// 	await fileHandle.close()
+		// }
+	}
 }

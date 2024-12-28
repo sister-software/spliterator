@@ -34,7 +34,6 @@ interface ChunkInfo {
  * Given several contiguous byte arrays, wraps them as if they were flattened into a single buffer.
  */
 export class CompositeDataView<Chunk extends TypedArray = TypedArray>
-	extends DataView
 	implements Iterable<Chunk[0]>, RelativeIndexable<Chunk[0]>
 {
 	/**
@@ -93,16 +92,17 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 	 */
 	#updateChunkOffsets(): void {
 		let currentOffset = 0
+
 		this.#chunkOffsets = this.#chunks.map((chunk) => {
 			const info = { offset: currentOffset, length: chunk.length }
+
 			currentOffset += chunk.length
+
 			return info
 		})
 	}
 
 	constructor(chunks?: Chunk[]) {
-		super(new Uint8Array(0).buffer)
-
 		if (chunks) {
 			this.#chunks = chunks
 			this.#memoizedByteLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
@@ -115,7 +115,7 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 	 *
 	 * @see {@linkcode size} for the number of chunks in the composite buffer.
 	 */
-	public override get byteLength(): number {
+	public get byteLength(): number {
 		return this.#memoizedByteLength
 	}
 
@@ -137,11 +137,11 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 	 *
 	 * Note that this is not memoized and will create a new buffer each time it is accessed.
 	 */
-	public override get buffer(): Chunk {
+	public get buffer(): Chunk {
 		return this.flat()
 	}
 
-	public override get [Symbol.toStringTag](): string {
+	public get [Symbol.toStringTag](): string {
 		return "CompositeDataView"
 	}
 
@@ -167,41 +167,22 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 	/**
 	 * Push a chunk onto the composite buffer.
 	 */
-	public push(chunk: Chunk): number {
+	public append(chunk: Chunk): number {
 		this.#chunks.push(chunk)
+
 		this.#memoizedByteLength += chunk.length
+
 		this.#updateChunkOffsets()
+
 		return this.#memoizedByteLength
 	}
 
 	/**
-	 * Pop a chunk from the composite buffer.
+	 * Prepend a chunk before the first chunk in the composite buffer.
+	 *
+	 * @returns The new length of the composite buffer.
 	 */
-	public pop(): Chunk | undefined {
-		const chunk = this.#chunks.pop()
-		if (chunk) {
-			this.#memoizedByteLength -= chunk.length
-			this.#updateChunkOffsets()
-		}
-		return chunk
-	}
-
-	/**
-	 * Shift a chunk from the composite buffer.
-	 */
-	public shift(): Chunk | undefined {
-		const chunk = this.#chunks.shift()
-		if (chunk) {
-			this.#memoizedByteLength -= chunk.length
-			this.#updateChunkOffsets()
-		}
-		return chunk
-	}
-
-	/**
-	 * Unshift a chunk onto the composite buffer.
-	 */
-	public unshift(chunk: Chunk): number {
+	public prepend(chunk: Chunk): number {
 		this.#chunks.unshift(chunk)
 		this.#memoizedByteLength += chunk.length
 		this.#updateChunkOffsets()
@@ -209,27 +190,73 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 	}
 
 	/**
+	 * Remove the most recent chunk from the composite buffer.
+	 */
+	public removeLast(): Chunk | undefined {
+		const chunk = this.#chunks.pop()
+
+		if (chunk) {
+			this.#memoizedByteLength -= chunk.length
+
+			this.#updateChunkOffsets()
+		}
+		return chunk
+	}
+
+	/**
+	 * Remove the first chunk from the composite buffer.
+	 */
+	public removeFirst(): Chunk | undefined {
+		const chunk = this.#chunks.shift()
+
+		if (chunk) {
+			this.#memoizedByteLength -= chunk.length
+			this.#updateChunkOffsets()
+		}
+
+		return chunk
+	}
+
+	/**
 	 * Returns a view into the underlying chunks without copying data.
 	 */
-	public subarray(start: number, end?: number): Chunk {
-		const actualEnd = end === undefined ? this.#memoizedByteLength : end
-		const startChunk = this.#findChunkForIndex(start)
-		const endChunk = this.#findChunkForIndex(actualEnd - 1)
+	public subarray(
+		/**
+		 * Element to begin at. The offset is inclusive.
+		 */
+		begin: number = 0,
+		/**
+		 * Element to end at. The offset is exclusive. If not provided, the view extends to the end of
+		 * the buffer.
+		 */
+		end: number = this.#memoizedByteLength
+	): Chunk {
+		if (begin < 0) {
+			throw new RangeError("Invalid subarray range: begin is negative")
+		}
+
+		if (end < 0) {
+			throw new RangeError("Invalid subarray range: end is negative")
+		}
+
+		// const actualEnd = end === undefined ? this.#memoizedByteLength : end
+		const startChunk = this.#findChunkForIndex(begin)
+		const endChunk = this.#findChunkForIndex(end - 1)
 
 		if (!startChunk || !endChunk) {
-			throw new RangeError("Invalid subarray range")
+			throw new RangeError("Invalid subarray range: Start: " + begin + ", End: " + end)
 		}
 
 		// If the range is within a single chunk, return a view into that chunk
 		if (startChunk.chunk === endChunk.chunk) {
-			const relativeStart = start - startChunk.chunkInfo.offset
-			const relativeEnd = actualEnd - startChunk.chunkInfo.offset
+			const relativeStart = begin - startChunk.chunkInfo.offset
+			const relativeEnd = end - startChunk.chunkInfo.offset
 			return startChunk.chunk.subarray(relativeStart, relativeEnd) as Chunk
 		}
 
 		// Otherwise, we need to create a new buffer and copy the data
 		const Constructor = this.#inferChunkConstructor()
-		const length = actualEnd - start
+		const length = end - begin
 		const result = new Constructor(length)
 
 		let writeOffset = 0
@@ -239,8 +266,8 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 			const currentChunk = this.#chunks[currentChunkIndex]!
 			const chunkInfo = this.#chunkOffsets[currentChunkIndex]!
 
-			const readStart = currentChunk === startChunk.chunk ? start - chunkInfo.offset : 0
-			const readEnd = currentChunk === endChunk.chunk ? actualEnd - chunkInfo.offset : currentChunk.length
+			const readStart = currentChunk === startChunk.chunk ? begin - chunkInfo.offset : 0
+			const readEnd = currentChunk === endChunk.chunk ? end - chunkInfo.offset : currentChunk.length
 
 			result.set(currentChunk.subarray(readStart, readEnd), writeOffset)
 			writeOffset += readEnd - readStart
@@ -256,7 +283,7 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 	 * Flattens the composite buffer into a single buffer.
 	 */
 	public flat(): Chunk {
-		return this.subarray(0)
+		return this.subarray()
 	}
 
 	/**
@@ -264,7 +291,28 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 	 *
 	 * @see {@linkcode subarray} for a view into the underlying chunks.
 	 */
-	public slice(start: number, end?: number): Chunk {
+	public slice(
+		/**
+		 * Zero-based index at which to begin extraction.
+		 *
+		 * If this value is negative, it is treated as `byteLength + begin`.
+		 */
+		start: number = 0,
+		/**
+		 * Zero-based index before which to end extraction.
+		 *
+		 * If this value is negative, it is treated as `byteLength + end`.
+		 */
+		end: number = this.#memoizedByteLength
+	): Chunk {
+		if (start < 0) {
+			start = Math.max(0, this.#memoizedByteLength + start)
+		}
+
+		if (end < 0) {
+			end = Math.max(0, this.#memoizedByteLength + end)
+		}
+
 		return this.subarray(start, end)
 	}
 }

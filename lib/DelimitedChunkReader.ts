@@ -5,7 +5,7 @@
  */
 
 import { Delimiter, DelimiterInput } from "./delmiter.js"
-import { AsyncDataResource, FileSystemProvider } from "./shared.js"
+import { AsyncDataResource, FileResourceLike, isFileResourceLike } from "./shared.js"
 import { AsyncSlidingWindow, ByteRange } from "./SlidingWindow.js"
 
 /**
@@ -24,11 +24,6 @@ export interface DeliminatedChunkReaderInit {
 	 * The character to delimit by. Typically a newline or comma.
 	 */
 	delimiter?: DelimiterInput
-
-	/**
-	 * The file system provider to use. Defaults to the Node.js file system.
-	 */
-	fs?: FileSystemProvider
 
 	/**
 	 * Whether to close the file handle after reading.
@@ -77,9 +72,17 @@ export class DelimitedChunkReader {
 		source: AsyncDataResource,
 		init: DeliminatedChunkReaderInit = {}
 	): Promise<ByteRange[]> {
-		const fs = init.fs ?? (await import("@sister.software/ribbon/node/fs"))
-		const fileHandle = await fs.open(source)
-		const byteLimit = init.limit ?? (await fileHandle.stat()).size
+		let file: FileResourceLike
+
+		if (isFileResourceLike(source)) {
+			file = source
+		} else {
+			const { NodeFileResource } = await import("@sister.software/ribbon/node/fs")
+			file = await NodeFileResource.open(source)
+		}
+
+		const byteLimit = init.limit ?? file.size
+		// const byteLimit = init.limit ?? (await fileHandle.stat()).size
 
 		const delimiter = Delimiter.from(init.delimiter ?? Delimiter.LineFeed)
 		const delimiterLength = delimiter.length
@@ -101,13 +104,16 @@ export class DelimitedChunkReader {
 			const searchStart = Math.max(chunkEnd - delimiterLength * 2, previousSlice[1])
 			const searchEnd = Math.min(chunkEnd + delimiterLength * 2, byteLimit)
 
-			const reverse = new AsyncSlidingWindow(fileHandle, {
-				fs,
+			const reverse = new AsyncSlidingWindow(file, {
 				delimiter,
 				position: searchStart,
-				limit: searchEnd,
+				byteLength: searchEnd,
 			})
-			const forward = new AsyncSlidingWindow(fileHandle, { fs, delimiter, position: searchStart, limit: searchEnd })
+			const forward = new AsyncSlidingWindow(file, {
+				delimiter,
+				position: searchStart,
+				byteLength: searchEnd,
+			})
 
 			const [previousRange, nextRange] = await Promise.all([
 				// We look backward to find the previous delimiter at a midpoint in the chunk...
@@ -149,7 +155,7 @@ export class DelimitedChunkReader {
 		if (!ranges.length) return fallback
 
 		if (init.autoClose) {
-			await fileHandle[Symbol.asyncDispose]()
+			await file[Symbol.asyncDispose]?.()
 		}
 
 		return ranges
