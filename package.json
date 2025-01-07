@@ -1,6 +1,6 @@
 {
 	"name": "spliterator",
-	"version": "1.5.0",
+	"version": "1.5.1",
 	"description": "Line-delimited file utilities",
 	"keywords": [
 		"csv",
@@ -10,13 +10,13 @@
 		"line-delimited",
 		"delimited"
 	],
-	"homepage": "https://github.com/sister-software/ribbon",
+	"homepage": "https://github.com/sister-software/spliterator",
 	"bugs": {
-		"url": "https://github.com/sister-software/ribbon/issues"
+		"url": "https://github.com/sister-software/spliterator/issues"
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/sister-software/ribbon.git"
+		"url": "git+https://github.com/sister-software/spliterator.git"
 	},
 	"license": "AGPL-3.0-only",
 	"contributors": [
@@ -86,7 +86,7 @@
 	},
 	"packageManager": "yarn@4.5.1",
 	"engines": {
-		"node": ">= 10.0.0"
+		"node": ">= 20.18.1"
 	},
 	"publishConfig": {
 		"access": "public",

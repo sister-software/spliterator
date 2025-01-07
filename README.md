@@ -1,8 +1,8 @@
-# Ribbon 🎀
+# Spliterator 🎀
 
-Ribbon makes newline-delimited files easy to work with.
+Spliterator is a TypeScript library for streaming delimited content such as CSV, TSV and JSONL.
 
-Let's say you have a huge newline-delimited JSON file that can't fit into memory.
+Let's say you have a huge newline-delimited JSON file that can't fit into memory:
 
 ```js
 {"name": "Jessie", "age": 30}
@@ -11,7 +11,7 @@ Let's say you have a huge newline-delimited JSON file that can't fit into memory
 // Several hundred thousand more lines...
 ```
 
-Ribbon can help you read it line-by-line:
+Spliterator can help you read it line-by-line without loading the entire file into memory:
 
 ```ts
 import { JSONSpliterator } from "spliterator"
@@ -28,7 +28,8 @@ for await (const line of reader) {
 }
 ```
 
-[![NPM Version](https://img.shields.io/npm/v/%40sister.software%2Fribbon)](https://www.npmjs.com/package/spliterator)
+[![NPM Version](https://img.shields.io/npm/v/spliterator)](https://www.npmjs.com/package/spliterator)
+![NPM License](https://img.shields.io/npm/l/spliterator)
 
 # Installation
 
@@ -42,7 +43,7 @@ npm install spliterator
 
 ## Character-delimited files
 
-While Ribbon supports any delimited byte stream, it's particularly useful for character-delimited content such as comma-separated values (CSV), tab-separated values (TSV) – or any other delimiter you can think of.
+While Spliterator supports any delimited byte stream, it's particularly useful for character-delimited content such as comma-separated values (CSV), tab-separated values (TSV) – or any other delimiter you can think of.
 
 ```csv
 Full Name, Occupation, Age
@@ -81,12 +82,13 @@ for await (const columns of reader) {
 
 ## Advanced usage
 
-Ribbon is designed to be simple to use, but also flexible and powerful.
-For more advanced use cases, check out our tests in the `test` directory, or our fully-annotated source code.
+Spliterator includes a collection of low-level classes and interfaces that can be used to create custom generators for any kind of delimited content.
+
+For more advanced usage, check out our tests in the `test` directory, or our fully-annotated source code.
 
 ### Reading from a stream
 
-All Ribbon generators implement the `Generator` and `AsyncGenerator` interfaces, so you can use them in `for...of` and `for await...of` loops, as well the web-native [ReadableStreams](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream), so you can use them in `for await...of` loops, as well as piping them through transformations to avoid nested and partially materialized streams.
+All included Spliterators implement the `Generator` and `AsyncGenerator` interfaces, so you can use them in `for...of` and `for await...of` loops, as well the web-native [ReadableStreams](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream), so you can use them in `for await...of` loops, as well as piping them through transformations to avoid nested and partially materialized streams.
 
 ```ts
 import { JSONSpliterator } from "spliterator"
@@ -107,11 +109,11 @@ for await (const line of stream) {
 
 ### Custom generators
 
-While Ribbon includes premade exports for most use-cases, custom generators can be created via `DelimitedGenerator`. This class is a low-level interface that allows you to create your own generators for any kind of delimited content.
+While Spliterator includes premade exports for most use-cases, custom generators can be created via `DelimitedGenerator`. This class is a low-level interface that allows you to create your own generators for any kind of delimited content.
 
 # License
 
-Ribbon is licensed under the AGPL-3.0 license. Generally,
+Spliterator is licensed under the AGPL-3.0 license. Generally,
 this means that you can use the software for free, but you must share
 any modifications you make to the software.
 

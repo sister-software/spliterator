@@ -9,11 +9,11 @@ import { createESLintPackageConfig } from "@sister.software/eslint-config"
 // @ts-check
 
 /**
- * ESLint configuration for the Ribbon package.
+ * ESLint configuration for the Spliterator package.
  */
 const ESLintConfig = createESLintPackageConfig({
 	copyrightHolder: "Sister Software",
-	packageTitle: "Ribbon",
+	packageTitle: "Spliterator",
 	spdxLicenseIdentifier: "AGPL-3.0",
 })
 
