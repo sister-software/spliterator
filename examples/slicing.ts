@@ -4,7 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import { DelimitedChunkReader, Delimiter } from "@sister.software/ribbon"
+import { CharacterSequence, DelimitedChunkReader } from "@sister.software/ribbon"
 import { NodeFileResource } from "@sister.software/ribbon/node/fs"
 import { fixturesDirectory } from "@sister.software/ribbon/test/utils"
 import { createReadStream, createWriteStream } from "node:fs"
@@ -14,7 +14,7 @@ import { pipeline } from "node:stream/promises"
 const fixturePath = fixturesDirectory("bdc_06_Cable_fixed_broadband_J24_10dec2024.csv")
 const handle = await NodeFileResource.open(fixturePath)
 
-const delimiter = Delimiter.from("\n")
+const delimiter = new CharacterSequence()
 const chunkReader = await DelimitedChunkReader.fromAsync(handle, {
 	chunks: 12,
 })

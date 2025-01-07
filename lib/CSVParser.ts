@@ -5,8 +5,8 @@
  */
 
 import { normalizeColumnNames } from "./casing.js"
+import { CharacterSequence, CharacterSequenceInput, Delimiters, takeDelimited } from "./CharacterSequence.js"
 import { AsyncDelimitedGeneratorInit, DelimitedGenerator, DelimitedGeneratorInit } from "./DelimitedGenerator.js"
-import { Delimiter, DelimiterInput, takeDelimited } from "./delmiter.js"
 import { AsyncDataResource, TypedArray, zipSync } from "./shared.js"
 
 /**
@@ -58,7 +58,7 @@ export interface CSVGeneratorOptions {
 	 *
 	 * @default Delimiter.Comma
 	 */
-	columnDelimiter?: DelimiterInput
+	columnDelimiter?: CharacterSequenceInput
 
 	/**
 	 * Whether to normalize the keys of the header row.
@@ -123,7 +123,7 @@ export abstract class CSVGenerator {
 			skip = header ? 1 : 0,
 			normalizeKeys,
 			mode = "array",
-			columnDelimiter: columnDelimiterInput,
+			columnDelimiter: columnDelimiterInput = Delimiters.Comma,
 			...rowOptions
 		} = options
 
@@ -134,7 +134,7 @@ export abstract class CSVGenerator {
 		let rowCursor = 0
 
 		const decoder = new TextDecoder()
-		const columnDelimiter = Delimiter.from(columnDelimiterInput ?? Delimiter.Comma)
+		const columnDelimiter = new CharacterSequence(columnDelimiterInput)
 
 		for (const row of DelimitedGenerator.from(source, rowOptions)) {
 			let columns = Array.from(takeDelimited(row, columnDelimiter), (column) => decoder.decode(column))
@@ -197,7 +197,7 @@ export abstract class CSVGenerator {
 
 		let rowCursor = 0
 
-		const columnDelimiter = Delimiter.from(columnDelimiterInput ?? Delimiter.Comma)
+		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? Delimiters.Comma)
 		const decoder = new TextDecoder()
 
 		for await (const row of DelimitedGenerator.fromAsync(source, rowOptions)) {

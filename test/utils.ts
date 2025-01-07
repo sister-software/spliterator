@@ -19,11 +19,18 @@ export interface FixtureResult {
 	decodedLines: string[]
 }
 
-export async function loadFixture(fixturePath: PathBuilderLike): Promise<FixtureResult> {
+export interface LoadFixtureInit {
+	delimiter?: string
+}
+
+export async function loadFixture(
+	fixturePath: PathBuilderLike,
+	{ delimiter = "\n" }: LoadFixtureInit = {}
+): Promise<FixtureResult> {
 	const bytes = await fs.readFile(fixturePath).then((buffer) => new Uint8Array(buffer))
 	const text = decoder.decode(bytes)
 
-	const decodedLines = text.split("\n")
+	const decodedLines = text.split(delimiter)
 	const encodedLines = decodedLines.map((line) => encoder.encode(line))
 
 	return {

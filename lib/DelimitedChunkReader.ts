@@ -4,7 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import { Delimiter, DelimiterInput } from "./delmiter.js"
+import { CharacterSequence, CharacterSequenceInput } from "./CharacterSequence.js"
 import { AsyncDataResource, FileResourceLike, isFileResourceLike } from "./shared.js"
 import { AsyncSlidingWindow, ByteRange } from "./SlidingWindow.js"
 
@@ -23,7 +23,7 @@ export interface DeliminatedChunkReaderInit {
 	/**
 	 * The character to delimit by. Typically a newline or comma.
 	 */
-	delimiter?: DelimiterInput
+	delimiter?: CharacterSequenceInput
 
 	/**
 	 * Whether to close the file handle after reading.
@@ -84,7 +84,7 @@ export class DelimitedChunkReader {
 		const byteLimit = init.limit ?? file.size
 		// const byteLimit = init.limit ?? (await fileHandle.stat()).size
 
-		const delimiter = Delimiter.from(init.delimiter ?? Delimiter.LineFeed)
+		const delimiter = new CharacterSequence(init.delimiter)
 		const delimiterLength = delimiter.length
 
 		const desiredSlices = Math.min(Math.max(1, init.chunks ?? 2), byteLimit / delimiterLength, byteLimit)

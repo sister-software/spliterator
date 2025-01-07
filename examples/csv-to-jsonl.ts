@@ -11,6 +11,6 @@ const generator = CSVGenerator.fromAsync(fixturesDirectory("carvel.csv"), {
 	mode: "object",
 })
 
-for await (const row of generator) {
-	console.log(JSON.stringify(row))
-}
+const rows = await Array.fromAsync(generator)
+
+console.table(rows)

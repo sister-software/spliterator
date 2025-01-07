@@ -4,7 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import { Delimiter, DelimiterInput, takeDelimited } from "./delmiter.js"
+import { CharacterSequence, CharacterSequenceInput, Delimiters, takeDelimited } from "./CharacterSequence.js"
 import { TypedArray } from "./shared.js"
 
 /**
@@ -16,7 +16,7 @@ export interface DelimiterTransformerOptions {
 	 *
 	 * @default `Delimiter.Comma`
 	 */
-	delimiter?: DelimiterInput
+	delimiter?: CharacterSequenceInput
 }
 
 /**
@@ -26,7 +26,7 @@ export interface DelimiterTransformerOptions {
  */
 export class DelimiterTransformer<T extends TypedArray = TypedArray> extends TransformStream<T, T[]> {
 	constructor(options: DelimiterTransformerOptions = {}) {
-		const delimiter = Delimiter.from(options.delimiter ?? Delimiter.Comma)
+		const delimiter = new CharacterSequence(options.delimiter ?? Delimiters.Comma)
 
 		super({
 			transform: (line, controller) => {

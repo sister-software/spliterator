@@ -4,11 +4,19 @@
  * @author Teffen Ellis, et al.
  */
 
-import { read, type PathLike } from "node:fs"
+import { read, ReadAsyncOptions, type PathLike } from "node:fs"
 import { open } from "node:fs/promises"
 import * as path from "node:path"
-import { fileURLToPath } from "node:url"
-import { isFileHandleLike, StatsLike, type FileHandleLike, type FileResourceLike } from "../shared.js"
+import { TypedArray } from "type-fest"
+import {
+	ByteRangeReader,
+	isFileHandleLike,
+	ReadBytesOptions,
+	StatsLike,
+	TypedArrayFallback,
+	type FileHandleLike,
+	type FileResourceLike,
+} from "../shared.js"
 
 export interface NodeFileResourceInit {
 	name?: string
@@ -16,12 +24,13 @@ export interface NodeFileResourceInit {
 	position?: number
 	byteLength?: number
 	lastModified?: number
+	blockSize?: number
 }
 
 /**
  * An isomorphic file resource which can be read from and disposed.
  */
-export class NodeFileResource implements FileResourceLike, AsyncDisposable {
+export class NodeFileResource implements FileResourceLike, ByteRangeReader, AsyncDisposable {
 	readonly #handle: FileHandleLike
 
 	/**
@@ -37,18 +46,20 @@ export class NodeFileResource implements FileResourceLike, AsyncDisposable {
 	 */
 	public readonly webkitRelativePath = ""
 
+	public readonly blockSize?: number
+
 	/**
 	 * The byte length of the file.
 	 */
-	readonly #byteLength: number
+	readonly size: number
 
 	/**
 	 * The byte length of the file.
 	 *
 	 * Alias for {@linkcode #byteLength}.
 	 */
-	public get size(): number {
-		return this.#byteLength
+	public get byteLength(): number {
+		return this.size
 	}
 
 	/**
@@ -63,26 +74,31 @@ export class NodeFileResource implements FileResourceLike, AsyncDisposable {
 		this.lastModified = init.lastModified ?? Date.now()
 		this.name = init.name ?? ""
 		this.#position = init.position ?? 0
-		this.#byteLength = (init.byteLength ?? 0) - this.#position
+		this.size = (init.byteLength ?? 0) - this.#position
+		this.blockSize = init.blockSize
 		this.type = init.type ?? ""
 	}
 
 	/**
-	 * Read the entire file as a byte array.
+	 * Read a range of bytes from the file.
 	 *
-	 * @see {@linkcode slice} to create a sliced view of the file.
-	 * @see {@linkcode arrayBuffer} to read the file as an array buffer.
+	 * @param options - The options for reading the byte range.
 	 */
-	public async bytes(): Promise<Uint8Array> {
-		const buffer = new Uint8Array(this.#byteLength)
+	async read<B extends TypedArray>(options: ReadBytesOptions & { buffer?: B } = {}): Promise<TypedArrayFallback<B>> {
+		const byteLength = options.length ?? this.size
+
+		const offset = options.offset ?? 0
+		const buffer = (options.buffer ?? new Uint8Array(byteLength)) as TypedArrayFallback<B>
+		const position = options.position ?? this.#position
 
 		await new Promise<void>((resolve, reject) =>
 			read(
 				this.#handle.fd,
 				{
 					buffer,
-					position: this.#position,
-				},
+					offset,
+					position,
+				} satisfies ReadAsyncOptions<TypedArrayFallback<B>>,
 				(error: unknown) => {
 					if (error) reject(error)
 					else resolve()
@@ -90,7 +106,16 @@ export class NodeFileResource implements FileResourceLike, AsyncDisposable {
 			)
 		)
 
-		return buffer
+		return buffer as any
+	}
+	/**
+	 * Read the entire file as a byte array.
+	 *
+	 * @see {@linkcode slice} to create a sliced view of the file.
+	 * @see {@linkcode arrayBuffer} to read the file as an array buffer.
+	 */
+	public async bytes(): Promise<Uint8Array> {
+		return this.read()
 	}
 
 	/**
@@ -117,7 +142,7 @@ export class NodeFileResource implements FileResourceLike, AsyncDisposable {
 	 */
 	public slice(start?: number, end?: number, contentType?: string): NodeFileResource {
 		start = start ?? 0
-		end = end ?? this.#byteLength
+		end = end ?? this.size
 
 		const byteLength = Math.max(0, end - start)
 
@@ -163,17 +188,24 @@ export class NodeFileResource implements FileResourceLike, AsyncDisposable {
 		stats?: StatsLike,
 		init: NodeFileResourceInit = {}
 	): Promise<NodeFileResource> {
-		const handle = isFileHandleLike(input) ? input : await open(input, "r")
+		let handle: FileHandleLike
+		let name = ""
+
+		if (isFileHandleLike(input)) {
+			handle = input
+		} else {
+			handle = await open(input, "r")
+			name = (init.name ?? typeof init.name === "string") ? init.name : path.basename(input.toString())
+		}
 
 		stats = stats ?? (await handle.stat())
-
-		const name = init.name ?? path.basename(fileURLToPath(input.toString()))
 
 		return new NodeFileResource(handle, {
 			lastModified: stats.mtimeMs,
 			byteLength: stats.size,
 			...init,
 			name,
+			blockSize: stats.blksize,
 		})
 	}
 }

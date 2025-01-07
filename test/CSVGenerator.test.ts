@@ -17,7 +17,7 @@ const firstRow = fixture.decodedLines[1]!.split(",")
 
 const normalizedHeader = normalizeColumnNames(rawHeader)
 
-test("Header is parsed", { skip: true }, async ({ expect, onTestFinished }) => {
+test("Header is parsed", async ({ expect, onTestFinished }) => {
 	const header = CSVGenerator.from(fixture.bytes, { skip: 0 }).next()
 
 	expect(header.done, "First row should not be done").toBeFalsy()
@@ -32,7 +32,7 @@ test("Header is parsed", { skip: true }, async ({ expect, onTestFinished }) => {
 	expect(headerAsync.value, "Async: Header should be an array of columns").members(rawHeader)
 })
 
-test("Header normalization", { skip: true }, async ({ expect, onTestFinished }) => {
+test("Header normalization", async ({ expect, onTestFinished }) => {
 	const rowGenerator = CSVGenerator.from(fixture.bytes, { skip: 0, normalizeKeys: true })
 	const header = rowGenerator.next()
 
@@ -46,7 +46,7 @@ test("Header normalization", { skip: true }, async ({ expect, onTestFinished }) 
 	expect(headerAsync.value, "Async: Header should be normalized").members(normalizedHeader)
 })
 
-test("Rows emit as entries", { skip: true }, async ({ expect, onTestFinished }) => {
+test("Rows emit as entries", async ({ expect, onTestFinished }) => {
 	const rowGenerator = CSVGenerator.from(fixture.bytes, { mode: "entries", normalizeKeys: true })
 	const emittedRow = rowGenerator.next()
 
@@ -62,7 +62,7 @@ test("Rows emit as entries", { skip: true }, async ({ expect, onTestFinished }) 
 	expect(Object.values(emittedRowAsync.value), "Async: Header should be an array of columns").toMatchObject(expectedRow)
 })
 
-test("Rows emit as record", { skip: true }, async ({ expect, onTestFinished }) => {
+test("Rows emit as record", async ({ expect, onTestFinished }) => {
 	const rowGenerator = CSVGenerator.from(fixture.bytes, { mode: "object", normalizeKeys: true })
 	const emittedRow = rowGenerator.next()
 

@@ -4,9 +4,209 @@
  * @author Teffen Ellis, et al.
  */
 
-import { Delimiter, DelimiterInput } from "./delmiter.js"
-import { AsyncDataResource, FileResourceLike, isFileResourceLike, TypedArray } from "./shared.js"
-import { SlidingWindow } from "./SlidingWindow.js"
+import { CharacterSequence, CharacterSequenceInput } from "./CharacterSequence.js"
+import {
+	applyReaderPolyfill,
+	AsyncDataResource,
+	ByteRangeReader,
+	FileResourceLike,
+	isFileResourceLike,
+	TypedArray,
+} from "./shared.js"
+import { ByteRange, SlidingWindow } from "./SlidingWindow.js"
+
+/**
+ * A first-in, first-out queue for marking and dequeuing index tuples.
+ */
+export class IndexQueue implements IterableIterator<ByteRange> {
+	#tuples: number[] = []
+
+	/**
+	 * The number of tuples in the queue.
+	 */
+	public get size(): number {
+		return this.#tuples.length / 2
+	}
+
+	/**
+	 * The total byte length spanned by the tuples in the queue.
+	 */
+	public get byteLength(): number {
+		let byteLength = 0
+
+		for (let i = 0; i < this.#tuples.length; i += 2) {
+			byteLength += this.#tuples[i + 1]! - this.#tuples[i]!
+		}
+
+		return byteLength
+	}
+
+	/**
+	 * Append a new tuple to the queue.
+	 */
+	public enqueue(tuple: ByteRange): void {
+		this.#tuples.push(...tuple)
+	}
+
+	/**
+	 * Get the next tuple in the queue, removing it.
+	 */
+	public dequeue(): ByteRange | undefined {
+		if (this.#tuples.length < 2) return
+
+		const tuple = this.#tuples.splice(0, 2)
+
+		return tuple as ByteRange
+	}
+
+	/**
+	 * Peek at the next tuple in the queue without removing it.
+	 */
+	public peek(): ByteRange | undefined {
+		if (this.#tuples.length < 2) return
+
+		return this.#tuples.slice(0, 2) as ByteRange
+	}
+
+	/**
+	 * Peek at the last tuple in the queue without removing it.
+	 */
+	public peekLast(): ByteRange | undefined {
+		if (this.#tuples.length < 2) return
+
+		return this.#tuples.slice(-2) as ByteRange
+	}
+
+	/**
+	 * Clear the queue.
+	 */
+	public clear(): void {
+		this.#tuples.length = 0
+	}
+
+	/**
+	 * Alias for `dequeue`, conforming to the iterator protocol.
+	 */
+	public next(): IteratorResult<ByteRange> {
+		const tuple = this.dequeue()
+
+		if (tuple) {
+			return { done: false, value: tuple }
+		}
+
+		return { done: true, value: undefined }
+	}
+
+	public [Symbol.iterator](): IndexQueue {
+		return this
+	}
+}
+
+/**
+ * A class to manage a buffer of bytes, growing and shrinking as needed.
+ */
+export class BufferController {
+	/**
+	 * The initial size of the buffer.
+	 */
+	#initialBufferSize: number
+
+	/**
+	 * The underlying buffer containing the data.
+	 *
+	 * This property is mutable for performance reasons. Consumers should treat it as immutable.
+	 */
+	bytes: Uint8Array
+
+	/**
+	 * The total number of bytes currently written to the buffer.
+	 *
+	 * This property is mutable for performance reasons. Consumers should treat it as immutable.
+	 */
+	bytesWritten: number
+
+	/**
+	 * The minimum byte length of the buffer.
+	 */
+	public get byteLengthMinimum(): number {
+		return Math.max(this.bytesWritten, this.#initialBufferSize)
+	}
+
+	constructor(init: { initialBufferSize: number }) {
+		this.#initialBufferSize = init.initialBufferSize
+		this.bytes = new Uint8Array(this.#initialBufferSize)
+		this.bytesWritten = 0
+	}
+
+	/**
+	 * Grow the buffer to the desired byte length, typically double the current byte length.
+	 */
+	public grow(desiredByteLength?: number): void {
+		desiredByteLength ??= this.bytes.length * 2
+
+		if (desiredByteLength <= this.bytes.length) return
+
+		// console.debug(`Growing buffer from ${this.bytes.length} to ${desiredByteLength} bytes.`)
+		const newBytes = new Uint8Array(desiredByteLength)
+
+		newBytes.set(this.bytes)
+
+		this.bytes = newBytes
+	}
+
+	/**
+	 * Modify the buffer in place, keeping only the bytes between the start and end indices.
+	 *
+	 * This is performed after we're confident that any data preceeding `start` or following `end` is
+	 * no longer needed.
+	 *
+	 * @param start - The starting byte index of which bytes to keep.
+	 * @param end - The ending byte index of which bytes to keep.
+	 */
+	public compress(start?: number, end?: number): void {
+		const byteLength = Math.max(this.byteLengthMinimum, this.bytes.length)
+
+		if (start === undefined) {
+			this.bytes = this.bytes.subarray(0, byteLength)
+		} else {
+			this.bytes = this.bytes.subarray(start, end)
+		}
+
+		this.bytesWritten = this.bytes.length
+	}
+
+	/**
+	 * Clear the buffer, zeroing out all bytes.
+	 *
+	 * @param begin The starting byte index from which to clear.
+	 * @param end The ending byte index to clear.
+	 */
+	public clear(begin: number = 0, end: number = this.bytesWritten): void {
+		this.bytes.fill(0, begin, end)
+		this.bytesWritten = 0
+	}
+
+	/**
+	 * Gets a new Uint8Array view of the ArrayBuffer store for this array, referencing the elements at
+	 * begin, inclusive, up to end, exclusive.
+	 *
+	 * @param begin — The index of the beginning of the array.
+	 * @param end — The index of the end of the array
+	 * @throws If the start index is greater than the end index.
+	 * @throws If the end index is greater than the current byte length.
+	 */
+	public subarray(begin: number = 0, end: number = this.bytesWritten): Uint8Array {
+		if (begin > end) {
+			throw new RangeError(`Start index ${begin} is greater than end index ${end}.`)
+		}
+
+		if (end > this.bytesWritten) {
+			throw new RangeError(`End index ${end} is greater than the current byte length ${this.bytesWritten}.`)
+		}
+
+		return this.bytes.subarray(begin, end)
+	}
+}
 
 /**
  * Options for the delimited iterator.
@@ -15,7 +215,7 @@ export interface DelimitedGeneratorInit {
 	/**
 	 * The character to delimit by. Typically a newline or comma.
 	 */
-	delimiter?: DelimiterInput
+	delimiter?: CharacterSequenceInput
 
 	/**
 	 * The byte offset to start reading from.
@@ -61,9 +261,8 @@ export interface DelimitedGeneratorInit {
 
 export interface AsyncDelimitedGeneratorInit extends DelimitedGeneratorInit {
 	/**
-	 * The total number of bytes to be buffered between reads.
-	 *
-	 * Typically, this is a multiple of the source's block size or a power of 2.
+	 * The buffer chunk size to read from the file, i.e. the high-water mark for the file read
+	 * operation.
 	 *
 	 * @default BlockSize * 16
 	 * @minimum The delimiter byte length * 4 or block size of the file system. Whichever is greater.
@@ -77,6 +276,236 @@ export interface AsyncDelimitedGeneratorInit extends DelimitedGeneratorInit {
 	 * @default true
 	 */
 	autoClose?: boolean
+
+	debug?: boolean
+}
+
+export async function* createByteSequenceSearcher<T extends TypedArray = Uint8Array>(
+	source: AsyncDataResource,
+	init: AsyncDelimitedGeneratorInit = {}
+): AsyncGenerator<T, any, unknown> {
+	const { signal, autoClose } = init
+
+	let file: FileResourceLike & ByteRangeReader
+
+	if (isFileResourceLike(source)) {
+		applyReaderPolyfill(source)
+
+		file = source
+	} else {
+		const { NodeFileResource } = await import("@sister.software/ribbon/node/fs")
+		file = await NodeFileResource.open(source)
+	}
+
+	if (file.size === 0) {
+		if (autoClose) {
+			await file[Symbol.asyncDispose]?.()
+		}
+
+		return
+	}
+
+	const needle = new CharacterSequence(init.delimiter)
+
+	/**
+	 * The current byte index to perform read operations from.
+	 */
+	let readPosition = init.position ?? 0
+
+	/**
+	 * The total byte size of the file.
+	 */
+	const totalByteSize = file.size
+
+	/**
+	 * The total number of bytes we expect to yield.
+	 *
+	 * We use this to ensure that we don't miss any data when the file is read in chunks.
+	 */
+	const yieldByteEstimate = totalByteSize - readPosition
+
+	/**
+	 * The total number of bytes we've yielded.
+	 */
+	let yieldedByteLength = 0
+	let yieldCount = 0
+
+	// const blockSize = file.blockSize ?? 4096
+	const highWaterMark = init.highWaterMark ?? Math.max(needle.length * 4, 4096)
+
+	const drop = Math.max(0, init.drop ?? 0)
+	const take = Math.max(init.take ?? Infinity, 0) + drop
+	const skipEmpty = init.skipEmpty ?? true
+
+	/**
+	 * A queue of index tuples marking the start and end of delimiter positions.
+	 *
+	 * Note that indices are relative to the buffer, not the file.
+	 *
+	 * This means that the start index is always 0, and the end index is the byte length of the
+	 * buffer.
+	 */
+	const indices = new IndexQueue()
+
+	/**
+	 * The buffer containing the current chunks of data. This will be resized as needed to accommodate
+	 * the file read operation.
+	 */
+	const controller = new BufferController({ initialBufferSize: Math.max(needle.length * 4, highWaterMark) })
+
+	/**
+	 * Drain the buffer, yielding each slice of data.
+	 *
+	 * Performing this operation will compact the buffer with some internal logic to ensure that we
+	 * don't miss any data.
+	 *
+	 * @yields Each slice of the buffer separated by a delimiter.
+	 */
+	function* drain(): Generator<T> {
+		if (indices.size === 0) return
+		if (yieldCount >= take) return
+
+		/** The current dequeued byte range. */
+		let currentByteRange: ByteRange | undefined
+		/** The last byte range seen. */
+		let lastByteRangeSeen: ByteRange | undefined
+
+		while ((currentByteRange = indices.dequeue())) {
+			lastByteRangeSeen = currentByteRange
+
+			const [start, end] = currentByteRange
+
+			const slice = controller.subarray(start, end) as T
+
+			if (!skipEmpty || slice.length > 0) {
+				yieldCount++
+
+				if (yieldCount > drop) {
+					yieldedByteLength += end - start
+
+					yield slice
+				}
+			}
+
+			if (yieldCount > take) break
+		}
+
+		// By yielding out our indices, we're effectively done with that window of the buffer.
+		// So we can compress it to save memory.
+		const nextBufferStart = lastByteRangeSeen ? lastByteRangeSeen[1] + needle.length : 0
+		controller.compress(nextBufferStart)
+	}
+
+	async function read() {
+		// We're extra careful here to ensure that we don't read past the end of the file.
+		// And because `file.read` doesn't expose the number of bytes read,
+		// we keep track of this ourselves.
+		const nextReadLength = Math.min(highWaterMark, totalByteSize - readPosition)
+		// Offset in this context means the byte offset to begin writing to the buffer.
+		const offset = controller.bytesWritten
+
+		// Before reading we grow the buffer to ensure that we have enough space.
+		const nextBufferSize = Math.max(controller.byteLengthMinimum, offset + nextReadLength)
+		controller.grow(nextBufferSize)
+
+		// console.debug("Before read", { cursor: readPosition, nextReadLength, nextBufferSize })
+
+		await file.read({
+			buffer: controller.bytes,
+			offset,
+			position: readPosition,
+			length: nextReadLength,
+		})
+
+		// console.debug("Inspecting buffer", debugAsVisibleCharacters(controller.bytes))
+
+		controller.bytesWritten += nextReadLength
+		readPosition += nextReadLength
+	}
+
+	/**
+	 * Find and enqueue delimiter positions.
+	 */
+	function search() {
+		const lastByteRange = indices.peekLast()
+		let searchCursor = lastByteRange ? lastByteRange[1] + needle.length : 0
+
+		while (searchCursor <= controller.bytesWritten) {
+			const delimiterIndex = needle.search(controller.bytes, searchCursor)
+
+			if (delimiterIndex === -1) {
+				// console.debug(`No viable byte range found in buffer. Breaking.`)
+				break
+			}
+
+			// console.debug("Found byte range", [searchCursor, delimiterIndex])
+			indices.enqueue([searchCursor, delimiterIndex])
+
+			searchCursor = delimiterIndex + needle.length
+		}
+	}
+
+	while (readPosition < totalByteSize) {
+		if (indices.byteLength >= highWaterMark) {
+			// console.debug(`Draining buffer with ${indices.size} indices.`)
+			yield* drain()
+		}
+
+		await read()
+		search()
+	}
+
+	// There's a few special cases we could get this far and not have drained the buffer.
+	const lastByteRange = indices.peek()
+
+	if (lastByteRange) {
+		const lastByteIndex = lastByteRange[1]
+
+		// There's a special case where the last delimiter is at the end of the *file*.
+
+		if (lastByteIndex < controller.bytesWritten) {
+			// We need to determine if we're at the end of the *file* and there's no delimiter.
+			const possibleDelimiterIndex = needle.search(controller.bytes, controller.bytesWritten - needle.length)
+
+			if (possibleDelimiterIndex !== -1) {
+				// We found a delimiter at the end of the file, so we enqueue the byte range.
+				indices.enqueue([possibleDelimiterIndex + needle.length, controller.bytesWritten])
+			} else {
+				// The file didn't end with a delimiter, so we just enqueue the last byte range.
+				indices.enqueue([lastByteIndex + needle.length, controller.bytesWritten])
+			}
+		}
+	} else if (yieldCount === 0) {
+		// We didn't find any delimiters in the file, so we just enqueue the whole buffer.
+		indices.enqueue([0, controller.bytesWritten])
+	}
+
+	if (indices.size) {
+		yield* drain()
+	}
+
+	if (init.debug) {
+		/**
+		 * The total number of bytes we expect to be omitted from the buffer. This is derived from the
+		 * number of of yields and the length of the delimiter.
+		 */
+		const expectedYieldedDelimitedBytes = (yieldCount - 1) * needle.length
+		const omittedBytes = yieldByteEstimate - (yieldedByteLength + expectedYieldedDelimitedBytes)
+
+		console.debug({
+			totalByteSize,
+			readPosition,
+			yieldByteEstimate,
+			yieldedByteLength,
+			yieldCount,
+			expectedYieldedDelimitedBytes,
+			omittedBytes,
+		})
+	}
+
+	if (autoClose) {
+		await file[Symbol.asyncDispose]?.()
+	}
 }
 
 /**
@@ -99,7 +528,14 @@ export abstract class DelimitedGenerator {
 		 * The byte array or string containing delimited data.
 		 */
 		source: T,
-		{ take = Infinity, skipEmpty = true, drop = 0, position = 0, signal, ...options }: DelimitedGeneratorInit = {}
+		{
+			take = Infinity,
+			skipEmpty = true,
+			drop = 0,
+			position = 0,
+			signal,
+			delimiter: delimiterInput,
+		}: DelimitedGeneratorInit = {}
 	): Generator<T extends string ? Uint8Array : T> {
 		const haystack = (typeof source === "string" ? new TextEncoder().encode(source) : source) as
 			| Exclude<T, string>
@@ -107,7 +543,7 @@ export abstract class DelimitedGenerator {
 
 		if (position > haystack.length) return
 
-		const delimiter = Delimiter.from(options.delimiter ?? Delimiter.LineFeed)
+		const delimiter = new CharacterSequence(delimiterInput)
 		let taken = 0
 		const fallbackEmpty = new Uint8Array(0) as T extends string ? Uint8Array : T
 
@@ -136,7 +572,6 @@ export abstract class DelimitedGenerator {
 				}
 			}
 
-			taken++
 			if (taken < drop) continue
 
 			yield slice as T extends string ? Uint8Array : T
@@ -161,124 +596,12 @@ export abstract class DelimitedGenerator {
 		 * The buffer containing newline-delimited data.
 		 */
 		source: AsyncDataResource,
-		{ take = Infinity, skipEmpty = true, drop = 0, signal, ...init }: Partial<AsyncDelimitedGeneratorInit> = {}
+		init: AsyncDelimitedGeneratorInit = {}
 	): AsyncGenerator<T, any, unknown> {
-		// Anything to take?
-		if (take === 0) return
+		const foo = createByteSequenceSearcher<T>(source, init)
 
-		let fileHandle: FileResourceLike
-
-		if (isFileResourceLike(source)) {
-			fileHandle = source
-		} else {
-			const { NodeFileResource } = await import("@sister.software/ribbon/node/fs")
-			fileHandle = await NodeFileResource.open(source)
+		for await (const bar of foo) {
+			yield bar
 		}
-
-		const byteLength = fileHandle.size
-		const delimiter = Delimiter.from(init.delimiter ?? Delimiter.LineFeed)
-
-		const findDelimiterStartIndex = (buffer: Uint8Array, searchStart: number) => {
-			for (let i = searchStart; i < buffer.length; i++) {
-				if (buffer[i] === delimiter[0]) return i
-			}
-
-			return -1
-		}
-
-		const blockSize = 4096
-		const highWaterMark = init.highWaterMark ?? blockSize * 16
-
-		// The cursor is where we are in the file.
-		let cursor = init.position ?? 0
-		const autoClose = init.autoClose ?? false
-		let buffers = new Uint8Array(0)
-
-		let taken = 0
-
-		// Our task is similar to the synchronous version, but we can't use SlidingWindow.
-		// We need to read from the file handle in chunks and look for the delimiter.
-		// 1. Fill our buffer up to the high water mark.
-		// 2. Read from the buffer one byte at time, looking for the delimiter.
-		// 3. If we find the delimiter, yield a subarray starting from our last delimiter to the current position.
-		// 4. If we reach the end of the buffer before the end of the file, read another chunk and concatenate it with the previous buffer. Continue from step 2 until we reach the end of the file.
-		// 5. If we reach the end of the file without finding the delimiter, yield the remaining buffer.
-
-		while (cursor < byteLength) {
-			// Abort signal check
-			if (signal?.aborted) {
-				throw new Error("Operation aborted")
-			}
-
-			// Read the next chunk into the buffer
-			const readSize = Math.min(highWaterMark, byteLength - cursor)
-			// const chunk = new Uint8Array(readSize)
-
-			// await fileHandle.read({ buffer: chunk, position: cursor, length: readSize })
-			const chunk = await fileHandle.slice(cursor, cursor + readSize).bytes()
-			// await fs.read(fileHandle, cursor, readSize, chunk)
-			const bytesRead = chunk.byteLength
-
-			cursor += bytesRead
-
-			// Append the new chunk to the buffer
-			const combinedBuffer = new Uint8Array(buffers.length + bytesRead)
-			combinedBuffer.set(buffers)
-			combinedBuffer.set(chunk.subarray(0, bytesRead), buffers.length)
-			buffers = combinedBuffer
-
-			// Look for delimiters within the buffer
-			let delimiterIndex = 0
-			let start = 0
-
-			while ((delimiterIndex = findDelimiterStartIndex(buffers, start)) !== -1) {
-				delimiterIndex += start
-
-				// Check if the full delimiter matches
-				if (
-					buffers.subarray(delimiterIndex, delimiterIndex + delimiter.length).every((byte, i) => byte === delimiter[i])
-				) {
-					const slice = buffers.subarray(0, delimiterIndex)
-					buffers = buffers.subarray(delimiterIndex + delimiter.length)
-
-					// Skip empty slices if needed
-					if (skipEmpty && slice.length === 0) {
-						start = 0
-						continue
-					}
-
-					// Drop slices if required
-					if (taken < drop) {
-						taken++
-						start = 0
-						continue
-					}
-
-					// Yield the slice
-					console.debug(">>>", new TextDecoder().decode(slice))
-					yield slice as T
-
-					taken++
-					if (taken === take) return
-
-					start = 0
-				} else {
-					// If not a complete delimiter, continue searching
-					start = delimiterIndex + 1
-				}
-			}
-		}
-
-		// Yield the remaining buffer
-		if (buffers.length > 0 && !skipEmpty) {
-			console.log("Final >>>", new TextDecoder().decode(buffers))
-			yield buffers as T
-		}
-
-		// Auto-close the file handle if needed
-		// if (autoClose) {
-		// 	fileHandle.
-		// 	await fileHandle.close()
-		// }
 	}
 }

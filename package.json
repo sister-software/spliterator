@@ -40,7 +40,7 @@
 		"out/lib/**/*"
 	],
 	"scripts": {
-		"demo": "node out/examples/slicing.js",
+		"demo": "node out/examples/simple-iteration.js",
 		"compile": "NODE_OPTIONS=\"--max-old-space-size=3000\" tsc -b",
 		"test": "vitest",
 		"lint": "run-s lint:prettier:check lint:eslint:check",

@@ -41,7 +41,7 @@ test("Synchronous parity with present lines", async ({ expect }) => {
 	expect(decodedLines, `Decoded lines match`).toMatchObject(presentFixtureLines)
 })
 
-test("Asynchronous content parity with String.prototype.split", { only: true }, async ({ expect, onTestFinished }) => {
+test("Asynchronous content parity with String.prototype.split", async ({ expect, onTestFinished }) => {
 	const decoder = new TextDecoder()
 
 	const fixturePath = fixturesDirectory("phonetic.txt")
@@ -50,7 +50,7 @@ test("Asynchronous content parity with String.prototype.split", { only: true }, 
 	const file = await NodeFileResource.open(fixturePath)
 	onTestFinished(() => file.dispose())
 
-	const lineGenerator = DelimitedGenerator.fromAsync(file, { skipEmpty: false, highWaterMark: 3 })
+	const lineGenerator = DelimitedGenerator.fromAsync(file, { skipEmpty: false })
 	const encodedLines = await Array.fromAsync(lineGenerator)
 	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
 
@@ -94,4 +94,76 @@ test("Asynchronous parity with present lines", async ({ expect, onTestFinished }
 	expect(encodedLines.length, `Async delimiter matches line length`).equal(presentFixtureLines.length)
 
 	expect(decodedLines, `Decoded lines match`).toMatchObject(presentFixtureLines)
+})
+
+test("Newline: Double spaced", async ({ expect, onTestFinished }) => {
+	const decoder = new TextDecoder()
+
+	const fixturePath = fixturesDirectory("phonetic-double-newline.txt")
+	const fixture = await loadFixture(fixturePath, {
+		delimiter: "\n",
+	})
+
+	const file = await NodeFileResource.open(fixturePath)
+	onTestFinished(() => file.dispose())
+
+	const lineGenerator = DelimitedGenerator.fromAsync(file, {
+		delimiter: "\n",
+		skipEmpty: false,
+	})
+
+	const encodedLines = await Array.fromAsync(lineGenerator)
+	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
+
+	expect(decodedLines.length, "Decoded line count matches").equal(fixture.decodedLines.length)
+
+	expect(decodedLines, "Decoded lines match").toMatchObject(fixture.decodedLines)
+})
+
+test("Carriage-Return: Single spaced", async ({ expect, onTestFinished }) => {
+	const decoder = new TextDecoder()
+
+	const fixturePath = fixturesDirectory("phonetic.crlf.txt")
+	const fixture = await loadFixture(fixturePath, {
+		delimiter: "\r\n",
+	})
+
+	const file = await NodeFileResource.open(fixturePath)
+	onTestFinished(() => file.dispose())
+
+	const lineGenerator = DelimitedGenerator.fromAsync(file, {
+		delimiter: "\r\n",
+		skipEmpty: false,
+	})
+
+	const encodedLines = await Array.fromAsync(lineGenerator)
+	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
+
+	expect(decodedLines.length, "Decoded line count matches").equal(fixture.decodedLines.length)
+
+	expect(decodedLines, "Decoded lines match").toMatchObject(fixture.decodedLines)
+})
+
+test("Carriage-Return: Double spaced", async ({ expect, onTestFinished }) => {
+	const decoder = new TextDecoder()
+
+	const fixturePath = fixturesDirectory("phonetic-double-newline.crlf.txt")
+	const fixture = await loadFixture(fixturePath, {
+		delimiter: "\r\n",
+	})
+
+	const file = await NodeFileResource.open(fixturePath)
+	onTestFinished(() => file.dispose())
+
+	const lineGenerator = DelimitedGenerator.fromAsync(file, {
+		delimiter: "\r\n",
+		skipEmpty: false,
+	})
+
+	const encodedLines = await Array.fromAsync(lineGenerator)
+	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
+
+	expect(decodedLines.length, "Decoded line count matches").equal(fixture.decodedLines.length)
+
+	expect(decodedLines, "Decoded lines match").toMatchObject(fixture.decodedLines)
 })

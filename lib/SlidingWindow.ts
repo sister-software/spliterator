@@ -4,8 +4,8 @@
  * @author Teffen Ellis, et al.
  */
 
-import { Delimiter, DelimiterBytes, DelimiterInput } from "./delmiter.js"
-import { FileResourceLike, TypedArray } from "./shared.js"
+import { CharacterSequence, CharacterSequenceInput } from "./CharacterSequence.js"
+import { applyReaderPolyfill, ByteRangeReader, FileResourceLike, TypedArray } from "./shared.js"
 
 /**
  * A tuple representing a window of bytes in a buffer.
@@ -25,7 +25,7 @@ export interface SlidingWindowInit {
 	/**
 	 * The delimiter to use. Defaults to a line feed.
 	 */
-	delimiter?: DelimiterInput
+	delimiter?: CharacterSequenceInput
 
 	/**
 	 * The byte index to start searching from.
@@ -45,7 +45,7 @@ export interface SlidingWindowInit {
  */
 export class SlidingWindow<T extends TypedArray> implements IterableIterator<ByteRange> {
 	buffer: T
-	#delimiter: DelimiterBytes
+	#delimiter: CharacterSequence
 	#byteLength: number
 	#done = false
 
@@ -67,7 +67,7 @@ export class SlidingWindow<T extends TypedArray> implements IterableIterator<Byt
 		init: SlidingWindowInit = {}
 	) {
 		this.buffer = buffer
-		this.#delimiter = Delimiter.from(init.delimiter ?? Delimiter.LineFeed)
+		this.#delimiter = new CharacterSequence(init.delimiter)
 		this.cursor = init.position ?? 0
 		this.#byteLength = Math.min(init.byteLength ?? buffer.byteLength, buffer.byteLength)
 	}
@@ -123,8 +123,8 @@ export interface AsyncSlidingWindowInit extends SlidingWindowInit {
  * @see {@link SlidingWindow} for a synchronous version.
  */
 export class AsyncSlidingWindow implements AsyncIterableIterator<ByteRange>, AsyncDisposable {
-	#file: FileResourceLike
-	#delimiter: DelimiterBytes
+	#file: FileResourceLike & ByteRangeReader
+	#delimiter: CharacterSequence
 	#byteLength: number
 	#done = false
 	#autoClose: boolean
@@ -140,9 +140,11 @@ export class AsyncSlidingWindow implements AsyncIterableIterator<ByteRange>, Asy
 	 * This a low-level utility function that can be used to implement more complex parsing logic.
 	 */
 	constructor(file: FileResourceLike, init: AsyncSlidingWindowInit) {
+		applyReaderPolyfill(file)
+
 		this.#file = file
 		this.#byteLength = init.byteLength ?? Infinity
-		this.#delimiter = Delimiter.from(init.delimiter ?? Delimiter.LineFeed)
+		this.#delimiter = new CharacterSequence(init.delimiter)
 		this.cursor = init.position ?? 0
 		this.#autoClose = init.autoClose ?? false
 	}
@@ -154,7 +156,10 @@ export class AsyncSlidingWindow implements AsyncIterableIterator<ByteRange>, Asy
 		const lookahead = this.#delimiter.length
 
 		for (let end = this.cursor; end < this.#byteLength; end++) {
-			const byteSlice = await this.#file.slice(end, end + lookahead).bytes()
+			const byteSlice = await this.#file.read({
+				position: end,
+				// lenegth: end + lookahead
+			})
 
 			const match = byteSlice.every((byte, i) => byte === this.#delimiter[i])
 
@@ -193,7 +198,7 @@ export class AsyncSlidingWindow implements AsyncIterableIterator<ByteRange>, Asy
 		const lookahead = this.#delimiter.length
 
 		for (let start = this.cursor; start > 0; start--) {
-			const byteSlice = await this.#file.slice(start - lookahead, start).bytes()
+			const byteSlice = await this.#file.read({ position: start - lookahead, length: start })
 
 			const match = byteSlice.every((byte, i) => byte === this.#delimiter[i])
 

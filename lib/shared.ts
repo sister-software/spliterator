@@ -5,7 +5,7 @@
  */
 
 // eslint-disable-next-line no-restricted-imports
-import type { Stats } from "node:fs"
+import { type Stats } from "node:fs"
 // eslint-disable-next-line no-restricted-imports
 import type { FileHandle } from "node:fs/promises"
 
@@ -47,12 +47,108 @@ export function isFileHandleLike(input: unknown): input is FileHandleLike {
 	return Boolean(input && typeof input === "object" && "fd" in input)
 }
 
+/**
+ * Type-helper to determine the destination type for a typed array.
+ *
+ * This is useful to infer the ultimate return type of a function which optionally accepts a typed
+ * array destination.
+ */
+export type TypedArrayFallback<T> = T extends TypedArray ? T : Uint8Array
+
+/**
+ * Options for reading a range of bytes from a source.
+ */
+export interface ReadBytesOptions {
+	/**
+	 * The offset from where to begin writing to the buffer.
+	 *
+	 * This is useful when reading multiple buffers into a single buffer.
+	 *
+	 * @default 0
+	 */
+	offset?: number
+
+	/**
+	 * How many bytes to read.
+	 *
+	 * @default `length of buffer`
+	 */
+	length?: number
+
+	/**
+	 * From where to start reading.
+	 */
+	position?: number
+}
+
+/**
+ * A trait for reading a range of bytes from a source.
+ *
+ * While possible with a variety of platform-specific APIs, this trait provides a common interface
+ * for reading byte ranges.
+ */
+export interface ByteRangeReader {
+	/**
+	 * Reads a range of bytes from a source.
+	 */
+	read(options?: ReadBytesOptions): Promise<Uint8Array>
+	read<B extends TypedArray>(options: ReadBytesOptions & { buffer: B }): Promise<B>
+}
+
+/**
+ * An isomorphic file resource which can be read from and disposed.
+ *
+ * Generally, this interface aligns with the `File` interface in the browser.
+ */
 export interface FileResourceLike extends File {
+	/**
+	 * Read the entire file as a byte array.
+	 */
 	bytes(): Promise<Uint8Array>
 
+	/**
+	 * Slice the file into a new file resource.
+	 *
+	 * @param start - The byte offset to start the slice.
+	 * @param end - The byte offset to end the slice.
+	 */
 	slice(start: number, end: number): FileResourceLike
 
+	/**
+	 * The block size of the file, if known.
+	 */
+	blockSize?: number
+
 	[Symbol.asyncDispose]?(): PromiseLike<void>
+}
+
+/**
+ * Given a file resource, adds a `read` method to read a range of bytes.
+ *
+ * This allows the web `File` interface to be used as a byte range reader.
+ */
+export function applyReaderPolyfill<T extends FileResourceLike>(file: T): asserts file is T & ByteRangeReader {
+	if ("read" in file && typeof file.read === "function") {
+		return
+	}
+
+	Object.assign(file, {
+		async read<B extends TypedArray>(options: ReadBytesOptions & { buffer?: B } = {}): Promise<TypedArrayFallback<B>> {
+			const { position: start = 0, length = file.size, offset = 0 } = options
+			const windowed = file.slice(start, start + length)
+
+			const bytes = (await windowed.bytes()) as TypedArrayFallback<B>
+
+			if (options.buffer) {
+				const destination = options.buffer as TypedArrayFallback<B>
+				destination.set(bytes as any, offset)
+
+				return destination
+			}
+
+			return bytes
+		},
+	})
 }
 
 /**
