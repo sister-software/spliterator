@@ -4,9 +4,9 @@
  * @author Teffen Ellis, et al.
  */
 
+import * as Colorette from "colorette"
 import { debugAsVisibleCharacters, Spliterator } from "spliterator"
 import { fixturesDirectory } from "spliterator/test/utils"
-import * as Colorette from "colorette"
 
 const spliterator = await Spliterator.fromAsync(fixturesDirectory("phonetic-single-spaced.txt"), {
 	// skipEmpty: false,

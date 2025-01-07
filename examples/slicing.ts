@@ -4,12 +4,12 @@
  * @author Teffen Ellis, et al.
  */
 
-import { CharacterSequence, DelimitedChunkReader } from "spliterator"
-import { NodeFileResource } from "spliterator/node/fs"
-import { fixturesDirectory } from "spliterator/test/utils"
 import { createReadStream, createWriteStream } from "node:fs"
 import * as fs from "node:fs/promises"
 import { pipeline } from "node:stream/promises"
+import { CharacterSequence, DelimitedChunkReader } from "spliterator"
+import { NodeFileResource } from "spliterator/node/fs"
+import { fixturesDirectory } from "spliterator/test/utils"
 
 const fixturePath = fixturesDirectory("bdc_06_Cable_fixed_broadband_J24_10dec2024.csv")
 const handle = await NodeFileResource.open(fixturePath)
