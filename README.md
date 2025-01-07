@@ -109,7 +109,7 @@ for await (const line of stream) {
 
 ### Custom generators
 
-While Spliterator includes premade exports for most use-cases, custom generators can be created via `DelimitedGenerator`. This class is a low-level interface that allows you to create your own generators for any kind of delimited content.
+While Spliterator includes premade exports for most use-cases, custom generators can be created via `Spliterator` and `AsyncSpliterator`. This class is a low-level interface that allows you to create your own generators for any kind of delimited content.
 
 # License
 
