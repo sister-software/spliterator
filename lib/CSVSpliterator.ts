@@ -6,16 +6,16 @@
 
 import { normalizeColumnNames } from "./casing.js"
 import { CharacterSequence, CharacterSequenceInput, Delimiters, takeDelimited } from "./CharacterSequence.js"
-import { AsyncDelimitedGeneratorInit, DelimitedGenerator, DelimitedGeneratorInit } from "./DelimitedGenerator.js"
-import { AsyncDataResource, TypedArray, zipSync } from "./shared.js"
+import { AsyncDataResource, zipSync } from "./shared.js"
+import { AsyncSpliteratorInit, Spliterator, SpliteratorInit } from "./Spliterator.js"
 
 /**
  * An output mode for the CSV generator.
  */
-export type CSVGeneratorOutputMode = "array" | "object" | "entries"
-export type CSVGeneratorEmitter<T = unknown> = (columns: Iterable<string>, headerColumns?: Iterable<string>) => T
+export type CSVOutputMode = "array" | "object" | "entries"
+export type CSVEmitter<T = unknown> = (columns: Iterable<string>, headerColumns?: Iterable<string>) => T
 
-export type CSVGeneratorEmittedRecord = {
+export type CSVSpliteratorEmittedRecord = {
 	[key: string]: string | number | undefined
 }
 
@@ -28,7 +28,7 @@ export type CSVGeneratorEmittedRecord = {
  */
 export type RowTuple = [key: string, value: string | number, idx: number]
 
-export const CSVGeneratorEmitters = {
+export const CSVSpliteratorEmitters = {
 	array: null,
 
 	entries(columns: Iterable<string>, headerColumns: Iterable<string> = []): RowTuple[] {
@@ -36,14 +36,14 @@ export const CSVGeneratorEmitters = {
 			return [key ?? `column_${idx}`, value ?? "", idx]
 		})
 	},
-	object(columns: Iterable<string>, headerColumns: Iterable<string> = []): CSVGeneratorEmittedRecord {
+	object(columns: Iterable<string>, headerColumns: Iterable<string> = []): CSVSpliteratorEmittedRecord {
 		const record = Object.fromEntries(Array.from(zipSync(headerColumns, columns)))
 
 		return record
 	},
-} as const satisfies Record<CSVGeneratorOutputMode, CSVGeneratorEmitter | null>
+} as const satisfies Record<CSVOutputMode, CSVEmitter | null>
 
-export interface CSVGeneratorOptions {
+export interface CSVSpliteratorOptions {
 	/**
 	 * The mode determines the shape of the data emitted by the generator.
 	 *
@@ -51,7 +51,7 @@ export interface CSVGeneratorOptions {
 	 * - `array` will emit each row as an array.
 	 * - `entries` will emit each row as an array of key-value pairs.
 	 */
-	mode?: CSVGeneratorOutputMode
+	mode?: CSVOutputMode
 
 	/**
 	 * The delimiter to use for columns in a row.
@@ -85,22 +85,22 @@ export interface CSVGeneratorOptions {
 	skip?: number
 }
 
-export abstract class CSVGenerator {
+export abstract class CSVSpliterator {
 	constructor() {
-		throw new TypeError("Static class cannot be instantiated. Did you mean `CSVGenerator.from`?")
+		throw new TypeError("Static class cannot be instantiated. Did you mean `CSVSpliterator.from`?")
 	}
 
-	static from<T extends CSVGeneratorEmittedRecord = CSVGeneratorEmittedRecord>(
-		source: TypedArray | string,
-		options: CSVGeneratorOptions & DelimitedGeneratorInit & { mode: "object" }
+	static from<T extends CSVSpliteratorEmittedRecord = CSVSpliteratorEmittedRecord>(
+		source: CharacterSequenceInput,
+		options: CSVSpliteratorOptions & SpliteratorInit & { mode: "object" }
 	): Generator<T>
 	/**
 	 * @yields Each row as a 3-tuple [key, value, idx].
 	 */
 
 	static from<T extends RowTuple[] = RowTuple[]>(
-		source: TypedArray | string,
-		options: CSVGeneratorOptions & DelimitedGeneratorInit & { mode: "entries" }
+		source: CharacterSequenceInput,
+		options: CSVSpliteratorOptions & SpliteratorInit & { mode: "entries" }
 	): Generator<T>
 	/**
 	 * Given a byte array or string, yield each row as an array of columns.
@@ -108,15 +108,15 @@ export abstract class CSVGenerator {
 	 * @yields Each row as an array of columns.
 	 */
 	static from<T extends string[] = string[]>(
-		source: TypedArray | string,
-		options: CSVGeneratorOptions & DelimitedGeneratorInit & { mode?: "array" }
+		source: CharacterSequenceInput,
+		options: CSVSpliteratorOptions & SpliteratorInit & { mode?: "array" }
 	): Generator<T>
 	/**
 	 * Given a byte array or string, yield each row as an array of columns.
 	 *
 	 * @yields Each row as an array of columns.
 	 */
-	static *from(source: TypedArray | string, options: CSVGeneratorOptions & DelimitedGeneratorInit = {}) {
+	static *from(source: CharacterSequenceInput, options: CSVSpliteratorOptions & SpliteratorInit = {}) {
 		const {
 			// ---
 			header = true,
@@ -129,14 +129,15 @@ export abstract class CSVGenerator {
 
 		let headerColumns: string[] = []
 
-		const emitter = CSVGeneratorEmitters[mode]
+		const emitter = CSVSpliteratorEmitters[mode]
 
 		let rowCursor = 0
 
 		const decoder = new TextDecoder()
 		const columnDelimiter = new CharacterSequence(columnDelimiterInput)
+		const spliterator = Spliterator.from(source, rowOptions)
 
-		for (const row of DelimitedGenerator.from(source, rowOptions)) {
+		for (const row of spliterator) {
 			let columns = Array.from(takeDelimited(row, columnDelimiter), (column) => decoder.decode(column))
 
 			if (header && rowCursor === 0) {
@@ -154,9 +155,9 @@ export abstract class CSVGenerator {
 		}
 	}
 
-	static fromAsync<T extends CSVGeneratorEmittedRecord = CSVGeneratorEmittedRecord>(
+	static fromAsync<T extends CSVSpliteratorEmittedRecord = CSVSpliteratorEmittedRecord>(
 		source: AsyncDataResource,
-		options?: CSVGeneratorOptions & AsyncDelimitedGeneratorInit & { mode: "object" }
+		options?: CSVSpliteratorOptions & AsyncSpliteratorInit & { mode: "object" }
 	): AsyncGenerator<T>
 	/**
 	 * @yields Each row as a 3-tuple [key, value, idx].
@@ -164,7 +165,7 @@ export abstract class CSVGenerator {
 
 	static fromAsync<T extends RowTuple[] = RowTuple[]>(
 		source: AsyncDataResource,
-		options?: CSVGeneratorOptions & AsyncDelimitedGeneratorInit & { mode: "entries" }
+		options?: CSVSpliteratorOptions & AsyncSpliteratorInit & { mode: "entries" }
 	): AsyncGenerator<T>
 	/**
 	 * Given a byte array or string, yield each row as an array of columns.
@@ -173,14 +174,14 @@ export abstract class CSVGenerator {
 	 */
 	static fromAsync<T extends string[] = string[]>(
 		source: AsyncDataResource,
-		options?: CSVGeneratorOptions & AsyncDelimitedGeneratorInit & { mode?: "array" }
+		options?: CSVSpliteratorOptions & AsyncSpliteratorInit & { mode?: "array" }
 	): AsyncGenerator<T>
 	/**
 	 * Given a byte array or string, yield each row as an array of columns.
 	 *
 	 * @yields Each row as an array of columns.
 	 */
-	static async *fromAsync(source: AsyncDataResource, options: CSVGeneratorOptions & AsyncDelimitedGeneratorInit = {}) {
+	static async *fromAsync(source: AsyncDataResource, options: CSVSpliteratorOptions & AsyncSpliteratorInit = {}) {
 		const {
 			// ---
 			header = true,
@@ -193,14 +194,15 @@ export abstract class CSVGenerator {
 
 		let headerColumns: string[] = []
 
-		const emitter = CSVGeneratorEmitters[mode]
+		const emitter = CSVSpliteratorEmitters[mode]
 
 		let rowCursor = 0
 
 		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? Delimiters.Comma)
 		const decoder = new TextDecoder()
+		const splitter = await Spliterator.fromAsync(source, rowOptions)
 
-		for await (const row of DelimitedGenerator.fromAsync(source, rowOptions)) {
+		for await (const row of splitter) {
 			let columns = Array.from(takeDelimited(row, columnDelimiter), (column) => decoder.decode(column))
 
 			if (header && rowCursor === 0) {

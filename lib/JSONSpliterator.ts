@@ -4,19 +4,22 @@
  * @author Teffen Ellis, et al.
  */
 
-import { AsyncDelimitedGeneratorInit, DelimitedGenerator, DelimitedGeneratorInit } from "./DelimitedGenerator.js"
-import { AsyncDataResource, TypedArray } from "./shared.js"
+import { CharacterSequenceInput } from "./CharacterSequence.js"
+import { AsyncDataResource } from "./shared.js"
+import { AsyncSpliteratorInit, Spliterator, SpliteratorInit } from "./Spliterator.js"
 
-export abstract class DelimitedJSONGenerator {
+export abstract class JSONSpliterator {
 	constructor() {
-		throw new TypeError("Static class cannot be instantiated. Did you mean `DelimitedJSONGenerator.from`?")
+		throw new TypeError("Static class cannot be instantiated. Did you mean `JSONSpliterator.from`?")
 	}
 
-	static *from<T = unknown>(source: TypedArray | string, options: DelimitedGeneratorInit = {}): Generator<T> {
+	static *from<T = unknown>(source: CharacterSequenceInput, options: SpliteratorInit = {}): Generator<T> {
 		const decoder = new TextDecoder()
 		let rowCursor = 0
 
-		for (const row of DelimitedGenerator.from(source, options)) {
+		const spliterator = Spliterator.from(source, options)
+
+		for (const row of spliterator) {
 			let parsed: T
 
 			try {
@@ -41,11 +44,12 @@ export abstract class DelimitedJSONGenerator {
 	 *
 	 * @yields Each row as an array of columns.
 	 */
-	static async *fromAsync<T = unknown>(source: AsyncDataResource, options: AsyncDelimitedGeneratorInit = {}) {
+	static async *fromAsync<T = unknown>(source: AsyncDataResource, options: AsyncSpliteratorInit = {}) {
 		const decoder = new TextDecoder()
 		let rowCursor = 0
+		const spliterator = await Spliterator.fromAsync(source, options)
 
-		for await (const row of DelimitedGenerator.fromAsync(source, options)) {
+		for await (const row of spliterator) {
 			let parsed: T
 
 			try {

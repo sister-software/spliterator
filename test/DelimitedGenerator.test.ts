@@ -4,18 +4,19 @@
  * @author Teffen Ellis, et al.
  */
 
-import { DelimitedGenerator } from "@sister.software/ribbon"
-import { NodeFileResource } from "@sister.software/ribbon/node/fs"
+import { AsyncSpliterator, Spliterator } from "spliterator"
+import { NodeFileResource } from "spliterator/node/fs"
 import { test } from "vitest"
 import { fixturesDirectory, loadFixture } from "./utils.js"
 
 test("Synchronous parity with String.prototype.split", async ({ expect }) => {
 	const decoder = new TextDecoder()
 
-	const fixturePath = fixturesDirectory("phonetic.txt")
+	const fixturePath = fixturesDirectory("phonetic-single-spaced.txt")
 	const fixture = await loadFixture(fixturePath)
+	expect(fixture.decodedLines, "Fixture has lines").not.toHaveLength(0)
 
-	const generator = DelimitedGenerator.from(fixture.bytes, { skipEmpty: false })
+	const generator = Spliterator.from(fixture.bytes, { skipEmpty: false })
 	const encodedLines = Array.from(generator)
 	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
 
@@ -28,11 +29,11 @@ test("Synchronous parity with String.prototype.split", async ({ expect }) => {
 test("Synchronous parity with present lines", async ({ expect }) => {
 	const decoder = new TextDecoder()
 
-	const fixturePath = fixturesDirectory("phonetic.txt")
+	const fixturePath = fixturesDirectory("phonetic-single-spaced.txt")
 	const fixture = await loadFixture(fixturePath)
 	const presentFixtureLines = fixture.decodedLines.filter(Boolean)
 
-	const generator = DelimitedGenerator.from(fixture.bytes)
+	const generator = Spliterator.from(fixture.bytes)
 	const encodedLines = Array.from(generator)
 	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
 
@@ -44,14 +45,15 @@ test("Synchronous parity with present lines", async ({ expect }) => {
 test("Asynchronous content parity with String.prototype.split", async ({ expect, onTestFinished }) => {
 	const decoder = new TextDecoder()
 
-	const fixturePath = fixturesDirectory("phonetic.txt")
+	const fixturePath = fixturesDirectory("phonetic-single-spaced.txt")
 	const fixture = await loadFixture(fixturePath)
 
 	const file = await NodeFileResource.open(fixturePath)
 	onTestFinished(() => file.dispose())
 
-	const lineGenerator = DelimitedGenerator.fromAsync(file, { skipEmpty: false })
+	const lineGenerator = new AsyncSpliterator(file, { skipEmpty: false })
 	const encodedLines = await Array.fromAsync(lineGenerator)
+
 	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
 
 	expect(decodedLines.length, "Decoded line count matches").equal(fixture.decodedLines.length)
@@ -63,7 +65,7 @@ test("Asynchronous content parity with String.prototype.split", async ({ expect,
 	const encodedStreamLines = await Array.fromAsync(encodedReadStream)
 	expect(encodedStreamLines, "Encoded stream lines match").toMatchObject(fixture.encodedLines)
 
-	const decodedReaderSource = DelimitedGenerator.fromAsync(file)
+	const decodedReaderSource = new AsyncSpliterator(file)
 
 	const decodedReadStream = ReadableStream
 		// ---
@@ -80,13 +82,13 @@ test("Asynchronous content parity with String.prototype.split", async ({ expect,
 test("Asynchronous parity with present lines", async ({ expect, onTestFinished }) => {
 	const decoder = new TextDecoder()
 
-	const fixturePath = fixturesDirectory("phonetic.txt")
+	const fixturePath = fixturesDirectory("phonetic-single-spaced.txt")
 	const fixture = await loadFixture(fixturePath)
 	const presentFixtureLines = fixture.decodedLines.map((line) => line.trim()).filter(Boolean)
 
 	const fileHandle = await NodeFileResource.open(fixturePath)
 	onTestFinished(() => fileHandle.dispose())
-	const generator = DelimitedGenerator.fromAsync(fileHandle)
+	const generator = await Spliterator.fromAsync(fileHandle)
 
 	const encodedLines = await Array.fromAsync(generator)
 	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
@@ -99,7 +101,7 @@ test("Asynchronous parity with present lines", async ({ expect, onTestFinished }
 test("Newline: Double spaced", async ({ expect, onTestFinished }) => {
 	const decoder = new TextDecoder()
 
-	const fixturePath = fixturesDirectory("phonetic-double-newline.txt")
+	const fixturePath = fixturesDirectory("phonetic-double-spaced.txt")
 	const fixture = await loadFixture(fixturePath, {
 		delimiter: "\n",
 	})
@@ -107,7 +109,7 @@ test("Newline: Double spaced", async ({ expect, onTestFinished }) => {
 	const file = await NodeFileResource.open(fixturePath)
 	onTestFinished(() => file.dispose())
 
-	const lineGenerator = DelimitedGenerator.fromAsync(file, {
+	const lineGenerator = new AsyncSpliterator(file, {
 		delimiter: "\n",
 		skipEmpty: false,
 	})
@@ -123,7 +125,7 @@ test("Newline: Double spaced", async ({ expect, onTestFinished }) => {
 test("Carriage-Return: Single spaced", async ({ expect, onTestFinished }) => {
 	const decoder = new TextDecoder()
 
-	const fixturePath = fixturesDirectory("phonetic.crlf.txt")
+	const fixturePath = fixturesDirectory("phonetic-single-spaced.crlf.txt")
 	const fixture = await loadFixture(fixturePath, {
 		delimiter: "\r\n",
 	})
@@ -131,7 +133,7 @@ test("Carriage-Return: Single spaced", async ({ expect, onTestFinished }) => {
 	const file = await NodeFileResource.open(fixturePath)
 	onTestFinished(() => file.dispose())
 
-	const lineGenerator = DelimitedGenerator.fromAsync(file, {
+	const lineGenerator = new AsyncSpliterator(file, {
 		delimiter: "\r\n",
 		skipEmpty: false,
 	})
@@ -147,7 +149,7 @@ test("Carriage-Return: Single spaced", async ({ expect, onTestFinished }) => {
 test("Carriage-Return: Double spaced", async ({ expect, onTestFinished }) => {
 	const decoder = new TextDecoder()
 
-	const fixturePath = fixturesDirectory("phonetic-double-newline.crlf.txt")
+	const fixturePath = fixturesDirectory("phonetic-double-spaced.crlf.txt")
 	const fixture = await loadFixture(fixturePath, {
 		delimiter: "\r\n",
 	})
@@ -155,7 +157,7 @@ test("Carriage-Return: Double spaced", async ({ expect, onTestFinished }) => {
 	const file = await NodeFileResource.open(fixturePath)
 	onTestFinished(() => file.dispose())
 
-	const lineGenerator = DelimitedGenerator.fromAsync(file, {
+	const lineGenerator = new AsyncSpliterator(file, {
 		delimiter: "\r\n",
 		skipEmpty: false,
 	})

@@ -4,8 +4,8 @@
  * @author Teffen Ellis, et al.
  */
 
-import { DelimitedJSONGenerator } from "@sister.software/ribbon"
-import { fixturesDirectory } from "@sister.software/ribbon/test/utils"
+import { JSONSpliterator } from "spliterator"
+import { fixturesDirectory } from "spliterator/test/utils"
 
 interface Row {
 	item_name: string
@@ -14,7 +14,7 @@ interface Row {
 	size: string
 }
 
-const generator = DelimitedJSONGenerator.fromAsync<Row>(fixturesDirectory("carvel.jsonl"))
+const generator = JSONSpliterator.fromAsync<Row>(fixturesDirectory("carvel.jsonl"))
 const firstRow = await generator.next()
 
 if (firstRow.done) {

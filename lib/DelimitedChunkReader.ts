@@ -5,8 +5,8 @@
  */
 
 import { CharacterSequence, CharacterSequenceInput } from "./CharacterSequence.js"
-import { AsyncDataResource, FileResourceLike, isFileResourceLike } from "./shared.js"
-import { AsyncSlidingWindow, ByteRange } from "./SlidingWindow.js"
+import { AsyncDataResource, ByteRange, FileResourceLike, isFileResourceLike } from "./shared.js"
+import { AsyncSlidingWindow } from "./SlidingWindow.js"
 
 /**
  * Options for the delimited chunk reader.
@@ -77,7 +77,7 @@ export class DelimitedChunkReader {
 		if (isFileResourceLike(source)) {
 			file = source
 		} else {
-			const { NodeFileResource } = await import("@sister.software/ribbon/node/fs")
+			const { NodeFileResource } = await import("spliterator/node/fs")
 			file = await NodeFileResource.open(source)
 		}
 

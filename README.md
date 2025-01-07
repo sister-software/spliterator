@@ -14,28 +14,28 @@ Let's say you have a huge newline-delimited JSON file that can't fit into memory
 Ribbon can help you read it line-by-line:
 
 ```ts
-import { DelimitedJSONGenerator } from "@sister.software/ribbon"
+import { JSONSpliterator } from "spliterator"
 
 interface Person {
 	name: string
 	age: number
 }
 
-const reader = DelimitedJSONGenerator.fromAsync("example.jsonl")
+const reader = JSONSpliterator.fromAsync("example.jsonl")
 
 for await (const line of reader) {
 	console.log(line) // {"name": "Alice", "age": 30}, etc.
 }
 ```
 
-[![NPM Version](https://img.shields.io/npm/v/%40sister.software%2Fribbon)](https://www.npmjs.com/package/@sister.software/ribbon)
+[![NPM Version](https://img.shields.io/npm/v/%40sister.software%2Fribbon)](https://www.npmjs.com/package/spliterator)
 
 # Installation
 
 ```bash
-yarn add @sister.software/ribbon
+yarn add spliterator
 # or
-npm install @sister.software/ribbon
+npm install spliterator
 ```
 
 # Usage
@@ -52,9 +52,9 @@ Orlando, Manager, 50
 ```
 
 ```ts
-import { CSVGenerator } from "@sister.software/ribbon"
+import { CSVSpliterator } from "spliterator"
 
-const reader = CSVGenerator.fromAsync("people.csv")
+const reader = CSVSpliterator.fromAsync("people.csv")
 
 for await (const columns of reader) {
 	console.log(columns) // ["Full Name", "Occupation", "Age"], ["Morgan", "Developer", 30], etc.
@@ -64,7 +64,7 @@ for await (const columns of reader) {
 CSV files can also be emitted as objects with headers as keys, with some quality-of-life features, such as normalizing property keys:
 
 ```ts
-import { CSVGenerator } from "@sister.software/ribbon"
+import { CSVSpliterator } from "spliterator"
 
 interface Person {
 	full_name: string
@@ -72,7 +72,7 @@ interface Person {
 	age: number
 }
 
-const reader = CSVGenerator.fromAsync<Person>("people.csv", { mode: "object" })
+const reader = CSVSpliterator.fromAsync<Person>("people.csv", { mode: "object" })
 
 for await (const columns of reader) {
 	console.log(columns) // { full_name: "Morgan", occupation: "Developer", age: 30 }, etc.
@@ -89,7 +89,7 @@ For more advanced use cases, check out our tests in the `test` directory, or our
 All Ribbon generators implement the `Generator` and `AsyncGenerator` interfaces, so you can use them in `for...of` and `for await...of` loops, as well the web-native [ReadableStreams](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream), so you can use them in `for await...of` loops, as well as piping them through transformations to avoid nested and partially materialized streams.
 
 ```ts
-import { DelimitedJSONGenerator } from "@sister.software/ribbon"
+import { JSONSpliterator } from "spliterator"
 
 const people = [
 	{ name: "Alice", age: 30 },
@@ -97,7 +97,7 @@ const people = [
 	{ name: "Charlie", age: 50 },
 ]
 
-const generator = DelimitedJSONGenerator.from(people.map(JSON.stringify).join("\n"))
+const generator = JSONSpliterator.from(people.map(JSON.stringify).join("\n"))
 const stream = ReadableStream.from(generator)
 
 for await (const line of stream) {

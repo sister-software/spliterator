@@ -4,11 +4,12 @@
  * @author Teffen Ellis, et al.
  */
 
-import { CSVGenerator } from "@sister.software/ribbon"
-import { fixturesDirectory } from "@sister.software/ribbon/test/utils"
+import { CSVSpliterator } from "spliterator"
+import { fixturesDirectory } from "spliterator/test/utils"
 
-const generator = CSVGenerator.fromAsync(fixturesDirectory("carvel.csv"), {
+const generator = CSVSpliterator.fromAsync(fixturesDirectory("carvel.csv"), {
 	mode: "object",
+	autoClose: true,
 })
 
 const rows = await Array.fromAsync(generator)

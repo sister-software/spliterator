@@ -20,6 +20,20 @@ export type StatsLike = Pick<Stats, "size" | "blksize" | "mtimeMs">
 export type FileHandleLike = Pick<FileHandle, "fd" | "stat" | "close" | "read" | "readableWebStream">
 
 /**
+ * A tuple representing a window of bytes in a buffer.
+ */
+export type ByteRange = [
+	/**
+	 * The starting byte index of the window.
+	 */
+	start: number,
+	/**
+	 * The ending byte index of the window.
+	 */
+	end: number,
+]
+
+/**
  * Typed arrays that may be used as sources for byte streams.
  */
 export type TypedArray =

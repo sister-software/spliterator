@@ -4,9 +4,9 @@
  * @author Teffen Ellis, et al.
  */
 
-import { CharacterSequence, DelimitedChunkReader } from "@sister.software/ribbon"
-import { NodeFileResource } from "@sister.software/ribbon/node/fs"
-import { fixturesDirectory } from "@sister.software/ribbon/test/utils"
+import { CharacterSequence, DelimitedChunkReader } from "spliterator"
+import { NodeFileResource } from "spliterator/node/fs"
+import { fixturesDirectory } from "spliterator/test/utils"
 import { createReadStream, createWriteStream } from "node:fs"
 import * as fs from "node:fs/promises"
 import { pipeline } from "node:stream/promises"

@@ -4,10 +4,11 @@
  * @author Teffen Ellis, et al.
  */
 
-import { AsyncDelimitedGeneratorInit, DelimitedGenerator, DelimitedGeneratorInit } from "./DelimitedGenerator.js"
-import { AsyncDataResource, TypedArray } from "./shared.js"
+import { CharacterSequenceInput } from "./CharacterSequence.js"
+import { AsyncDataResource } from "./shared.js"
+import { AsyncSpliteratorInit, Spliterator, SpliteratorInit } from "./Spliterator.js"
 
-export interface DelimitedTextGeneratorOptions {
+export interface TextSpliteratorInit {
 	/**
 	 * The encoding to use when decoding the data.
 	 *
@@ -28,22 +29,24 @@ export interface DelimitedTextGeneratorOptions {
 	ignoreBOM?: boolean
 }
 
-export abstract class DelimitedTextGenerator {
+export abstract class TextSpliterator {
 	constructor() {
-		throw new TypeError("Static class cannot be instantiated. Did you mean `DelimitedTextGenerator.from`?")
+		throw new TypeError("Static class cannot be instantiated. Did you mean `TextSpliterator.from`?")
 	}
 
 	/**
 	 * @yields Each row as a string.
 	 */
 	static *from(
-		source: TypedArray | string,
-		{ encoding, fatal, ignoreBOM, ...options }: DelimitedTextGeneratorOptions & DelimitedGeneratorInit = {}
+		source: CharacterSequenceInput,
+		{ encoding, fatal, ignoreBOM, ...options }: TextSpliteratorInit & SpliteratorInit = {}
 	): Generator<string> {
 		const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
 		let rowCursor = 0
 
-		for (const row of DelimitedGenerator.from(source, options)) {
+		const spliterator = Spliterator.from(source, options)
+
+		for (const row of spliterator) {
 			let decoded: string
 
 			try {
@@ -68,12 +71,13 @@ export abstract class DelimitedTextGenerator {
 	 */
 	static async *fromAsync(
 		source: AsyncDataResource,
-		{ encoding, fatal, ignoreBOM, ...options }: DelimitedTextGeneratorOptions & AsyncDelimitedGeneratorInit = {}
+		{ encoding, fatal, ignoreBOM, ...options }: TextSpliteratorInit & AsyncSpliteratorInit = {}
 	): AsyncGenerator<string> {
 		const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
 		let rowCursor = 0
+		const spliterator = await Spliterator.fromAsync(source, options)
 
-		for await (const row of DelimitedGenerator.fromAsync(source, options)) {
+		for await (const row of spliterator) {
 			let decoded: string
 
 			try {

@@ -4,8 +4,8 @@
  * @author Teffen Ellis, et al.
  */
 
-import { AsyncSlidingWindow, CharacterSequence, DelimitedChunkReader } from "@sister.software/ribbon"
-import { NodeFileResource } from "@sister.software/ribbon/node/fs"
+import { AsyncSlidingWindow, CharacterSequence, DelimitedChunkReader } from "spliterator"
+import { NodeFileResource } from "spliterator/node/fs"
 import { test } from "vitest"
 import { fixturesDirectory } from "./utils.js"
 

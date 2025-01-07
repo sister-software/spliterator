@@ -5,21 +5,7 @@
  */
 
 import { CharacterSequence, CharacterSequenceInput } from "./CharacterSequence.js"
-import { applyReaderPolyfill, ByteRangeReader, FileResourceLike, TypedArray } from "./shared.js"
-
-/**
- * A tuple representing a window of bytes in a buffer.
- */
-export type ByteRange = [
-	/**
-	 * The starting byte index of the window.
-	 */
-	start: number,
-	/**
-	 * The ending byte index of the window.
-	 */
-	end: number,
-]
+import { applyReaderPolyfill, ByteRange, ByteRangeReader, FileResourceLike, TypedArray } from "./shared.js"
 
 export interface SlidingWindowInit {
 	/**

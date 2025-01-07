@@ -4,7 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import { CompositeDataView } from "@sister.software/ribbon"
+import { CompositeDataView } from "spliterator"
 import { describe, expect, it } from "vitest"
 
 describe("CompositeTypedArray", { skip: true }, () => {
