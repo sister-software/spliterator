@@ -51,7 +51,7 @@ export class Spliterator<R extends DataView | ArrayBuffer = Uint8Array> implemen
 	 * @param source - The data resource to read from.
 	 * @param init - The initialization options for the generator.
 	 */
-	static from(source: CharacterSequenceInput, init?: SpliteratorInit): Spliterator
+	static from(source: DataView | ArrayBuffer | Buffer | Iterable<number>, init?: SpliteratorInit): Spliterator
 	/**
 	 * Create a new delimited generator from an asynchronous byte stream.
 	 *

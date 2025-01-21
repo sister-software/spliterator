@@ -150,7 +150,7 @@ export abstract class CSVSpliterator {
 		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? Delimiters.Comma)
 		const columnSpliteratorInit: SpliteratorInit = { delimiter: columnDelimiter }
 
-		const rows = Spliterator.from(source, rowInit)
+		const rows = Spliterator.fromSync(source, rowInit)
 
 		if (header) {
 			const result = rows.next()
