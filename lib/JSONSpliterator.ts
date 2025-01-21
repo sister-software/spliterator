@@ -47,7 +47,7 @@ export abstract class JSONSpliterator {
 	static async *fromAsync<T = unknown>(source: AsyncDataResource, options: AsyncSpliteratorInit = {}) {
 		const decoder = new TextDecoder()
 		let rowCursor = 0
-		const spliterator = await Spliterator.fromAsync(source, options)
+		const spliterator = await Spliterator.from(source, options)
 
 		for await (const row of spliterator) {
 			let parsed: T

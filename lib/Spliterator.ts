@@ -5,9 +5,14 @@
  */
 
 import { AsyncSpliterator, AsyncSpliteratorInit, SpliteratorInit } from "./AsyncSpliterator.js"
-import { CharacterSequence, CharacterSequenceInput, normalizeCharacterInput } from "./CharacterSequence.js"
+import {
+	CharacterSequence,
+	CharacterSequenceInput,
+	debugAsVisibleCharacters,
+	normalizeCharacterInput,
+} from "./CharacterSequence.js"
 import { IndexQueue } from "./IndexQueue.js"
-import { type ByteRange } from "./shared.js"
+import { AsyncChunkIterator, AsyncDataResource, isFileHandleLike, type ByteRange } from "./shared.js"
 
 export { AsyncSpliterator }
 
@@ -16,7 +21,7 @@ export type { AsyncSpliteratorInit, SpliteratorInit }
 /**
  * A byte stream delimiting iterator.
  */
-export class Spliterator implements IterableIterator<Uint8Array>, Disposable {
+export class Spliterator<R extends DataView | ArrayBuffer = Uint8Array> implements IterableIterator<R>, Disposable {
 	//#region Lifecycle
 
 	/**
@@ -36,8 +41,87 @@ export class Spliterator implements IterableIterator<Uint8Array>, Disposable {
 	 * @param source - The data resource to read from.
 	 * @param init - The initialization options for the generator.
 	 */
-	static from<T extends CharacterSequenceInput>(source: T, init: SpliteratorInit = {}): Spliterator {
+	static fromSync<T extends CharacterSequenceInput>(source: T, init: SpliteratorInit = {}): Spliterator {
 		return new Spliterator(normalizeCharacterInput(source), init)
+	}
+
+	/**
+	 * Create a spliterator from an iterable resource such as a buffer, array, or string.
+	 *
+	 * @param source - The data resource to read from.
+	 * @param init - The initialization options for the generator.
+	 */
+	static from(source: CharacterSequenceInput, init?: SpliteratorInit): Spliterator
+	/**
+	 * Create a new delimited generator from an asynchronous byte stream.
+	 *
+	 * @param source - The data resource to read from.
+	 * @param init - The initialization options for the generator.
+	 *
+	 * @returns A new generator instance, yielding byte ranges.
+	 */
+	static from(source: AsyncChunkIterator, init?: AsyncSpliteratorInit): AsyncSpliterator
+	/**
+	 * Create a new delimited generator from a resource such as a file handle or URL.
+	 *
+	 * @param source - The data resource to read from.
+	 * @param init - The initialization options for the generator.
+	 *
+	 * @returns A new generator instance, yielding byte ranges.
+	 */
+	static from(source: AsyncDataResource, init?: AsyncSpliteratorInit): Promise<AsyncSpliterator>
+	/**
+	 * Create a new delimited generator from a resource such as a file handle, URL, or byte stream.
+	 *
+	 * @param source - The data resource to read from.
+	 * @param init - The initialization options for the generator.
+	 *
+	 * @returns A new generator instance, yielding byte ranges.
+	 */
+	/**
+	 * Create a new delimited generator from a resource such as a file handle, URL, or byte stream.
+	 *
+	 * @param source - The data resource to read from.
+	 * @param init - The initialization options for the generator.
+	 *
+	 * @returns A new generator instance, yielding byte ranges.
+	 */
+	static from(
+		source: CharacterSequenceInput | AsyncDataResource | AsyncChunkIterator,
+		init?: SpliteratorInit & AsyncSpliteratorInit
+	): Spliterator | AsyncSpliterator | Promise<AsyncSpliterator>
+	static from(
+		source: CharacterSequenceInput | AsyncDataResource | AsyncChunkIterator,
+		init: SpliteratorInit & AsyncSpliteratorInit = {}
+	): Spliterator | AsyncSpliterator | Promise<AsyncSpliterator> {
+		if (typeof source === "object" && Symbol.asyncIterator in source) {
+			return new AsyncSpliterator(source, init)
+		}
+
+		if (typeof source === "string" || source instanceof URL || isFileHandleLike(source)) {
+			return import("spliterator/node/fs").then(async ({ createChunkIterator }) => {
+				const chunkIterator = await createChunkIterator(source, {
+					highWaterMark: init.highWaterMark,
+				})
+
+				return new AsyncSpliterator(chunkIterator, init)
+			})
+		}
+
+		return new Spliterator(normalizeCharacterInput(source), init)
+	}
+
+	/**
+	 * Create a new delimited generator from a data resource.
+	 */
+	public static toTransformStream(init: SpliteratorInit): TransformStream<Uint8Array, Uint8Array[]> {
+		return new TransformStream<Uint8Array, Uint8Array[]>({
+			transform(chunk, controller) {
+				const spliterator = new Spliterator(chunk, init)
+
+				controller.enqueue(spliterator.toArray())
+			},
+		})
 	}
 
 	/**
@@ -91,6 +175,11 @@ export class Spliterator implements IterableIterator<Uint8Array>, Disposable {
 	readonly #needle: CharacterSequence
 
 	/**
+	 * The byte sequence for a double quote.
+	 */
+	readonly #doubleQuoteSequence: CharacterSequence = new CharacterSequence('"')
+
+	/**
 	 * How many yields to skip.
 	 */
 	readonly #yieldDropCount: number
@@ -135,9 +224,14 @@ export class Spliterator implements IterableIterator<Uint8Array>, Disposable {
 	#readPosition: number
 
 	/**
-	 * The last byte range seen while draining the buffer.
+	 * A bit of a hack to keep track of double quotes.
 	 */
-	#lastByteRangeSeen: ByteRange | undefined
+	#doubleQuoteStartIndex = -1
+
+	/**
+	 * The previous byte range seen while draining the buffer.
+	 */
+	#previousByteRange: ByteRange | undefined
 
 	/**
 	 * Whether to output debug information.
@@ -181,65 +275,142 @@ export class Spliterator implements IterableIterator<Uint8Array>, Disposable {
 		}
 	}
 
+	#drain(): void {
+		const sourceByteLength = this.#source.byteLength
+
+		this.#log("Reached end of file. Preparing to finalize.")
+
+		// There's a few special cases we could get this far and not have drained the buffer.
+		const lastByteRange = this.#previousByteRange
+
+		if (lastByteRange) {
+			const lastByteIndex = lastByteRange[1]
+
+			// There's a special case where the last delimiter is at the end of the *file*.
+
+			// We need to determine if we're at the end of the *file* and there's no delimiter.
+			const possibleDelimiterIndex = this.#needle.search(this.#source, sourceByteLength - this.#needle.length)
+
+			if (possibleDelimiterIndex !== -1) {
+				this.#log("Inserted byte range at the last delimiter", [possibleDelimiterIndex, sourceByteLength])
+				// We found a delimiter at the end of the file, so we enqueue the byte range.
+				this.#indices.enqueue([possibleDelimiterIndex + this.#needle.length, sourceByteLength])
+			} else {
+				this.#log("Inserted byte range at the last byte", [lastByteIndex, sourceByteLength])
+				// The file didn't end with a delimiter, so we just enqueue the last byte range.
+				this.#indices.enqueue([lastByteIndex + this.#needle.length, sourceByteLength])
+			}
+		} else if (this.#yieldCount === 0) {
+			// We didn't find any delimiters in the file, so we just enqueue the whole buffer.
+			this.#indices.enqueue([0, sourceByteLength])
+		}
+
+		this.#done = true
+	}
+
 	/**
 	 * Fill the buffer with data and search for delimiters.
 	 */
 	#fill(): void {
 		const sourceByteLength = this.#source.byteLength
 
-		if (this.#readPosition === sourceByteLength) {
-			this.#log("Reached end of file. Preparing to finalize.")
-
-			// There's a few special cases we could get this far and not have drained the buffer.
-			const lastByteRange = this.#lastByteRangeSeen
-
-			if (lastByteRange) {
-				const lastByteIndex = lastByteRange[1]
-
-				// There's a special case where the last delimiter is at the end of the *file*.
-
-				if (lastByteIndex < sourceByteLength) {
-					// We need to determine if we're at the end of the *file* and there's no delimiter.
-					const possibleDelimiterIndex = this.#needle.search(this.#source, sourceByteLength - this.#needle.length)
-
-					if (possibleDelimiterIndex !== -1) {
-						this.#log("Inserted byte range at the last delimiter", [possibleDelimiterIndex, sourceByteLength])
-						// We found a delimiter at the end of the file, so we enqueue the byte range.
-						this.#indices.enqueue([possibleDelimiterIndex + this.#needle.length, sourceByteLength])
-					} else {
-						this.#log("Inserted byte range at the last byte", [lastByteIndex, sourceByteLength])
-						// The file didn't end with a delimiter, so we just enqueue the last byte range.
-						this.#indices.enqueue([lastByteIndex + this.#needle.length, sourceByteLength])
-					}
-				} else {
-					this.#log(
-						`Weird situation. We're at the end of the file, but the last byte range ${lastByteIndex} is greater than the buffer length ${sourceByteLength}.`
-					)
-				}
-			} else if (this.#yieldCount === 0) {
-				// We didn't find any delimiters in the file, so we just enqueue the whole buffer.
-				this.#indices.enqueue([0, sourceByteLength])
-			}
-
-			this.#done = true
-
-			return
-		}
-
 		while (this.#readPosition < sourceByteLength && this.#indices.byteLength < this.#highWaterMark) {
-			// Unlike the async version, we can keep reading until our indices match the high water mark.
-			const delimiterIndex = this.#needle.search(this.#source, this.#readPosition)
+			const doubleQuoteStartIndex = this.#doubleQuoteStartIndex
 
-			if (delimiterIndex === -1) {
-				this.#log(`No viable byte range found in buffer. Breaking.`)
+			let nextDoubleQuoteIndex: number
+			let delimiterSearchStart = this.#readPosition
+			let sliceEnd: number
+			let sliceStart: number = this.#readPosition
+
+			// if (doubleQuoteStartIndex !== -1) {
+			// 	nextDoubleQuoteIndex = this.#doubleQuoteSequence.search(this.#source, doubleQuoteStartIndex + 1)
+			// } else {
+			// 	nextDoubleQuoteIndex = this.#doubleQuoteSequence.search(this.#source, this.#readPosition)
+
+			// }
+
+			// 	if (nextDoubleQuoteIndex !== -1) {
+			// 		console.log("Next double quote at", nextDoubleQuoteIndex)
+
+			// 		delimiterSearchStart = nextDoubleQuoteIndex + 1
+			// 	} else {
+			// 		// console.log("No double quote found after previous double quote")
+
+			// 		delimiterSearchStart = this.#readPosition
+			// 	}
+
+			// 	this.#doubleQuoteStartIndex = -1
+			// } else {
+			// 	// console.log("Searching for double quote at read position", this.#readPosition)
+
+			// 	nextDoubleQuoteIndex = this.#doubleQuoteSequence.search(this.#source, this.#readPosition)
+
+			// 	if (nextDoubleQuoteIndex !== -1) {
+			// 		console.log("Found double quote at", nextDoubleQuoteIndex)
+			// 		this.#doubleQuoteStartIndex = nextDoubleQuoteIndex
+			// 		sliceStart = doubleQuoteStartIndex + 1
+
+			// 		delimiterSearchStart = nextDoubleQuoteIndex + 1
+			// 	} else {
+			// 		// console.log("No double quote found at read position")
+
+			// 		delimiterSearchStart = this.#readPosition
+			// 	}
+			// }
+			let delimiterIndex: number
+
+			while (true) {
+				delimiterIndex = this.#needle.search(this.#source, delimiterSearchStart)
+
+				if (delimiterIndex === -1) {
+					// this.#log(`No delimiters left. Breaking.`)
+					return
+				}
+
+				nextDoubleQuoteIndex = this.#doubleQuoteSequence.search(this.#source, delimiterSearchStart, delimiterIndex)
+
+				// Didn't find a double quote before the delimiter.
+				if (nextDoubleQuoteIndex === -1 && this.#doubleQuoteStartIndex === -1) {
+					// And we haven't found a double quote before.
+					sliceEnd = delimiterIndex
+
+					this.#readPosition = sliceEnd + this.#needle.length
+
+					break
+				}
+
+				if (nextDoubleQuoteIndex !== -1) {
+					// We found a double quote before the delimiter...
+
+					if (this.#doubleQuoteStartIndex === -1) {
+						// But this is the first double quote we've found.
+						this.#doubleQuoteStartIndex = nextDoubleQuoteIndex
+
+						delimiterSearchStart = delimiterIndex + 1
+						continue
+					} else {
+						sliceStart = this.#doubleQuoteStartIndex + 1
+					}
+				}
+
+				// We found a double quote before the delimiter, but it's not the first one.
+				sliceEnd = delimiterIndex - 1
+
+				this.#readPosition = delimiterIndex + this.#needle.length
+				this.#doubleQuoteStartIndex = -1
+
 				break
 			}
 
-			this.#log("Found byte range", [this.#readPosition, delimiterIndex])
+			const byteRange: ByteRange = [sliceStart, sliceEnd]
 
-			this.#indices.enqueue([this.#readPosition, delimiterIndex])
+			// this.#log("Found byte ranges", byteRange)
+			this.#log(
+				`${byteRange} --> (${sliceStart - delimiterSearchStart})`,
+				debugAsVisibleCharacters(this.#source.subarray(...byteRange))
+			)
 
-			this.#readPosition = delimiterIndex + this.#needle.length
+			this.#indices.enqueue(byteRange)
 		}
 	}
 
@@ -250,15 +421,22 @@ export class Spliterator implements IterableIterator<Uint8Array>, Disposable {
 	/**
 	 * Read the next byte range from the source.
 	 */
-	public next(): IteratorResult<Uint8Array> {
+	public next(): IteratorResult<R> {
 		if (this.#done || this.#yieldCount >= this.#yieldStopCount) return this.#finalize()
 
-		if (this.#indices.size === 0) {
-			this.#fill()
+		if (!this.#indices.size) this.#fill()
+
+		if (!this.#indices.size) {
+			this.#drain()
 		}
 
-		const currentByteRange = this.#indices.dequeue()!
-		this.#lastByteRangeSeen = currentByteRange
+		const currentByteRange = this.#indices.dequeue()
+		this.#previousByteRange = currentByteRange
+
+		if (!currentByteRange) {
+			this.#done = true
+			return this.#finalize()
+		}
 
 		const [start, end] = currentByteRange
 
@@ -277,15 +455,18 @@ export class Spliterator implements IterableIterator<Uint8Array>, Disposable {
 		this.#yieldedByteLength += end - start
 
 		return {
-			value: slice,
+			value: slice as unknown as R,
 			done: false,
 		}
 	}
 
 	/**
 	 * Collect all the byte ranges from the file.
+	 *
+	 * @returns An array of encoded byte ranges.
+	 * @see {@linkcode toDecodedArray} to automatically decode the byte ranges.
 	 */
-	public toArray(): Uint8Array[] {
+	public toArray(): R[] {
 		return Array.from(this)
 	}
 
@@ -296,7 +477,7 @@ export class Spliterator implements IterableIterator<Uint8Array>, Disposable {
 		return Array.from(this, (bytes) => decoder.decode(bytes))
 	}
 
-	public [Symbol.iterator](): IterableIterator<Uint8Array> {
+	public [Symbol.iterator](): IterableIterator<R> {
 		return this
 	}
 }

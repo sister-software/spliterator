@@ -5,7 +5,7 @@
  */
 
 import { AsyncSpliterator, Spliterator } from "spliterator"
-import { NodeFileResource } from "spliterator/node/fs"
+import { createChunkIterator } from "spliterator/node/fs"
 import { test } from "vitest"
 import { fixturesDirectory, loadFixture } from "./utils.js"
 
@@ -17,13 +17,13 @@ test("Synchronous parity with String.prototype.split", async ({ expect }) => {
 	expect(fixture.decodedLines, "Fixture has lines").not.toHaveLength(0)
 
 	const generator = Spliterator.from(fixture.bytes, { skipEmpty: false })
-	const encodedLines = Array.from(generator)
+	const encodedLines = generator.toArray()
 	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
 
-	expect(encodedLines.length, `Async delimiter matches line length`).equal(fixture.encodedLines.length)
+	expect(encodedLines.length, "Async delimiter matches line length").equal(fixture.encodedLines.length)
 
-	expect(decodedLines, `Decoded lines match`).toMatchObject(fixture.decodedLines)
-	expect(encodedLines, `Encoded lines match`).toMatchObject(fixture.encodedLines)
+	expect(decodedLines, "Decoded lines match").toMatchObject(fixture.decodedLines)
+	expect(encodedLines, "Encoded lines match").toMatchObject(fixture.encodedLines)
 })
 
 test("Synchronous parity with present lines", async ({ expect }) => {
@@ -37,9 +37,9 @@ test("Synchronous parity with present lines", async ({ expect }) => {
 	const encodedLines = Array.from(generator)
 	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
 
-	expect(encodedLines.length, `Delimiter matches line length`).equal(presentFixtureLines.length)
+	expect(encodedLines.length, "Delimiter matches line length").equal(presentFixtureLines.length)
 
-	expect(decodedLines, `Decoded lines match`).toMatchObject(presentFixtureLines)
+	expect(decodedLines, "Decoded lines match").toMatchObject(presentFixtureLines)
 })
 
 test("Asynchronous content parity with String.prototype.split", async ({ expect, onTestFinished }) => {
@@ -48,10 +48,10 @@ test("Asynchronous content parity with String.prototype.split", async ({ expect,
 	const fixturePath = fixturesDirectory("phonetic-single-spaced.txt")
 	const fixture = await loadFixture(fixturePath)
 
-	const file = await NodeFileResource.open(fixturePath)
-	onTestFinished(() => file.dispose())
+	const chunkIterator = await createChunkIterator(fixturePath)
+	onTestFinished(() => chunkIterator[Symbol.asyncDispose]?.())
 
-	const lineGenerator = new AsyncSpliterator(file, { skipEmpty: false })
+	const lineGenerator = new AsyncSpliterator(chunkIterator, { skipEmpty: false })
 	const encodedLines = await Array.fromAsync(lineGenerator)
 
 	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
@@ -59,13 +59,16 @@ test("Asynchronous content parity with String.prototype.split", async ({ expect,
 	expect(decodedLines.length, "Decoded line count matches").equal(fixture.decodedLines.length)
 	expect(decodedLines, "Decoded lines match").toMatchObject(fixture.decodedLines)
 	expect(encodedLines, "Encoded lines match").toMatchObject(fixture.encodedLines)
+})
 
-	const encodedReadStream = ReadableStream.from(encodedLines)
+test("Asynchronous content parity with readable streams", async ({ expect, onTestFinished }) => {
+	const fixturePath = fixturesDirectory("phonetic-single-spaced.txt")
+	const fixture = await loadFixture(fixturePath)
 
-	const encodedStreamLines = await Array.fromAsync(encodedReadStream)
-	expect(encodedStreamLines, "Encoded stream lines match").toMatchObject(fixture.encodedLines)
+	const chunkIterator = await createChunkIterator(fixturePath)
+	onTestFinished(() => chunkIterator[Symbol.asyncDispose]?.())
 
-	const decodedReaderSource = new AsyncSpliterator(file)
+	const decodedReaderSource = new AsyncSpliterator(chunkIterator)
 
 	const decodedReadStream = ReadableStream
 		// ---
@@ -86,16 +89,17 @@ test("Asynchronous parity with present lines", async ({ expect, onTestFinished }
 	const fixture = await loadFixture(fixturePath)
 	const presentFixtureLines = fixture.decodedLines.map((line) => line.trim()).filter(Boolean)
 
-	const fileHandle = await NodeFileResource.open(fixturePath)
-	onTestFinished(() => fileHandle.dispose())
-	const generator = await Spliterator.fromAsync(fileHandle)
+	const chunkIterator = await createChunkIterator(fixturePath)
+	onTestFinished(() => chunkIterator[Symbol.asyncDispose]?.())
+
+	const generator = Spliterator.from(chunkIterator)
 
 	const encodedLines = await Array.fromAsync(generator)
 	const decodedLines = Array.from(encodedLines, (line) => decoder.decode(line))
 
-	expect(encodedLines.length, `Async delimiter matches line length`).equal(presentFixtureLines.length)
+	expect(encodedLines.length, "Async delimiter matches line length").equal(presentFixtureLines.length)
 
-	expect(decodedLines, `Decoded lines match`).toMatchObject(presentFixtureLines)
+	expect(decodedLines, "Decoded lines match").toMatchObject(presentFixtureLines)
 })
 
 test("Newline: Double spaced", async ({ expect, onTestFinished }) => {
@@ -106,8 +110,8 @@ test("Newline: Double spaced", async ({ expect, onTestFinished }) => {
 		delimiter: "\n",
 	})
 
-	const file = await NodeFileResource.open(fixturePath)
-	onTestFinished(() => file.dispose())
+	const file = await createChunkIterator(fixturePath)
+	onTestFinished(() => file[Symbol.asyncDispose]?.())
 
 	const lineGenerator = new AsyncSpliterator(file, {
 		delimiter: "\n",
@@ -130,8 +134,8 @@ test("Carriage-Return: Single spaced", async ({ expect, onTestFinished }) => {
 		delimiter: "\r\n",
 	})
 
-	const file = await NodeFileResource.open(fixturePath)
-	onTestFinished(() => file.dispose())
+	const file = await createChunkIterator(fixturePath)
+	onTestFinished(() => file[Symbol.asyncDispose]?.())
 
 	const lineGenerator = new AsyncSpliterator(file, {
 		delimiter: "\r\n",
@@ -154,10 +158,10 @@ test("Carriage-Return: Double spaced", async ({ expect, onTestFinished }) => {
 		delimiter: "\r\n",
 	})
 
-	const file = await NodeFileResource.open(fixturePath)
-	onTestFinished(() => file.dispose())
+	const chunkIterator = await createChunkIterator(fixturePath)
+	onTestFinished(() => chunkIterator[Symbol.asyncDispose]?.())
 
-	const lineGenerator = new AsyncSpliterator(file, {
+	const lineGenerator = new AsyncSpliterator(chunkIterator, {
 		delimiter: "\r\n",
 		skipEmpty: false,
 	})

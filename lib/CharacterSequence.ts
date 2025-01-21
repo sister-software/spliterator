@@ -4,8 +4,6 @@
  * @author Teffen Ellis, et al.
  */
 
-import { TypedArray } from "./shared.js"
-
 /**
  * Type-predicate to determine if a value is an array-like object.
  */
@@ -22,7 +20,7 @@ export function isArrayLike<T>(input: unknown): input is ArrayLike<T> {
  * - A buffer.
  * - An iterable of character codes.
  */
-export type CharacterSequenceInput = number | string | Uint8Array | Buffer | Iterable<number>
+export type CharacterSequenceInput = number | string | DataView | ArrayBuffer | Buffer | Iterable<number>
 
 /**
  * Common delimiter values.
@@ -142,33 +140,37 @@ export class CharacterSequence extends Uint8Array {
 	/**
 	 * Perform a Boyer-Moore-Horspool search for the pattern in the text.
 	 *
-	 * @param text The encoded text to search.
+	 * @param haystack The encoded text to search.
 	 * @param start The byte index to start searching from.
+	 * @param end The byte index to stop searching at.
 	 *
 	 * @returns The byte index of the pattern in the text, or -1 if not found.
 	 */
-	public search(text: Uint8Array, start: number = 0): number {
-		const n = text.length
-		const m = this.length
+	public search(haystack: Uint8Array, start: number = 0, end = haystack.length): number {
+		const sequenceLength = this.length
 
-		let i = start
+		let startIndex = start
 
-		while (i <= n - m) {
-			let j = m - 1
+		while (startIndex <= end - sequenceLength) {
+			let lastIndex = sequenceLength - 1
 
 			// Match pattern from right to left
-			while (j >= 0 && this[j] === text[i + j]) {
-				j--
+			while (lastIndex >= 0 && this[lastIndex] === haystack[startIndex + lastIndex]) {
+				lastIndex--
 			}
 
 			// Pattern found
-			if (j < 0) return i
+			if (lastIndex < 0) return startIndex
 
 			// Jump based on the last character in the window
-			i += this.#skipIndex[text[i + m - 1]!]!
+			startIndex += this.#skipIndex[haystack[startIndex + sequenceLength - 1]!]!
 		}
 
 		return -1
+	}
+
+	public decode(encoding: string = "utf-8"): string {
+		return new TextDecoder(encoding).decode(this)
 	}
 
 	/**
@@ -186,54 +188,4 @@ export class CharacterSequence extends Uint8Array {
 			this.#skipIndex[this[i]!] = this.length - 1 - i
 		}
 	}
-}
-
-const encoder = new TextEncoder()
-
-/**
- * Given a delimited line, split it into fields using the specified separator.
- *
- * Unlike `String.prototype.split`, this function correctly handles fields that contain the
- * separator character within double quotes.
- *
- * @param source The line to split.
- * @param needle The character that separates fields.
- * @yields Each field in the line.
- */
-export function* takeDelimited<T extends TypedArray | string>(
-	source: T,
-	needle: Uint8Array = new CharacterSequence(",")
-) {
-	const haystack = (typeof source === "string" ? encoder.encode(source) : source) as Exclude<T, string>
-
-	const contentDelimiters: number[] = []
-	let doubleQuoteCount = 0
-
-	// First, we traverse the line to find the field delimiters...
-	for (let byteIndex = 0; byteIndex < haystack.byteLength; byteIndex++) {
-		const byte = haystack[byteIndex]
-
-		if (byte === Delimiters.DoubleQuote) {
-			doubleQuoteCount++
-		}
-
-		// TODO: handle escaped double quotes
-		// TODO: handle delimiters with a length greater than 1
-		if (byte === needle[0] && doubleQuoteCount % 2 === 0) {
-			contentDelimiters.push(byteIndex)
-		}
-	}
-
-	// Now, we slice the line into fields.
-	let sliceStart = 0
-
-	for (let delimiterIndex = 0; delimiterIndex < contentDelimiters.length; delimiterIndex++) {
-		const sliceEnd = contentDelimiters[delimiterIndex]!
-
-		yield haystack.subarray(sliceStart, sliceEnd)
-		sliceStart = sliceEnd + 1
-	}
-
-	// Finally, our last slice is the remainder of the line.
-	yield haystack.subarray(sliceStart)
 }

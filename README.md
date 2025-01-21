@@ -80,7 +80,23 @@ for await (const columns of reader) {
 }
 ```
 
-## Advanced usage
+## CLI Usage
+
+Spliterator also includes a CLI tool that can be used to stream delimited content from the command line, transform it, filter it, and more.
+
+```bash
+spliterator csv people.csv people.jsonl
+```
+
+The CLI also supports reading from standard input:
+
+```bash
+cat people.csv | spliterator csv people.jsonl
+```
+
+For information on all available commands, run `spliterator --help`.
+
+## Advanced Usage
 
 Spliterator includes a collection of low-level classes and interfaces that can be used to create custom generators for any kind of delimited content.
 

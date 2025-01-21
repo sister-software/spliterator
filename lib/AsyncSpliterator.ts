@@ -4,17 +4,11 @@
  * @author Teffen Ellis, et al.
  */
 
+import { ReadableStream, ReadableWritablePair, StreamPipeOptions } from "stream/web"
 import { BufferController } from "./BufferController.js"
 import { CharacterSequence, CharacterSequenceInput } from "./CharacterSequence.js"
 import { IndexQueue } from "./IndexQueue.js"
-import {
-	applyReaderPolyfill,
-	AsyncDataResource,
-	type ByteRange,
-	type ByteRangeReader,
-	type FileResourceLike,
-	isFileResourceLike,
-} from "./shared.js"
+import { AsyncChunkIterator, AsyncDataResource, type ByteRange } from "./shared.js"
 
 /**
  * Initialization options for creating a spliterator.
@@ -82,11 +76,11 @@ export interface AsyncSpliteratorInit extends SpliteratorInit {
 	highWaterMark?: number
 
 	/**
-	 * Whether to close the file handle after completion.
+	 * Whether to automatically dispose of the source once the iterator is done.
 	 *
 	 * @default true
 	 */
-	autoClose?: boolean
+	autoDispose?: boolean
 }
 
 /**
@@ -104,28 +98,56 @@ export interface AsyncSpliteratorInit extends SpliteratorInit {
  *
  * @see {@linkcode Spliterator} for the synchronous version.
  */
-export class AsyncSpliterator implements AsyncIterableIterator<Uint8Array>, AsyncDisposable {
+export class AsyncSpliterator<R extends DataView | ArrayBuffer = Uint8Array>
+	implements AsyncIterableIterator<R>, AsyncDisposable
+{
 	//#region Lifecycle
 
 	/**
-	 * Create a new delimited generator from a data resource.
-	 *
-	 * Unlike the constructor, this method can be used to create a generator from a file path or URL.
+	 * Create a new delimited generator from an asynchronous byte stream.
 	 *
 	 * @param source - The data resource to read from.
 	 * @param init - The initialization options for the generator.
+	 *
+	 * @returns A new generator instance, yielding byte ranges.
 	 */
-	static async from(source: AsyncDataResource, init: AsyncSpliteratorInit = {}): Promise<AsyncSpliterator> {
-		let file: FileResourceLike
-
-		if (isFileResourceLike(source)) {
-			file = source
-		} else {
-			const { NodeFileResource } = await import("spliterator/node/fs")
-			file = await NodeFileResource.open(source)
+	static from(source: AsyncChunkIterator, init?: AsyncSpliteratorInit): AsyncSpliterator
+	/**
+	 * Create a new delimited generator from a resource such as a file handle or URL.
+	 *
+	 * @param source - The data resource to read from.
+	 * @param init - The initialization options for the generator.
+	 *
+	 * @returns A new generator instance, yielding byte ranges.
+	 */
+	static from(source: AsyncDataResource, init?: AsyncSpliteratorInit): Promise<AsyncSpliterator>
+	/**
+	 * Create a new delimited generator from a resource such as a file handle, URL, or byte stream.
+	 *
+	 * @param source - The data resource to read from.
+	 * @param init - The initialization options for the generator.
+	 *
+	 * @returns A new generator instance, yielding byte ranges.
+	 */
+	static from(
+		source: AsyncDataResource | AsyncChunkIterator,
+		init?: AsyncSpliteratorInit
+	): AsyncSpliterator | Promise<AsyncSpliterator>
+	static from(
+		source: AsyncDataResource | AsyncChunkIterator,
+		init: AsyncSpliteratorInit = {}
+	): AsyncSpliterator | Promise<AsyncSpliterator> {
+		if (typeof source === "object" && Symbol.asyncIterator in source) {
+			return new AsyncSpliterator(source, init)
 		}
 
-		return new AsyncSpliterator(file, init)
+		return import("spliterator/node/fs").then(async ({ createChunkIterator }) => {
+			const chunkIterator = await createChunkIterator(source, {
+				highWaterMark: init.highWaterMark,
+			})
+
+			return new AsyncSpliterator(chunkIterator, init)
+		})
 	}
 
 	/**
@@ -135,34 +157,42 @@ export class AsyncSpliterator implements AsyncIterableIterator<Uint8Array>, Asyn
 		this.#indices.clear()
 		this.#controller.clear()
 
-		if (this.#autoClose) {
-			await this.#file[Symbol.asyncDispose]?.()
+		if (this.#autoDispose) {
+			await this.#source[Symbol.asyncDispose]?.()
 		}
 	}
 
 	/**
-	 * Create a new delimited generator from a file handle.
+	 * Create a new delimited generator from a data resource.
+	 */
+	public static toTransformStream(init: SpliteratorInit): TransformStream<AsyncChunkIterator, Uint8Array> {
+		return new TransformStream<AsyncChunkIterator, Uint8Array>({
+			async transform(chunk, controller) {
+				const spliterator = await AsyncSpliterator.from(chunk, init)
+
+				for await (const slice of spliterator) {
+					controller.enqueue(slice)
+				}
+			},
+		})
+	}
+
+	/**
+	 * Create a new delimited generator from an asynchronous byte stream.
 	 *
-	 * @param file - The file to read from.
+	 * @param source - The file to read from.
 	 * @param init - The initialization options for the generator.
 	 * @see {@linkcode AsyncSpliterator.from} to create a new generator from a data resource.
 	 */
+	constructor(source: AsyncChunkIterator, init: AsyncSpliteratorInit = {}) {
+		this.#source = source
+		this.#chunkReader = source[Symbol.asyncIterator]()
 
-	constructor(file: FileResourceLike, init: AsyncSpliteratorInit = {}) {
-		applyReaderPolyfill(file)
-		this.#file = file
-
-		this.#autoClose = init.autoClose ?? false
+		this.#autoDispose = init.autoDispose ?? false
 
 		this.#needle = new CharacterSequence(init.delimiter)
 
-		this.#readPosition = init.position ?? 0
-
-		this.#totalByteSize = file.size
-
-		this.#yieldByteEstimate = this.#totalByteSize - this.#readPosition
-
-		this.#highWaterMark = Math.max(this.#needle.length * 4, init.highWaterMark ?? 4096)
+		this.#highWaterMark = Math.max(this.#needle.length * 4, init.highWaterMark ?? 4096 * 16)
 
 		this.#yieldDropCount = Math.max(0, init.drop ?? 0)
 		this.#yieldStopCount = Math.max(init.take ?? Infinity, 0) + this.#yieldDropCount
@@ -170,7 +200,7 @@ export class AsyncSpliterator implements AsyncIterableIterator<Uint8Array>, Asyn
 		this.#skipEmpty = init.skipEmpty ?? true
 
 		this.#controller = new BufferController({
-			initialBufferSize: Math.max(this.#needle.length * 4, this.#highWaterMark),
+			initialBufferSize: this.#highWaterMark,
 		})
 
 		this.#debug = init.debug ?? false
@@ -182,14 +212,24 @@ export class AsyncSpliterator implements AsyncIterableIterator<Uint8Array>, Asyn
 	//#region Private Properties
 
 	/**
-	 * The file to read from.
+	 * Whether to call `Symbol.asyncDispose` on the source once the iterator is done.
 	 */
-	readonly #file: FileResourceLike & ByteRangeReader
+	readonly #autoDispose: boolean
 
 	/**
-	 * Whether to close the file handle when the iterator is completed or disposed.
+	 * The source of the data.
 	 */
-	readonly #autoClose: boolean
+	readonly #source: AsyncChunkIterator
+
+	/**
+	 * The chunk reader for the file.
+	 */
+	readonly #chunkReader: AsyncIterator<Uint8Array>
+
+	/**
+	 * The last chunk of data read from the source.
+	 */
+	#lastReadResult: IteratorResult<Uint8Array> | undefined
 
 	/**
 	 * A queue of index tuples marking the start and end of delimiter positions.
@@ -211,18 +251,6 @@ export class AsyncSpliterator implements AsyncIterableIterator<Uint8Array>, Asyn
 	 * the file read operation.
 	 */
 	readonly #controller: BufferController
-
-	/**
-	 * The total byte size of the file.
-	 */
-	readonly #totalByteSize: number
-
-	/**
-	 * The total number of bytes we expect to yield.
-	 *
-	 * We use this to ensure that we don't miss any data when the file is read in chunks.
-	 */
-	readonly #yieldByteEstimate: number
 
 	/**
 	 * How many yields to skip.
@@ -257,10 +285,10 @@ export class AsyncSpliterator implements AsyncIterableIterator<Uint8Array>, Asyn
 	 */
 	#yieldCount = 0
 
-	/**
-	 * The current byte index to perform read operations from.
-	 */
-	#readPosition: number
+	// /**
+	//  * The current byte index to perform read operations from.
+	//  */
+	// #readPosition: number
 
 	/**
 	 * The last byte range seen while draining the buffer.
@@ -309,43 +337,20 @@ export class AsyncSpliterator implements AsyncIterableIterator<Uint8Array>, Asyn
 	 * Read a chunk of data from the file.
 	 */
 	async #read() {
-		// We're extra careful here to ensure that we don't read past the end of the file.
-		// And because `file.read` doesn't expose the number of bytes read,
-		// we keep track of this ourselves.
-		const nextReadLength = Math.min(this.#highWaterMark, this.#totalByteSize - this.#readPosition)
-		// Offset in this context means the byte offset to begin writing to the buffer.
-		const offset = this.#controller.bytesWritten
+		this.#lastReadResult = await this.#chunkReader.next()
 
-		// Before reading we grow the buffer to ensure that we have enough space.
-		const nextBufferSize = Math.max(this.#controller.byteLengthMinimum, offset + nextReadLength)
-		this.#controller.grow(nextBufferSize)
+		if (this.#lastReadResult.done) return
 
-		this.#log("Before read", { cursor: this.#readPosition, nextReadLength, nextBufferSize, offset })
-
-		await this.#file.read({
-			buffer: this.#controller.bytes,
-			offset,
-			position: this.#readPosition,
-			length: nextReadLength,
-		})
-
-		this.#controller.bytesWritten += nextReadLength
-
-		// this.#log(
-		// 	"Inspecting buffer",
-		// 	debugAsVisibleCharacters(this.#controller.bytes.subarray(0, this.#controller.bytesWritten))
-		// )
-
-		this.#readPosition += nextReadLength
+		// Append the chunk to the buffer.
+		this.#controller.set(this.#lastReadResult.value, this.#controller.bytesWritten)
 	}
 
 	/**
 	 * Fill the buffer with data and search for delimiters.
 	 */
 	async #fill(): Promise<void> {
-		if (this.#readPosition === this.#totalByteSize) {
+		if (this.#lastReadResult?.done) {
 			this.#log("Reached end of file. Preparing to finalize.")
-
 			// There's a few special cases we could get this far and not have drained the buffer.
 			const lastByteRange = this.#lastByteRangeSeen
 
@@ -395,7 +400,7 @@ export class AsyncSpliterator implements AsyncIterableIterator<Uint8Array>, Asyn
 		this.#log("Compressing buffer", { nextBufferStart })
 		this.#controller.compress(nextBufferStart)
 
-		while (this.#readPosition < this.#totalByteSize && this.#indices.byteLength < this.#highWaterMark) {
+		while ((!this.#lastReadResult || !this.#lastReadResult.done) && this.#indices.byteLength < this.#highWaterMark) {
 			await this.#read()
 			this.#search()
 		}
@@ -408,21 +413,16 @@ export class AsyncSpliterator implements AsyncIterableIterator<Uint8Array>, Asyn
 			 * number of of yields and the length of the delimiter.
 			 */
 			const expectedYieldedDelimitedBytes = (this.#yieldCount - 1) * this.#needle.length
-			const omittedBytes = this.#yieldByteEstimate - (this.#yieldedByteLength + expectedYieldedDelimitedBytes)
 
 			this.#log({
-				totalByteSize: this.#totalByteSize,
-				readPosition: this.#readPosition,
-				yieldByteEstimate: this.#yieldByteEstimate,
 				yieldedByteLength: this.#yieldedByteLength,
 				yieldCount: this.#yieldCount,
 				expectedYieldedDelimitedBytes,
-				omittedBytes,
 			})
 		}
 
-		if (this.#autoClose) {
-			await this.#file[Symbol.asyncDispose]?.()
+		if (this.#autoDispose) {
+			await this.#source[Symbol.asyncDispose]?.()
 		}
 
 		return {
@@ -435,15 +435,20 @@ export class AsyncSpliterator implements AsyncIterableIterator<Uint8Array>, Asyn
 
 	//#region Iterator Methods
 
-	public async next(): Promise<IteratorResult<Uint8Array>> {
+	public async next(): Promise<IteratorResult<R>> {
 		if (this.#done || this.#yieldCount >= this.#yieldStopCount) return this.#finalize()
 
 		if (this.#indices.size === 0) {
 			await this.#fill()
 		}
 
-		const currentByteRange = this.#indices.dequeue()!
+		const currentByteRange = this.#indices.dequeue()
 		this.#lastByteRangeSeen = currentByteRange
+
+		if (!currentByteRange) {
+			this.#done = true
+			return this.#finalize()
+		}
 
 		const [start, end] = currentByteRange
 
@@ -462,7 +467,7 @@ export class AsyncSpliterator implements AsyncIterableIterator<Uint8Array>, Asyn
 		this.#yieldedByteLength += end - start
 
 		return {
-			value: slice,
+			value: slice as unknown as R,
 			done: false,
 		}
 	}
@@ -472,7 +477,7 @@ export class AsyncSpliterator implements AsyncIterableIterator<Uint8Array>, Asyn
 	 *
 	 * **This method will read the entire file into memory.**
 	 */
-	public toArray(): Promise<Uint8Array[]> {
+	public toArray(): Promise<R[]> {
 		return Array.fromAsync(this)
 	}
 
@@ -485,11 +490,117 @@ export class AsyncSpliterator implements AsyncIterableIterator<Uint8Array>, Asyn
 		return Array.fromAsync(this, (bytes) => decoder.decode(bytes))
 	}
 
+	/**
+	 * Wraps the spliterator in a readable stream.
+	 *
+	 * This is useful for piping the spliterator to other streams.
+	 *
+	 * @returns A readable stream of byte ranges.
+	 */
+	public toReadableStream(): ReadableStream<R> {
+		const iterator = this[Symbol.asyncIterator]()
+
+		return new ReadableStream({
+			pull: async (controller) => {
+				const { done, value } = await iterator.next()
+
+				if (done) {
+					controller.close()
+				} else {
+					controller.enqueue(value)
+				}
+			},
+			cancel: () => this[Symbol.asyncDispose]?.(),
+		})
+	}
+
+	/**
+	 * Pipes the spliterator to a writable stream.
+	 *
+	 * ```ts
+	 * const spliterator = await AsyncSpliterator.from("data.csv")
+	 *
+	 * const textStream = spliterator.pipeTo(new TextDecoderStream())
+	 * ```
+	 *
+	 * @see {@linkcode toReadableStream} to first convert the spliterator to a readable stream.
+	 */
+	public pipeThrough<T>(transform: ReadableWritablePair<T, R>, options?: StreamPipeOptions): ReadableStream<T> {
+		return this.toReadableStream().pipeThrough(transform, options)
+	}
+
+	/**
+	 * Iterate over the byte ranges in the file, yielding each range. between delimiters.
+	 */
 	public [Symbol.asyncIterator]() {
 		return this
 	}
 
 	public return(): Promise<IteratorReturnResult<undefined>> {
 		return this.#finalize()
+	}
+
+	//#endregion
+
+	//#region Experimental
+
+	/**
+	 * Given a file handle containing delimited data and a desired slice count, returns an array of
+	 * slices of the buffer between delimiters.
+	 *
+	 * This is an advanced function so an analogy is provided:
+	 *
+	 * Suppose you had to manually search through a very large book page by page to find where each
+	 * chapter begins and ends. For a book with 1,000,000 pages, a single person would take a long
+	 * time to go through it all.
+	 *
+	 * You could add more people to the task by laying out all the pages, measuring the length and
+	 * assigning each person a length of pages to traverse.
+	 *
+	 * There's a few ways to go about this:
+	 *
+	 * We could approach this in serial -- having the first worker start from page 1 and scanning
+	 * until they find the beginning of the next chapter, handing off the range to the next worker.
+	 * This is how `AsyncSpliterator` works.
+	 *
+	 * However this is inefficient because no matter how many workers we have, they must wait for the
+	 * previous worker to finish before they can start. Ideally, a desired number of workers would be
+	 * able to scan their own _length_ of pages simultaneously, and settle up on the boundaries of the
+	 * chapters they find.
+	 *
+	 * `AsyncSpliterator.asMany` is like the second approach, spltting the book into mostly equal
+	 * lengths and having each worker scan their own length of pages.
+	 *
+	 * @param source - The file handle to read from.
+	 * @param delimiter - The character to delimit by. Typically a newline or comma.
+	 * @param concurrency - The _desired_ number of `AsyncSpliterator` instances to create.
+	 *
+	 * @returns An array of `AsyncSpliterator` instances, possibly less than the desired concurrency.
+	 * @internal
+	 */
+	public static async asMany(
+		source: AsyncDataResource,
+		delimiter: CharacterSequenceInput,
+		concurrency: number
+	): Promise<AsyncSpliterator[]> {
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars
+		concurrency = Math.max(1, concurrency)
+		const needle = new CharacterSequence(delimiter)
+
+		const spliterators: AsyncSpliterator[] = []
+
+		const { createChunkIterator, readFileSize } = await import("spliterator/node/fs")
+		const fileSize = await readFileSize(source)
+		// const file = createChunkIterator(source, {
+		// 	start: 0,
+		// })
+
+		// The idea here is  we're going to split the file into `concurrency` chunks.
+
+		if (Date.now()) {
+			throw new Error("Not implemented.")
+		}
+
+		return spliterators
 	}
 }

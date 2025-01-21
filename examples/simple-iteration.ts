@@ -8,10 +8,13 @@ import * as Colorette from "colorette"
 import { debugAsVisibleCharacters, Spliterator } from "spliterator"
 import { fixturesDirectory } from "spliterator/test/utils"
 
-const spliterator = await Spliterator.fromAsync(fixturesDirectory("phonetic-single-spaced.txt"), {
-	// skipEmpty: false,
-	autoClose: true,
-	debug: true,
+const fixturePath = fixturesDirectory("phonetic-single-spaced.txt")
+
+const spliterator = await Spliterator.from(fixturePath, {
+	// delimiter: "\r\n",
+	skipEmpty: false,
+	autoDispose: true,
+	// debug: true,
 	// highWaterMark: 8,
 	// take: 10,
 	// drop: 1,

@@ -17,7 +17,10 @@ export type StatsLike = Pick<Stats, "size" | "blksize" | "mtimeMs">
 /**
  * A trimmed-down version of the Node.js `FileHandle` interface.
  */
-export type FileHandleLike = Pick<FileHandle, "fd" | "stat" | "close" | "read" | "readableWebStream">
+export type FileHandleLike = Pick<
+	FileHandle,
+	"fd" | "stat" | "close" | "read" | "readableWebStream" | "createReadStream"
+>
 
 /**
  * A tuple representing a window of bytes in a buffer.
@@ -101,7 +104,7 @@ export interface ReadBytesOptions {
  * While possible with a variety of platform-specific APIs, this trait provides a common interface
  * for reading byte ranges.
  */
-export interface ByteRangeReader {
+export interface ByteRangeReader extends AsyncIterator<Uint8Array> {
 	/**
 	 * Reads a range of bytes from a source.
 	 */
@@ -137,6 +140,13 @@ export interface FileResourceLike extends File {
 }
 
 /**
+ * Type-predicate to determine if a value is a file resource.
+ */
+export function isFileResourceLike(input: unknown): input is FileResourceLike {
+	return Boolean(input && typeof input === "object" && "slice" in input)
+}
+
+/**
  * Given a file resource, adds a `read` method to read a range of bytes.
  *
  * This allows the web `File` interface to be used as a byte range reader.
@@ -166,22 +176,28 @@ export function applyReaderPolyfill<T extends FileResourceLike>(file: T): assert
 }
 
 /**
- * Type-predicate to determine if a value is a file resource.
+ * An asynchronous iterable byte stream.
+ *
+ * Note that as an iterable this will drained of all bytes when iterated over.
  */
-export function isFileResourceLike(input: unknown): input is FileResourceLike {
-	return Boolean(input && typeof input === "object" && "slice" in input)
+export interface AsyncChunkIterator extends AsyncIterable<Uint8Array> {
+	/**
+	 * Disposes of the byte stream, releasing any resources.
+	 *
+	 * This method is optional and may not be implemented by all byte streams.
+	 */
+	[Symbol.asyncDispose]?(): PromiseLike<void>
 }
 
 /**
  * An asynchronous resource to a delimited byte stream, which can be a...
  *
  * - `string` representing a file path.
- * - `URL` object representing a file path.
- * - `Buffer` containing the file contents.
- * - `TypedArray` containing the file contents.
- * - `FileHandleLike` object representing an open file handle.
+ * - {@linkcode URL} object representing a file path.
+ * - {@linkcode FileHandleLike} object representing an open file handle.
+ * - {@linkcode AsyncChunkIterator} object representing an asynchronous byte stream.
  */
-export type AsyncDataResource = string | URL | FileHandleLike | FileResourceLike
+export type AsyncDataResource = string | URL | FileHandleLike
 
 /**
  * A resource to a delimited byte stream, i.e., a file buffer, handle, or path.

@@ -105,4 +105,31 @@ export class BufferController {
 
 		return this.bytes.subarray(begin, end)
 	}
+
+	/**
+	 * Sets a value or an array of values.
+	 *
+	 * Unlike the `TypedArray.set` method, this method will grow the buffer if the offset is greater
+	 * than the current byte length.
+	 *
+	 * @param array — A typed or untyped array of values to set.
+	 * @param offset — The index in the current array at which the values are to be written.
+	 *
+	 * @returns The number of bytes written.
+	 */
+	public set(array: ArrayLike<number>, offset: number = 0): number {
+		const nextLength = offset + array.length
+
+		if (nextLength > this.bytes.length) {
+			this.grow(nextLength)
+		}
+
+		this.bytes.set(array, offset)
+
+		if (nextLength > this.bytesWritten) {
+			this.bytesWritten = nextLength
+		}
+
+		return nextLength
+	}
 }

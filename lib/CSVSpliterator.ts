@@ -5,18 +5,25 @@
  */
 
 import { normalizeColumnNames } from "./casing.js"
-import { CharacterSequence, CharacterSequenceInput, Delimiters, takeDelimited } from "./CharacterSequence.js"
-import { AsyncDataResource, zipSync } from "./shared.js"
+import { CharacterSequence, CharacterSequenceInput, Delimiters } from "./CharacterSequence.js"
+import { AsyncChunkIterator, AsyncDataResource, zipSync } from "./shared.js"
 import { AsyncSpliteratorInit, Spliterator, SpliteratorInit } from "./Spliterator.js"
 
 /**
  * An output mode for the CSV generator.
  */
 export type CSVOutputMode = "array" | "object" | "entries"
-export type CSVEmitter<T = unknown> = (columns: Iterable<string>, headerColumns?: Iterable<string>) => T
+export type CSVTransformer<T = unknown> = (value: string) => T
 
-export type CSVSpliteratorEmittedRecord = {
-	[key: string]: string | number | undefined
+export type CSVTransformerEntry<T = unknown> = [columnName: string, transformer: CSVTransformer<T>]
+export type CSVTransformerRecord = Record<string, CSVTransformer | undefined>
+
+export type CSVEmitter<T = unknown> = (columns: Iterable<string>, headerColumns?: Iterable<CSVTransformerEntry>) => T
+
+const identity: CSVTransformer<string> = (value) => value
+
+export type CSVSpliteratorEmittedRecord<V = string | number | undefined> = {
+	[key: string]: V
 }
 
 /**
@@ -26,24 +33,36 @@ export type CSVSpliteratorEmittedRecord = {
  * - The value of the column.
  * - The index of the row.
  */
-export type RowTuple = [key: string, value: string | number, idx: number]
+export type RowTuple<V = string | number> = [key: string, value: V, idx: number]
 
 export const CSVSpliteratorEmitters = {
 	array: null,
 
-	entries(columns: Iterable<string>, headerColumns: Iterable<string> = []): RowTuple[] {
-		return Array.from(zipSync(headerColumns, columns), ([key, value], idx) => {
-			return [key ?? `column_${idx}`, value ?? "", idx]
+	entries(columns: Iterable<string>, headerColumns: Iterable<CSVTransformerEntry> = []): RowTuple<unknown>[] {
+		return Array.from(zipSync(headerColumns, columns), ([transformer, value], idx) => {
+			const key = transformer?.[0]
+			const transform = transformer?.[1] ?? identity
+			return [key ?? `column_${idx}`, transform(value ?? ""), idx]
 		})
 	},
-	object(columns: Iterable<string>, headerColumns: Iterable<string> = []): CSVSpliteratorEmittedRecord {
-		const record = Object.fromEntries(Array.from(zipSync(headerColumns, columns)))
+	object(
+		columns: Iterable<string>,
+		headerColumns: Iterable<CSVTransformerEntry> = []
+	): CSVSpliteratorEmittedRecord<unknown> {
+		const record: CSVSpliteratorEmittedRecord<unknown> = {}
+
+		for (const [transformer, value, idx] of zipSync(headerColumns, columns)) {
+			const key = transformer?.[0] ?? `column_${idx}`
+			const transform = transformer?.[1] ?? identity
+
+			record[key] = transform(value ?? "")
+		}
 
 		return record
 	},
 } as const satisfies Record<CSVOutputMode, CSVEmitter | null>
 
-export interface CSVSpliteratorOptions {
+export interface CSVSpliteratorInit extends SpliteratorInit {
 	/**
 	 * The mode determines the shape of the data emitted by the generator.
 	 *
@@ -75,14 +94,7 @@ export interface CSVSpliteratorOptions {
 	 */
 	header?: boolean
 
-	/**
-	 * How many rows to skip before emitting data.
-	 *
-	 * This is useful for skipping headers or other metadata.
-	 *
-	 * Defaults to 1 if `header` is true, otherwise 0.
-	 */
-	skip?: number
+	transformers?: Iterable<CSVTransformerEntry> | CSVTransformerRecord
 }
 
 export abstract class CSVSpliterator {
@@ -92,7 +104,7 @@ export abstract class CSVSpliterator {
 
 	static from<T extends CSVSpliteratorEmittedRecord = CSVSpliteratorEmittedRecord>(
 		source: CharacterSequenceInput,
-		options: CSVSpliteratorOptions & SpliteratorInit & { mode: "object" }
+		options?: CSVSpliteratorInit & { mode: "object" }
 	): Generator<T>
 	/**
 	 * @yields Each row as a 3-tuple [key, value, idx].
@@ -100,7 +112,7 @@ export abstract class CSVSpliterator {
 
 	static from<T extends RowTuple[] = RowTuple[]>(
 		source: CharacterSequenceInput,
-		options: CSVSpliteratorOptions & SpliteratorInit & { mode: "entries" }
+		options?: CSVSpliteratorInit & { mode: "entries" }
 	): Generator<T>
 	/**
 	 * Given a byte array or string, yield each row as an array of columns.
@@ -109,114 +121,176 @@ export abstract class CSVSpliterator {
 	 */
 	static from<T extends string[] = string[]>(
 		source: CharacterSequenceInput,
-		options: CSVSpliteratorOptions & SpliteratorInit & { mode?: "array" }
+		options?: CSVSpliteratorInit & { mode?: "array" }
 	): Generator<T>
 	/**
 	 * Given a byte array or string, yield each row as an array of columns.
 	 *
 	 * @yields Each row as an array of columns.
 	 */
-	static *from(source: CharacterSequenceInput, options: CSVSpliteratorOptions & SpliteratorInit = {}) {
+	static *from(source: CharacterSequenceInput, init: CSVSpliteratorInit = {}) {
 		const {
 			// ---
 			header = true,
-			skip = header ? 1 : 0,
+			transformers: transformersInput = [],
 			normalizeKeys,
 			mode = "array",
 			columnDelimiter: columnDelimiterInput = Delimiters.Comma,
-			...rowOptions
-		} = options
-
-		let headerColumns: string[] = []
+			take = Infinity,
+			drop = 0,
+			...rowInit
+		} = init
 
 		const emitter = CSVSpliteratorEmitters[mode]
-
-		let rowCursor = 0
+		let transformers: CSVTransformerEntry[] = []
+		let yieldCount = 0
+		const yieldLimit = take + drop
 
 		const decoder = new TextDecoder()
-		const columnDelimiter = new CharacterSequence(columnDelimiterInput)
-		const spliterator = Spliterator.from(source, rowOptions)
+		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? Delimiters.Comma)
+		const columnSpliteratorInit: SpliteratorInit = { delimiter: columnDelimiter }
 
-		for (const row of spliterator) {
-			let columns = Array.from(takeDelimited(row, columnDelimiter), (column) => decoder.decode(column))
+		const rows = Spliterator.from(source, rowInit)
 
-			if (header && rowCursor === 0) {
-				headerColumns = normalizeKeys ? normalizeColumnNames(columns) : columns
-				columns = headerColumns
+		if (header) {
+			const result = rows.next()
+
+			if (result.done) return
+
+			const columns = new Spliterator(result.value, columnSpliteratorInit).toDecodedArray(decoder)
+			const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
+
+			if (Array.isArray(transformersInput)) {
+				transformers = Array.from(zipSync(headers, transformersInput), ([columnName, transformer]) => [
+					columnName!,
+					transformer ?? identity,
+				])
+			} else {
+				transformers = headers.map((columnName) => {
+					const transform = (transformersInput as CSVTransformerRecord)[columnName] || identity
+					return [columnName, transform]
+				})
 			}
+		}
 
-			if (skip && rowCursor < skip) {
-				rowCursor++
-
+		for (const row of rows) {
+			if (yieldCount < drop) {
+				yieldCount++
 				continue
 			}
 
-			yield emitter ? emitter(columns, headerColumns) : columns
+			if (yieldCount >= yieldLimit) break
+
+			const columns = new Spliterator(row, columnSpliteratorInit).toDecodedArray(decoder)
+
+			yield emitter ? emitter(columns, transformers) : columns
 		}
 	}
 
+	/**
+	 * @yields Each row as an object with the header names as keys.
+	 */
 	static fromAsync<T extends CSVSpliteratorEmittedRecord = CSVSpliteratorEmittedRecord>(
-		source: AsyncDataResource,
-		options?: CSVSpliteratorOptions & AsyncSpliteratorInit & { mode: "object" }
+		source: AsyncDataResource | AsyncChunkIterator,
+		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode: "object" }
 	): AsyncGenerator<T>
+
 	/**
 	 * @yields Each row as a 3-tuple [key, value, idx].
 	 */
-
 	static fromAsync<T extends RowTuple[] = RowTuple[]>(
-		source: AsyncDataResource,
-		options?: CSVSpliteratorOptions & AsyncSpliteratorInit & { mode: "entries" }
+		source: AsyncDataResource | AsyncChunkIterator,
+		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode: "entries" }
 	): AsyncGenerator<T>
 	/**
-	 * Given a byte array or string, yield each row as an array of columns.
-	 *
 	 * @yields Each row as an array of columns.
 	 */
 	static fromAsync<T extends string[] = string[]>(
-		source: AsyncDataResource,
-		options?: CSVSpliteratorOptions & AsyncSpliteratorInit & { mode?: "array" }
+		source: AsyncDataResource | AsyncChunkIterator,
+		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode?: "array" }
 	): AsyncGenerator<T>
 	/**
-	 * Given a byte array or string, yield each row as an array of columns.
+	 * Given an asychronous data source, splits the data by rows(usually by newline) and then by
+	 * columns (usually by comma).
 	 *
-	 * @yields Each row as an array of columns.
+	 * @param source The data source to split.
+	 * @param init Options for the spliterator.
+	 * @yields Each row, shaped according to the `mode` option.
 	 */
-	static async *fromAsync(source: AsyncDataResource, options: CSVSpliteratorOptions & AsyncSpliteratorInit = {}) {
+	static fromAsync(
+		source: AsyncDataResource | AsyncChunkIterator,
+		init?: CSVSpliteratorInit & AsyncSpliteratorInit
+	): AsyncGenerator<unknown>
+	/**
+	 * Given an asychronous data source, splits the data by rows (usually by newline) and then by
+	 * columns (usually by comma).
+	 *
+	 * @param source The data source to split.
+	 * @param init Options for the spliterator.
+	 * @yields Each row, shaped according to the `mode` option.
+	 */
+	static async *fromAsync(
+		source: AsyncDataResource | AsyncChunkIterator,
+		init: CSVSpliteratorInit & AsyncSpliteratorInit = {}
+	) {
 		const {
 			// ---
 			header = true,
-			skip = header ? 1 : 0,
 			mode = "array",
+			transformers: transformersInput = [],
 			normalizeKeys = mode !== "array",
 			columnDelimiter: columnDelimiterInput,
-			...rowOptions
-		} = options
-
-		let headerColumns: string[] = []
+			take = Infinity,
+			drop = 0,
+			...rowInit
+		} = init
 
 		const emitter = CSVSpliteratorEmitters[mode]
-
-		let rowCursor = 0
+		let transformers: CSVTransformerEntry[] = []
+		let yieldCount = 0
+		const yieldLimit = take + drop
 
 		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? Delimiters.Comma)
+		const columnSpliteratorInit: SpliteratorInit = { delimiter: columnDelimiter }
+
 		const decoder = new TextDecoder()
-		const splitter = await Spliterator.fromAsync(source, rowOptions)
 
-		for await (const row of splitter) {
-			let columns = Array.from(takeDelimited(row, columnDelimiter), (column) => decoder.decode(column))
+		const rows = await Spliterator.from(source, rowInit)
 
-			if (header && rowCursor === 0) {
-				headerColumns = normalizeKeys ? normalizeColumnNames(columns) : columns
-				columns = headerColumns
+		if (header) {
+			const result = await rows.next()
+
+			if (result.done) return
+
+			const columns = new Spliterator(result.value, columnSpliteratorInit).toDecodedArray(decoder)
+			const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
+
+			if (Array.isArray(transformersInput)) {
+				transformers = Array.from(zipSync(headers, transformersInput), ([columnName, transformer]) => [
+					columnName!,
+					transformer ?? identity,
+				])
+			} else {
+				transformers = headers.map((columnName) => {
+					const transform = (transformersInput as CSVTransformerRecord)[columnName] || identity
+					return [columnName, transform]
+				})
 			}
+		}
 
-			if (skip && rowCursor < skip) {
-				rowCursor++
-
+		for await (const row of rows) {
+			if (yieldCount < drop) {
+				yieldCount++
 				continue
 			}
 
-			yield emitter ? emitter(columns, headerColumns) : columns
+			if (yieldCount >= yieldLimit) break
+
+			const columns = new Spliterator(row, columnSpliteratorInit).toDecodedArray(decoder)
+
+			yield emitter ? emitter(columns, transformers) : columns
+
+			yieldCount++
 		}
 	}
 }
