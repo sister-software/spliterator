@@ -17,7 +17,7 @@ export abstract class JSONSpliterator {
 		const decoder = new TextDecoder()
 		let rowCursor = 0
 
-		const spliterator = Spliterator.from(source, options)
+		const spliterator = Spliterator.fromSync(source, options)
 
 		for (const row of spliterator) {
 			let parsed: T

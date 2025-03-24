@@ -148,6 +148,18 @@ export async function createChunkIterator(
 	}
 
 	if (typeof source === "string" || source instanceof URL) {
+		const statable = await stat(source)
+			.then(() => true)
+			.catch(() => false)
+
+		if (!statable) {
+			// Note that we don't log the source here, as it may contain sensitive information,
+			// and may possibly not be encoded for display.
+			throw new TypeError(
+				"Cannot read from the provided source. See caller of `createChunkIterator` for more information."
+			)
+		}
+
 		const handle = await open(source, "r")
 
 		const readStream = handle.createReadStream({

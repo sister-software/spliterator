@@ -36,7 +36,7 @@ export class Spliterator<R extends DataView | ArrayBuffer = Uint8Array> implemen
 	static fromAsync = AsyncSpliterator.from
 
 	/**
-	 * Create a spliterator from an iterable resource such as a buffer, array, or string.
+	 * Create a spliterator from an iterable resource such as a **buffer, array, or string**.
 	 *
 	 * @param source - The data resource to read from.
 	 * @param init - The initialization options for the generator.
@@ -46,14 +46,15 @@ export class Spliterator<R extends DataView | ArrayBuffer = Uint8Array> implemen
 	}
 
 	/**
-	 * Create a spliterator from an iterable resource such as a buffer, array, or string.
+	 * Create a spliterator from an iterable resource such as a **buffer or array**.
 	 *
 	 * @param source - The data resource to read from.
 	 * @param init - The initialization options for the generator.
+	 * @see {@linkcode Spliterator.fromSync} to ensure synchronous operation for string inputs.
 	 */
 	static from(source: DataView | ArrayBuffer | Buffer | Iterable<number>, init?: SpliteratorInit): Spliterator
 	/**
-	 * Create a new delimited generator from an asynchronous byte stream.
+	 * Create a new delimited generator from an **asynchronous byte stream**.
 	 *
 	 * @param source - The data resource to read from.
 	 * @param init - The initialization options for the generator.
@@ -62,29 +63,24 @@ export class Spliterator<R extends DataView | ArrayBuffer = Uint8Array> implemen
 	 */
 	static from(source: AsyncChunkIterator, init?: AsyncSpliteratorInit): AsyncSpliterator
 	/**
-	 * Create a new delimited generator from a resource such as a file handle or URL.
+	 * Create a new delimited generator from a resource such as a **file handle or URL**.
 	 *
 	 * @param source - The data resource to read from.
 	 * @param init - The initialization options for the generator.
 	 *
 	 * @returns A new generator instance, yielding byte ranges.
+	 * @see {@linkcode Spliterator.fromSync} to ensure synchronous operation for string inputs.
 	 */
 	static from(source: AsyncDataResource, init?: AsyncSpliteratorInit): Promise<AsyncSpliterator>
 	/**
-	 * Create a new delimited generator from a resource such as a file handle, URL, or byte stream.
+	 * Create a new delimited generator from a resource such as a **file handle, URL, or byte
+	 * stream**.
 	 *
 	 * @param source - The data resource to read from.
 	 * @param init - The initialization options for the generator.
 	 *
 	 * @returns A new generator instance, yielding byte ranges.
-	 */
-	/**
-	 * Create a new delimited generator from a resource such as a file handle, URL, or byte stream.
-	 *
-	 * @param source - The data resource to read from.
-	 * @param init - The initialization options for the generator.
-	 *
-	 * @returns A new generator instance, yielding byte ranges.
+	 * @see {@linkcode Spliterator.fromSync} to ensure synchronous operation for string inputs.
 	 */
 	static from(
 		source: CharacterSequenceInput | AsyncDataResource | AsyncChunkIterator,
@@ -100,9 +96,25 @@ export class Spliterator<R extends DataView | ArrayBuffer = Uint8Array> implemen
 
 		if (typeof source === "string" || source instanceof URL || isFileHandleLike(source)) {
 			return import("spliterator/node/fs").then(async ({ createChunkIterator }) => {
-				const chunkIterator = await createChunkIterator(source, {
-					highWaterMark: init.highWaterMark,
-				})
+				let chunkIterator: AsyncChunkIterator
+
+				try {
+					chunkIterator = await createChunkIterator(source, {
+						highWaterMark: init.highWaterMark,
+					})
+				} catch (error) {
+					if (typeof source === "string" || source instanceof URL) {
+						const wrapped = new Error(
+							"`Spliterator.from` was called with an invalid async data resource. Did you mean to use `Spliterator.fromSync`?"
+						)
+
+						wrapped.cause = error
+
+						throw wrapped
+					}
+
+					throw error
+				}
 
 				return new AsyncSpliterator(chunkIterator, init)
 			})

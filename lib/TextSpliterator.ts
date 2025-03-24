@@ -35,7 +35,13 @@ export abstract class TextSpliterator {
 	}
 
 	/**
-	 * @yields Each row as a string.
+	 * Synchronously yield delimited text from a byte array or string.
+	 *
+	 * @param source The source content to split.
+	 * @param options The options to use when splitting the content.
+	 * @yields Each slice of the source content.
+	 * @see {@linkcode TextSpliterator.fromAsync} for asynchronous iteration with decoding.
+	 * @see {@linkcode Spliterator.fromSync} for synchronous iteration without decoding.
 	 */
 	static *from(
 		source: CharacterSequenceInput,
@@ -44,7 +50,7 @@ export abstract class TextSpliterator {
 		const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
 		let rowCursor = 0
 
-		const spliterator = Spliterator.from(source, options)
+		const spliterator = Spliterator.fromSync(source, options)
 
 		for (const row of spliterator) {
 			let decoded: string
@@ -65,9 +71,13 @@ export abstract class TextSpliterator {
 	}
 
 	/**
-	 * Given a byte array or string, yield each row as an array of columns.
+	 * Asynchronously yield delimited text from a byte array or string.
 	 *
-	 * @yields Each row as an array of columns.
+	 * @param source The async data resource to split.
+	 * @param options The options to use when splitting the content.
+	 * @yields Each slice of the source content.
+	 * @see {@linkcode TextSpliterator.from} for synchronous iteration with decoding.
+	 * @see {@linkcode Spliterator.fromAsync} for asynchronous iteration without decoding.
 	 */
 	static async *fromAsync(
 		source: AsyncDataResource,
