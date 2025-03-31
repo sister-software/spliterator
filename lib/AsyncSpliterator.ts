@@ -10,6 +10,8 @@ import { CharacterSequence, CharacterSequenceInput } from "./CharacterSequence.j
 import { IndexQueue } from "./IndexQueue.js"
 import { AsyncChunkIterator, AsyncDataResource, type ByteRange } from "./shared.js"
 
+const noop = () => void 0
+
 /**
  * Initialization options for creating a spliterator.
  */
@@ -168,7 +170,7 @@ export class AsyncSpliterator<R extends DataView | ArrayBuffer = Uint8Array>
 	public static toTransformStream(init: SpliteratorInit): TransformStream<AsyncChunkIterator, Uint8Array> {
 		return new TransformStream<AsyncChunkIterator, Uint8Array>({
 			async transform(chunk, controller) {
-				const spliterator = await AsyncSpliterator.from(chunk, init)
+				const spliterator = AsyncSpliterator.from(chunk, init)
 
 				for await (const slice of spliterator) {
 					controller.enqueue(slice)
@@ -204,7 +206,7 @@ export class AsyncSpliterator<R extends DataView | ArrayBuffer = Uint8Array>
 		})
 
 		this.#debug = init.debug ?? false
-		this.#log = this.#debug ? console.debug.bind(console) : () => void 0
+		this.#log = this.#debug ? console.debug.bind(console) : noop
 	}
 
 	//#endregion
@@ -322,7 +324,14 @@ export class AsyncSpliterator<R extends DataView | ArrayBuffer = Uint8Array>
 			const delimiterIndex = this.#needle.search(this.#controller.bytes, searchCursor)
 
 			if (delimiterIndex === -1) {
-				this.#log(`No viable byte range found in buffer. Breaking.`)
+				// if (this.#lastReadResult?.done) {
+				// 	this.#log("Reached end of file. No more delimiters found.")
+				// 	this.#indices.enqueue([searchCursor, this.#controller.bytesWritten])
+
+				// 	break
+				// }
+
+				this.#log(`No viable byte range found in buffer. Breaking.`, { searchCursor })
 				break
 			}
 
@@ -358,6 +367,7 @@ export class AsyncSpliterator<R extends DataView | ArrayBuffer = Uint8Array>
 				const lastByteIndex = lastByteRange[1]
 
 				// There's a special case where the last delimiter is at the end of the *file*.
+				this.#log("Last byte range special case", lastByteRange)
 
 				if (lastByteIndex < this.#controller.bytesWritten) {
 					// We need to determine if we're at the end of the *file* and there's no delimiter.
@@ -383,9 +393,6 @@ export class AsyncSpliterator<R extends DataView | ArrayBuffer = Uint8Array>
 						`Weird situation. We're at the end of the file, but the last byte range ${lastByteIndex} is greater than the buffer length ${this.#controller.bytesWritten}.`
 					)
 				}
-			} else if (this.#yieldCount === 0) {
-				// We didn't find any delimiters in the file, so we just enqueue the whole buffer.
-				this.#indices.enqueue([0, this.#controller.bytesWritten])
 			}
 
 			this.#done = true
@@ -440,6 +447,13 @@ export class AsyncSpliterator<R extends DataView | ArrayBuffer = Uint8Array>
 
 		if (this.#indices.size === 0) {
 			await this.#fill()
+		}
+
+		if (this.#lastReadResult?.done && this.#indices.size === 0) {
+			await this.#fill()
+			// We didn't find any delimiters in the file, so we just enqueue the whole buffer.
+
+			this.#indices.enqueue([0, this.#controller.bytesWritten])
 		}
 
 		const currentByteRange = this.#indices.dequeue()

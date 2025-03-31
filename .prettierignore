@@ -6,6 +6,7 @@
 ## Build asset directories
 /build
 coverage
+test/fixtures/*
 dist
 out
 

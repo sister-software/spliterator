@@ -15,6 +15,11 @@ const ESLintConfig = createESLintPackageConfig({
 	copyrightHolder: "Sister Software",
 	packageTitle: "Spliterator",
 	spdxLicenseIdentifier: "AGPL-3.0",
+	overrides: {
+		rules: {
+			"jsdoc/check-param-names": "off",
+		},
+	},
 })
 
 export default ESLintConfig

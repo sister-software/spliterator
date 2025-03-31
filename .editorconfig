@@ -19,3 +19,7 @@ indent_style = space
 
 [*.crlf.*]
 end_of_line = crlf
+
+[**/test/fixtures/*.{txt}]
+insert_final_newline = false
+trim_trailing_whitespace = false
