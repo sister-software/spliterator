@@ -62,16 +62,21 @@ export class BufferController {
 	 * This is performed after we're confident that any data preceeding `start` or following `end` is
 	 * no longer needed.
 	 *
+	 * `bytesWritten` is rebased onto the new window so it always reflects the count of valid bytes
+	 * present after compression. Bytes outside the kept window are dropped from the count even if the
+	 * underlying allocation is larger.
+	 *
 	 * @param start - The starting byte index of which bytes to keep.
-	 * @param end - The ending byte index of which bytes to keep.
+	 * @param end - The ending byte index of which bytes to keep. Defaults to the current buffer
+	 *   length. Values past the buffer length are clamped.
 	 */
-	public compress(start: number = 0, end?: number): void {
-		end ??= Math.max(this.byteLengthMinimum, this.bytes.length)
-		const adjustedBytesWritten = Math.min(this.bytesWritten, end - start)
+	public compress(start: number = 0, end: number = this.bytes.length): void {
+		const clampedEnd = Math.min(end, this.bytes.length)
+		const validEnd = Math.min(this.bytesWritten, clampedEnd)
 
-		this.bytes = this.bytes.subarray(start, end)
+		this.bytes = this.bytes.subarray(start, clampedEnd)
 
-		this.bytesWritten = adjustedBytesWritten
+		this.bytesWritten = Math.max(0, validEnd - start)
 	}
 
 	/**

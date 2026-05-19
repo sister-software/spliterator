@@ -1,6 +1,6 @@
 {
 	"name": "spliterator",
-	"version": "1.6.4",
+	"version": "1.7.0",
 	"description": "Line-delimited iterator library for CSV, NDJSON, and other delimited formats.",
 	"keywords": [
 		"csv",
@@ -45,7 +45,8 @@
 	"scripts": {
 		"demo": "node out/examples/simple-iteration.js",
 		"compile": "NODE_OPTIONS=\"--max-old-space-size=3000\" tsc -b",
-		"test": "vitest",
+		"clean": "tsc -b --clean",
+		"test": "yarn compile && vitest",
 		"lint": "run-s lint:prettier:check lint:eslint:check",
 		"lint:fix": "run-s lint:prettier:fix lint:eslint:fix",
 		"lint:prettier:check": "prettier --cache --check -u .",

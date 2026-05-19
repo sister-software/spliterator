@@ -315,22 +315,19 @@ export class AsyncSpliterator<R extends DataView | ArrayBuffer = Uint8Array>
 
 	/**
 	 * Find and enqueue delimiter positions.
+	 *
+	 * The search is bounded by `bytesWritten` so we never scan into uninitialized buffer memory and
+	 * never enqueue ranges whose `end` exceeds the valid byte length.
 	 */
 	#search() {
 		const lastByteRange = this.#indices.peekLast()
 		let searchCursor = lastByteRange ? lastByteRange[1] + this.#needle.length : 0
+		const searchEnd = this.#controller.bytesWritten
 
-		while (searchCursor <= this.#controller.bytesWritten) {
-			const delimiterIndex = this.#needle.search(this.#controller.bytes, searchCursor)
+		while (searchCursor <= searchEnd) {
+			const delimiterIndex = this.#needle.search(this.#controller.bytes, searchCursor, searchEnd)
 
 			if (delimiterIndex === -1) {
-				// if (this.#lastReadResult?.done) {
-				// 	this.#log("Reached end of file. No more delimiters found.")
-				// 	this.#indices.enqueue([searchCursor, this.#controller.bytesWritten])
-
-				// 	break
-				// }
-
 				this.#log(`No viable byte range found in buffer. Breaking.`, { searchCursor })
 				break
 			}
@@ -360,39 +357,18 @@ export class AsyncSpliterator<R extends DataView | ArrayBuffer = Uint8Array>
 	async #fill(): Promise<void> {
 		if (this.#lastReadResult?.done) {
 			this.#log("Reached end of file. Preparing to finalize.")
-			// There's a few special cases we could get this far and not have drained the buffer.
-			const lastByteRange = this.#lastByteRangeSeen
+			// Enqueue a final slice covering the bytes between the last yielded delimiter and the
+			// end of the stream. The slice may be empty (when the stream ends exactly on a
+			// delimiter, or when the file is empty); we still enqueue it so that callers with
+			// `skipEmpty: false` see the trailing entry produced by `String.prototype.split`.
+			const tailStart = this.#lastByteRangeSeen ? this.#lastByteRangeSeen[1] + this.#needle.length : 0
+			const tailEnd = this.#controller.bytesWritten
 
-			if (lastByteRange) {
-				const lastByteIndex = lastByteRange[1]
-
-				// There's a special case where the last delimiter is at the end of the *file*.
-				this.#log("Last byte range special case", lastByteRange)
-
-				if (lastByteIndex < this.#controller.bytesWritten) {
-					// We need to determine if we're at the end of the *file* and there's no delimiter.
-					const possibleDelimiterIndex = this.#needle.search(
-						this.#controller.bytes,
-						this.#controller.bytesWritten - this.#needle.length
-					)
-
-					if (possibleDelimiterIndex !== -1) {
-						this.#log("Inserted byte range at the last delimiter", [
-							possibleDelimiterIndex,
-							this.#controller.bytesWritten,
-						])
-						// We found a delimiter at the end of the file, so we enqueue the byte range.
-						this.#indices.enqueue([possibleDelimiterIndex + this.#needle.length, this.#controller.bytesWritten])
-					} else {
-						this.#log("Inserted byte range at the last byte", [lastByteIndex, this.#controller.bytesWritten])
-						// The file didn't end with a delimiter, so we just enqueue the last byte range.
-						this.#indices.enqueue([lastByteIndex + this.#needle.length, this.#controller.bytesWritten])
-					}
-				} else {
-					this.#log(
-						`Weird situation. We're at the end of the file, but the last byte range ${lastByteIndex} is greater than the buffer length ${this.#controller.bytesWritten}.`
-					)
-				}
+			if (tailStart <= tailEnd) {
+				this.#log("Inserted trailing byte range", [tailStart, tailEnd])
+				this.#indices.enqueue([tailStart, tailEnd])
+			} else {
+				this.#log("Skipped trailing range — start beyond end", { tailStart, tailEnd })
 			}
 
 			this.#done = true
@@ -406,6 +382,12 @@ export class AsyncSpliterator<R extends DataView | ArrayBuffer = Uint8Array>
 
 		this.#log("Compressing buffer", { nextBufferStart })
 		this.#controller.compress(nextBufferStart)
+
+		// After compress, the buffer coordinate space has shifted. The cached `lastByteRangeSeen`
+		// refers to the *previous* coordinate space, so clear it — subsequent ranges enqueued by
+		// `#search` are relative to the freshly-compressed buffer (and `#search` starts at 0 when
+		// the indices queue is empty, which it is here by `next()`'s precondition).
+		this.#lastByteRangeSeen = undefined
 
 		while ((!this.#lastReadResult || !this.#lastReadResult.done) && this.#indices.byteLength < this.#highWaterMark) {
 			await this.#read()
@@ -449,11 +431,11 @@ export class AsyncSpliterator<R extends DataView | ArrayBuffer = Uint8Array>
 			await this.#fill()
 		}
 
-		if (this.#lastReadResult?.done && this.#indices.size === 0) {
+		// The first `#fill` may have read into EOF without entering the EOF branch (the branch only
+		// triggers when fill is called with `done` already set). In that case the trailing tail
+		// hasn't been enqueued yet, so call fill once more to let the EOF branch flush it.
+		if (this.#lastReadResult?.done && this.#indices.size === 0 && !this.#done) {
 			await this.#fill()
-			// We didn't find any delimiters in the file, so we just enqueue the whole buffer.
-
-			this.#indices.enqueue([0, this.#controller.bytesWritten])
 		}
 
 		const currentByteRange = this.#indices.dequeue()
