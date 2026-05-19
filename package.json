@@ -45,7 +45,8 @@
 	"scripts": {
 		"demo": "node out/examples/simple-iteration.js",
 		"compile": "NODE_OPTIONS=\"--max-old-space-size=3000\" tsc -b",
-		"test": "vitest",
+		"clean": "tsc -b --clean",
+		"test": "yarn compile && vitest",
 		"lint": "run-s lint:prettier:check lint:eslint:check",
 		"lint:fix": "run-s lint:prettier:fix lint:eslint:fix",
 		"lint:prettier:check": "prettier --cache --check -u .",
