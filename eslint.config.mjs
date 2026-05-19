@@ -4,22 +4,32 @@
  * @author Teffen Ellis, et al.
  */
 
-import { createESLintPackageConfig } from "@sister.software/eslint-config"
+/**
+ * @import {Config} from "eslint/config"
+ */
+
+import { createESLintPackageConfig, DefaultIgnorePatterns } from "@sister.software/eslint-config"
+
+import { defineConfig } from "eslint/config"
 
 // @ts-check
 
 /**
- * ESLint configuration for the Spliterator package.
+ * @type {Config[]}
  */
-const ESLintConfig = createESLintPackageConfig({
-	copyrightHolder: "Sister Software",
-	packageTitle: "Spliterator",
-	spdxLicenseIdentifier: "AGPL-3.0",
-	overrides: {
-		rules: {
-			"jsdoc/check-param-names": "off",
+const eslintConfig = defineConfig(
+	createESLintPackageConfig({
+		copyrightHolder: "Sister Software",
+		spdxLicenseIdentifier: "AGPL-3.0",
+		parserOptions: {
+			tsconfigRootDir: import.meta.dirname,
 		},
-	},
-})
+		ignorePatterns: [
+			// ---
+			...DefaultIgnorePatterns,
+			"./.claude/**/*",
+		],
+	})
+)
 
-export default ESLintConfig
+export default eslintConfig

@@ -7,16 +7,16 @@
 
 import { resolve as resolvePath } from "node:path"
 import {
-	AsyncSpliteratorInit,
 	CharacterSequence,
-	CSVOutputMode,
 	CSVSpliterator,
-	CSVSpliteratorInit,
-	CSVTransformerRecord,
+	type AsyncSpliteratorInit,
+	type CSVOutputMode,
+	type CSVSpliteratorInit,
+	type CSVTransformerRecord,
 } from "spliterator"
 import { createFileWritableStream, createReadStream } from "spliterator/node/fs"
-import { ArgumentsCamelCase, Argv } from "yargs"
-import { commonCommandsBuilder, PluckArgv, SpliteratorFilter } from "../utils.js"
+import { type ArgumentsCamelCase, type Argv } from "yargs"
+import { commonCommandsBuilder, type PluckArgv, type SpliteratorFilter } from "../utils.js"
 
 export const command = "csv [source] [destination]"
 export const describe = false

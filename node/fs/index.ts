@@ -4,10 +4,10 @@
  * @author Teffen Ellis, et al.
  */
 
-import { CreateWriteStreamOptions, open, stat } from "node:fs/promises"
+import { type CreateWriteStreamOptions, open, stat } from "node:fs/promises"
 import { Writable } from "node:stream"
 import { WritableStream } from "node:stream/web"
-import { AsyncChunkIterator, AsyncDataResource, isFileHandleLike } from "../../lib/shared.js"
+import { type AsyncChunkIterator, type AsyncDataResource, isFileHandleLike } from "../../lib/shared.js"
 
 /**
  * Create a readable stream from a file system source.
@@ -51,7 +51,7 @@ export async function createFileWritableStream(
 	destination: unknown,
 	options: CreateWriteStreamOptions = {}
 ): Promise<WritableStream> {
-	let nodeWriteStream: NodeJS.WritableStream | Writable
+	let nodeWriteStream: Writable
 
 	if (typeof destination !== "string" || !destination) {
 		nodeWriteStream = process.stdout
@@ -184,9 +184,7 @@ export async function createChunkIterator(
 		}
 
 		if (source.readableWebStream) {
-			return source.readableWebStream({
-				type: "bytes",
-			})
+			return source.readableWebStream()
 		}
 
 		throw new TypeError("The provided file handle does not support readable web streams.")

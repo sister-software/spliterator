@@ -4,7 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import { TypedArray } from "./shared.js"
+import type { TypedArray } from "./shared.js"
 
 /**
  * A generic mutable typed array.
@@ -28,6 +28,14 @@ export type MutableTypedArrayConstructor<T extends number | bigint = number | bi
 interface ChunkInfo {
 	offset: number
 	length: number
+}
+
+/**
+ * Locally-defined mirror of the TC39 `RelativeIndexable` interface, which is no longer surfaced by
+ * the `ESNext` lib used here.
+ */
+interface RelativeIndexable<T> {
+	at(index: number): T | undefined
 }
 
 /**

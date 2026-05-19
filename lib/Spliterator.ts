@@ -4,15 +4,15 @@
  * @author Teffen Ellis, et al.
  */
 
-import { AsyncSpliterator, AsyncSpliteratorInit, SpliteratorInit } from "./AsyncSpliterator.js"
+import { AsyncSpliterator, type AsyncSpliteratorInit, type SpliteratorInit } from "./AsyncSpliterator.js"
 import {
 	CharacterSequence,
-	CharacterSequenceInput,
 	debugAsVisibleCharacters,
 	normalizeCharacterInput,
+	type CharacterSequenceInput,
 } from "./CharacterSequence.js"
 import { IndexQueue } from "./IndexQueue.js"
-import { AsyncChunkIterator, AsyncDataResource, isFileHandleLike, type ByteRange } from "./shared.js"
+import { isFileHandleLike, type AsyncChunkIterator, type AsyncDataResource, type ByteRange } from "./shared.js"
 
 export { AsyncSpliterator }
 
@@ -21,7 +21,9 @@ export type { AsyncSpliteratorInit, SpliteratorInit }
 /**
  * A byte stream delimiting iterator.
  */
-export class Spliterator<R extends DataView | ArrayBuffer = Uint8Array> implements IterableIterator<R>, Disposable {
+export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Array>
+	implements IterableIterator<R>, Disposable
+{
 	//#region Lifecycle
 
 	/**

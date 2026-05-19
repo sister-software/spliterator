@@ -4,7 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import { createWriteStream, PathLike, WriteStream } from "node:fs"
+import { createWriteStream, type PathLike, WriteStream } from "node:fs"
 
 /**
  * Callback for writing a line to a newline-delimited file.

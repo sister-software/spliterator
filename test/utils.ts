@@ -5,7 +5,7 @@
  */
 
 import * as fs from "node:fs/promises"
-import { PathBuilder, PathBuilderLike } from "path-ts"
+import { PathBuilder, type PathBuilderLike } from "path-ts"
 
 export const fixturesDirectory = PathBuilder.from("test/fixtures")
 

@@ -4,6 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
+import type { ReadableWritablePair } from "stream/web"
 import { AsyncSpliterator, Spliterator } from "spliterator"
 import { createChunkIterator } from "spliterator/node/fs"
 import { test } from "vitest"
@@ -73,7 +74,11 @@ test("Asynchronous content parity with readable streams", async ({ expect, onTes
 	const decodedReadStream = ReadableStream
 		// ---
 		.from(decodedReaderSource)
-		.pipeThrough(new TextDecoderStream("utf-8"))
+		// `TextDecoderStream` is typed as `ReadableWritablePair<string, BufferSource>`, but
+		// `WritableStream`'s element type is invariant in the @types/node 25 web-stream typings, so
+		// the contravariant compatibility with `Uint8Array` isn't recognised. The runtime contract
+		// is unchanged — Uint8Array is a valid input to `TextDecoderStream`.
+		.pipeThrough(new TextDecoderStream("utf-8") as unknown as ReadableWritablePair<string, Uint8Array>)
 
 	const decodedStreamLines = await Array.fromAsync(decodedReadStream)
 
