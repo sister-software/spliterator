@@ -7,13 +7,13 @@
 import { resolve as resolvePath } from "node:path"
 import { CharacterSequence, Spliterator } from "spliterator"
 import { createFileWritableStream, createReadStream } from "spliterator/node/fs"
-import { ArgumentsCamelCase, Argv } from "yargs"
+import type { ArgumentsCamelCase, Argv } from "yargs"
 import {
 	commonCommandsBuilder,
-	LineTransformer,
-	LineTransformerModuleExports,
-	PluckArgv,
-	SpliteratorFilter,
+	type LineTransformer,
+	type LineTransformerModuleExports,
+	type PluckArgv,
+	type SpliteratorFilter,
 } from "../utils.js"
 
 export const command = "$0 [source] [destination]"

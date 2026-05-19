@@ -119,11 +119,6 @@ export interface ByteRangeReader extends AsyncIterator<Uint8Array> {
  */
 export interface FileResourceLike extends File {
 	/**
-	 * Read the entire file as a byte array.
-	 */
-	bytes(): Promise<Uint8Array>
-
-	/**
 	 * Slice the file into a new file resource.
 	 *
 	 * @param start - The byte offset to start the slice.

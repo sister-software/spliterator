@@ -1,8 +1,9 @@
 {
 	"extends": "@sister.software/tsconfig",
 	"compilerOptions": {
-		"baseUrl": ".",
-		"forceConsistentCasingInFileNames": true
+		"forceConsistentCasingInFileNames": true,
+		"emitDeclarationOnly": false,
+		"allowImportingTsExtensions": false
 	},
 	"exclude": ["./out/**/*"]
 }

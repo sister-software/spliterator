@@ -4,7 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import { Argv } from "yargs"
+import type { Argv } from "yargs"
 
 export type PluckArgv<T extends (...args: any[]) => any> = ReturnType<T> extends Argv<infer U> ? U : never
 

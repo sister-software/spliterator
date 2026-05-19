@@ -4,8 +4,8 @@
  * @author Teffen Ellis, et al.
  */
 
-import { CharacterSequence, CharacterSequenceInput } from "./CharacterSequence.js"
-import { ByteRange, TypedArray } from "./shared.js"
+import { CharacterSequence, type CharacterSequenceInput } from "./CharacterSequence.js"
+import type { ByteRange, TypedArray } from "./shared.js"
 
 export interface SlidingWindowInit {
 	/**

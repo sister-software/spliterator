@@ -4,11 +4,11 @@
  * @author Teffen Ellis, et al.
  */
 
-import { ReadableStream, ReadableWritablePair, StreamPipeOptions } from "stream/web"
+import { ReadableStream, type ReadableWritablePair, type StreamPipeOptions } from "stream/web"
 import { BufferController } from "./BufferController.js"
-import { CharacterSequence, CharacterSequenceInput } from "./CharacterSequence.js"
+import { CharacterSequence, type CharacterSequenceInput } from "./CharacterSequence.js"
 import { IndexQueue } from "./IndexQueue.js"
-import { AsyncChunkIterator, AsyncDataResource, type ByteRange } from "./shared.js"
+import type { AsyncChunkIterator, AsyncDataResource, ByteRange } from "./shared.js"
 
 const noop = () => void 0
 
@@ -100,7 +100,7 @@ export interface AsyncSpliteratorInit extends SpliteratorInit {
  *
  * @see {@linkcode Spliterator} for the synchronous version.
  */
-export class AsyncSpliterator<R extends DataView | ArrayBuffer = Uint8Array>
+export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Array>
 	implements AsyncIterableIterator<R>, AsyncDisposable
 {
 	//#region Lifecycle

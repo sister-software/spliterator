@@ -4,9 +4,9 @@
  * @author Teffen Ellis, et al.
  */
 
-import { CharacterSequenceInput } from "./CharacterSequence.js"
-import { AsyncDataResource } from "./shared.js"
-import { AsyncSpliteratorInit, Spliterator, SpliteratorInit } from "./Spliterator.js"
+import { type CharacterSequenceInput } from "./CharacterSequence.js"
+import { type AsyncDataResource } from "./shared.js"
+import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "./Spliterator.js"
 
 export interface TextSpliteratorInit {
 	/**
