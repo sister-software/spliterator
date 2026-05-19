@@ -43,18 +43,19 @@
 		"out/cli/**/*"
 	],
 	"scripts": {
-		"demo": "node out/examples/simple-iteration.js",
-		"compile": "NODE_OPTIONS=\"--max-old-space-size=3000\" tsc -b",
+		"check-types": "tsc --build .",
 		"clean": "tsc -b --clean",
-		"test": "yarn compile && vitest",
+		"compile": "NODE_OPTIONS=\"--max-old-space-size=3000\" tsc -b",
+		"demo": "node out/examples/simple-iteration.js",
 		"lint": "run-s lint:prettier:check lint:eslint:check",
-		"lint:fix": "run-s lint:prettier:fix lint:eslint:fix",
-		"lint:prettier:check": "prettier --cache --check -u .",
-		"lint:prettier:fix": "prettier --cache --write -u .",
-		"lint:prettier": "eslint .",
 		"lint:eslint:check": "eslint .",
 		"lint:eslint:fix": "eslint --fix .",
-		"release": "release-it"
+		"lint:fix": "run-s lint:prettier:fix lint:eslint:fix",
+		"lint:prettier": "eslint .",
+		"lint:prettier:check": "prettier --cache --check -u .",
+		"lint:prettier:fix": "prettier --cache --write -u .",
+		"release": "release-it",
+		"test": "yarn compile && vitest"
 	},
 	"prettier": "@sister.software/prettier-config",
 	"dependencies": {
