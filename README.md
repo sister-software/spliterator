@@ -80,6 +80,18 @@ for await (const columns of reader) {
 }
 ```
 
+For tab-separated files, reach for `TSVSpliterator`. It accepts the same options as `CSVSpliterator` and defaults `columnDelimiter` to a tab, so you can omit it for the common case:
+
+```ts
+import { TSVSpliterator } from "spliterator"
+
+const reader = TSVSpliterator.fromAsync("people.tsv", { mode: "object" })
+
+for await (const columns of reader) {
+	console.log(columns)
+}
+```
+
 ## CLI Usage
 
 Spliterator also includes a CLI tool that can be used to stream delimited content from the command line, transform it, filter it, and more.

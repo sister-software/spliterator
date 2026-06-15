@@ -148,7 +148,10 @@ export abstract class CSVSpliterator {
 
 		const decoder = new TextDecoder()
 		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? Delimiters.Comma)
-		const columnSpliteratorInit: SpliteratorInit = { delimiter: columnDelimiter }
+		// Empty columns are semantically meaningful for delimited records — a 30-column row
+		// must stay 30 columns — so the column splitter unconditionally preserves them
+		// regardless of the caller's top-level `skipEmpty`, which only affects row splitting.
+		const columnSpliteratorInit: SpliteratorInit = { delimiter: columnDelimiter, skipEmpty: false }
 
 		const rows = Spliterator.fromSync(source, rowInit)
 
@@ -251,7 +254,7 @@ export abstract class CSVSpliterator {
 		const yieldLimit = take + drop
 
 		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? Delimiters.Comma)
-		const columnSpliteratorInit: SpliteratorInit = { delimiter: columnDelimiter }
+		const columnSpliteratorInit: SpliteratorInit = { delimiter: columnDelimiter, skipEmpty: false }
 
 		const decoder = new TextDecoder()
 

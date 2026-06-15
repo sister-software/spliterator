@@ -4,7 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import { CSVSpliterator, normalizeColumnNames, zipSync } from "spliterator"
+import { CSVSpliterator, Delimiters, normalizeColumnNames, zipSync } from "spliterator"
 import { createChunkIterator } from "spliterator/node/fs"
 import { test } from "vitest"
 import { fixturesDirectory, loadFixture } from "./utils.js"
@@ -75,4 +75,43 @@ test("Async: Rows emit as record", async ({ expect, onTestFinished }) => {
 	const emittedRowAsync = await rowGeneratorAsync.next()
 
 	expect(emittedRowAsync.value, "Async: Header should be record").toMatchObject(expectedRow)
+})
+
+// Regression for issue #2: the per-row column tokenizer used to inherit the default
+// `skipEmpty: true` and silently collapse consecutive delimiters, dropping every empty cell
+// and shifting later columns left. Empty cells in delimited records are semantically meaningful
+// (a 5-column row must stay 5 columns), so the column splitter must preserve them.
+const emptyFieldsTsv = "a\tb\tc\td\te\n1\t\t\t\t5\n"
+
+test("Empty fields are preserved between consecutive column delimiters", ({ expect }) => {
+	const rows = Array.from(
+		CSVSpliterator.from(emptyFieldsTsv, { mode: "array", columnDelimiter: Delimiters.Tab, header: false })
+	)
+
+	expect(rows).toEqual([
+		["a", "b", "c", "d", "e"],
+		["1", "", "", "", "5"],
+	])
+})
+
+test("Async: Empty fields are preserved between consecutive column delimiters", async ({ expect }) => {
+	const bytes = new TextEncoder().encode(emptyFieldsTsv)
+	const chunkIterator = (async function* () {
+		yield bytes
+	})()
+
+	const rows: string[][] = []
+
+	for await (const row of CSVSpliterator.fromAsync(chunkIterator, {
+		mode: "array",
+		columnDelimiter: Delimiters.Tab,
+		header: false,
+	})) {
+		rows.push(row as string[])
+	}
+
+	expect(rows).toEqual([
+		["a", "b", "c", "d", "e"],
+		["1", "", "", "", "5"],
+	])
 })
