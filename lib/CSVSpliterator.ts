@@ -97,7 +97,20 @@ export interface CSVSpliteratorInit extends SpliteratorInit {
 	transformers?: Iterable<CSVTransformerEntry> | CSVTransformerRecord
 }
 
+/**
+ * A static class spliterator for comma-separated values.
+ *
+ * @see {@linkcode CSVSpliterator.from} for synchronous usage.
+ * @see {@linkcode CSVSpliterator.fromAsync} for asynchronous usage.
+ */
 export abstract class CSVSpliterator {
+	/**
+	 * The column delimiter used by the spliterator.
+	 *
+	 * @default Delimiters.Comma
+	 */
+	public static ColumnDelimiter: number = Delimiters.Comma
+
 	constructor() {
 		throw new TypeError("Static class cannot be instantiated. Did you mean `CSVSpliterator.from`?")
 	}
@@ -135,7 +148,7 @@ export abstract class CSVSpliterator {
 			transformers: transformersInput = [],
 			normalizeKeys,
 			mode = "array",
-			columnDelimiter: columnDelimiterInput = Delimiters.Comma,
+			columnDelimiter: columnDelimiterInput = this.ColumnDelimiter,
 			take = Infinity,
 			drop = 0,
 			...rowInit
@@ -147,7 +160,7 @@ export abstract class CSVSpliterator {
 		const yieldLimit = take + drop
 
 		const decoder = new TextDecoder()
-		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? Delimiters.Comma)
+		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? this.ColumnDelimiter)
 		// Empty columns are semantically meaningful for delimited records — a 30-column row
 		// must stay 30 columns — so the column splitter unconditionally preserves them
 		// regardless of the caller's top-level `skipEmpty`, which only affects row splitting.
@@ -253,7 +266,7 @@ export abstract class CSVSpliterator {
 		let yieldCount = 0
 		const yieldLimit = take + drop
 
-		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? Delimiters.Comma)
+		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? this.ColumnDelimiter)
 		const columnSpliteratorInit: SpliteratorInit = { delimiter: columnDelimiter, skipEmpty: false }
 
 		const decoder = new TextDecoder()
