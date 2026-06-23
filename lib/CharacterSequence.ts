@@ -75,6 +75,11 @@ export const Delimiters = {
 	 * Record separator (␞)
 	 */
 	RecordSeparator: 30,
+
+	/**
+	 * Pipe (|)
+	 */
+	Pipe: 124,
 } as const satisfies Record<string, number>
 
 export const VisibleDelimiterMap = new Map<number, string>([
