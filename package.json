@@ -1,6 +1,6 @@
 {
 	"name": "spliterator",
-	"version": "2.2.0",
+	"version": "2.2.1",
 	"description": "Line-delimited iterator library for CSV, NDJSON, and other delimited formats.",
 	"keywords": [
 		"csv",
