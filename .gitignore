@@ -68,3 +68,4 @@ schema/generated
 # Agents
 .claude/settings.local.json
 .pi/
+
