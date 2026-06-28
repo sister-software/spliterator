@@ -2,7 +2,7 @@
 
 /**
  * @copyright Sister Software
- * @license AGPL-3.0
+ * @license MIT
  * @author Teffen Ellis, et al.
  * @file CLI entry point for the Spliterator library.
  */

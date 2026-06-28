@@ -14,7 +14,7 @@
 	"bugs": {
 		"url": "https://github.com/sister-software/spliterator/issues"
 	},
-	"license": "AGPL-3.0-only",
+	"license": "MIT",
 	"contributors": [
 		{
 			"name": "Teffen Ellis",

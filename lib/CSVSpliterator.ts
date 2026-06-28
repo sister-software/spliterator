@@ -1,6 +1,6 @@
 /**
  * @copyright Sister Software
- * @license AGPL-3.0
+ * @license MIT
  * @author Teffen Ellis, et al.
  */
 
