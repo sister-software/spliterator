@@ -720,10 +720,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@sister.software/tsconfig@npm:^8.0.1":
-  version: 8.0.1
-  resolution: "@sister.software/tsconfig@npm:8.0.1"
-  checksum: 10/28a2be8f2ee2b166217d8f3ff02df1b199502a08bbc8a25982ae9a7087da964c92cf1ce8c8fe77c664dee79e7cfc1601a3786b48e16ec5ea2a69a8454f07a9c8
+"@sister.software/tsconfig@npm:^9.0.0":
+  version: 9.1.0
+  resolution: "@sister.software/tsconfig@npm:9.1.0"
+  checksum: 10/30d98653431b2876cbae3f56ca24453b0cc472282d907650c01001e6f8708a69c0d7e66dff50d3432fc7c176f90a5edc32adfb7dbcc1a74ceb4f4b03996769b2
   languageName: node
   linkType: hard
 
@@ -4547,7 +4547,7 @@ __metadata:
   dependencies:
     "@sister.software/oxfmt-config": "npm:^9.1.0"
     "@sister.software/oxlint-config": "npm:^9.1.0"
-    "@sister.software/tsconfig": "npm:^8.0.1"
+    "@sister.software/tsconfig": "npm:^9.0.0"
     "@types/node": "npm:^25.9.0"
     "@types/yargs": "npm:^17.0.35"
     change-case: "npm:^5.4.4"
