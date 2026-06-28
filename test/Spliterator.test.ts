@@ -5,9 +5,11 @@
  */
 
 import type { ReadableWritablePair } from "stream/web"
+
 import { AsyncSpliterator, Spliterator } from "spliterator"
 import { createChunkIterator } from "spliterator/node/fs"
 import { test } from "vitest"
+
 import { fixturesDirectory, loadFixture } from "./utils.js"
 
 test("Synchronous parity with String.prototype.split", async ({ expect }) => {

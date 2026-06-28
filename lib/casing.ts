@@ -50,14 +50,14 @@ export function isUniformlyCased(input: string | null): boolean {
  */
 export function smartCapitalCase(input: string): string {
 	if (input.includes("@")) return input
+
 	if (isUniformlyCased(input)) return input
 
 	return capitalCase(input)
 }
 
 /**
- * Given an array of column names, normalize them to ensure they are unique and usable as object
- * keys.
+ * Given an array of column names, normalize them to ensure they are unique and usable as object keys.
  */
 export function normalizeColumnNames(columnHeaders: Iterable<string>): string[] {
 	const columnInputCountMap = new Map<string, number>()

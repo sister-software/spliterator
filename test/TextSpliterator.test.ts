@@ -6,6 +6,7 @@
 
 import { TextSpliterator } from "spliterator"
 import { test } from "vitest"
+
 import { fixturesDirectory, loadFixture } from "./utils.js"
 
 test("Synchronous parity with String.prototype.split", async ({ expect }) => {

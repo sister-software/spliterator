@@ -5,6 +5,7 @@
  */
 
 import * as fs from "node:fs/promises"
+
 import { AsyncSpliterator, CharacterSequence } from "spliterator"
 import { fixturesDirectory } from "spliterator/test/utils"
 

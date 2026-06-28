@@ -59,16 +59,14 @@ export class BufferController {
 	/**
 	 * Modify the buffer in place, keeping only the bytes between the start and end indices.
 	 *
-	 * This is performed after we're confident that any data preceeding `start` or following `end` is
-	 * no longer needed.
+	 * This is performed after we're confident that any data preceeding `start` or following `end` is no longer needed.
 	 *
-	 * `bytesWritten` is rebased onto the new window so it always reflects the count of valid bytes
-	 * present after compression. Bytes outside the kept window are dropped from the count even if the
-	 * underlying allocation is larger.
+	 * `bytesWritten` is rebased onto the new window so it always reflects the count of valid bytes present after
+	 * compression. Bytes outside the kept window are dropped from the count even if the underlying allocation is larger.
 	 *
 	 * @param start - The starting byte index of which bytes to keep.
-	 * @param end - The ending byte index of which bytes to keep. Defaults to the current buffer
-	 *   length. Values past the buffer length are clamped.
+	 * @param end - The ending byte index of which bytes to keep. Defaults to the current buffer length. Values past the
+	 *   buffer length are clamped.
 	 */
 	public compress(start: number = 0, end: number = this.bytes.length): void {
 		const clampedEnd = Math.min(end, this.bytes.length)
@@ -91,8 +89,8 @@ export class BufferController {
 	}
 
 	/**
-	 * Gets a new Uint8Array view of the ArrayBuffer store for this array, referencing the elements at
-	 * begin, inclusive, up to end, exclusive.
+	 * Gets a new Uint8Array view of the ArrayBuffer store for this array, referencing the elements at begin, inclusive,
+	 * up to end, exclusive.
 	 *
 	 * @param begin — The index of the beginning of the array.
 	 * @param end — The index of the end of the array
@@ -114,8 +112,8 @@ export class BufferController {
 	/**
 	 * Sets a value or an array of values.
 	 *
-	 * Unlike the `TypedArray.set` method, this method will grow the buffer if the offset is greater
-	 * than the current byte length.
+	 * Unlike the `TypedArray.set` method, this method will grow the buffer if the offset is greater than the current byte
+	 * length.
 	 *
 	 * @param array — A typed or untyped array of values to set.
 	 * @param offset — The index in the current array at which the values are to be written.

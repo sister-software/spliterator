@@ -5,9 +5,11 @@
  */
 
 import { resolve as resolvePath } from "node:path"
+
 import { CharacterSequence, Spliterator } from "spliterator"
 import { createFileWritableStream, createReadStream } from "spliterator/node/fs"
 import type { ArgumentsCamelCase, Argv } from "yargs"
+
 import {
 	commonCommandsBuilder,
 	type LineTransformer,
@@ -39,6 +41,7 @@ export const handler = async (argv: ArgumentsCamelCase<IterateCommandArgs>) => {
 	}
 
 	let filter: SpliteratorFilter = () => true
+
 	if (argv.filter) {
 		const module = await import(resolvePath(argv.filter))
 		filter = module.default

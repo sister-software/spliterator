@@ -18,8 +18,7 @@ export interface TextSpliteratorInit {
 	encoding?: string
 
 	/**
-	 * Whether to throw an error when encountering invalid data, or to swap it with a replacement
-	 * character.
+	 * Whether to throw an error when encountering invalid data, or to swap it with a replacement character.
 	 */
 	fatal?: boolean
 
@@ -39,6 +38,7 @@ export abstract class TextSpliterator {
 	 *
 	 * @param source The source content to split.
 	 * @param options The options to use when splitting the content.
+	 *
 	 * @yields Each slice of the source content.
 	 * @see {@linkcode TextSpliterator.fromAsync} for asynchronous iteration with decoding.
 	 * @see {@linkcode Spliterator.fromSync} for synchronous iteration without decoding.
@@ -75,6 +75,7 @@ export abstract class TextSpliterator {
 	 *
 	 * @param source The async data resource to split.
 	 * @param options The options to use when splitting the content.
+	 *
 	 * @yields Each slice of the source content.
 	 * @see {@linkcode TextSpliterator.from} for synchronous iteration with decoding.
 	 * @see {@linkcode Spliterator.fromAsync} for asynchronous iteration without decoding.

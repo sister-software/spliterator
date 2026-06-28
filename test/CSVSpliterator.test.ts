@@ -7,6 +7,7 @@
 import { CSVSpliterator, Delimiters, normalizeColumnNames, zipSync } from "spliterator"
 import { createChunkIterator } from "spliterator/node/fs"
 import { test } from "vitest"
+
 import { fixturesDirectory, loadFixture } from "./utils.js"
 
 const fixturePath = fixturesDirectory("carvel.csv")

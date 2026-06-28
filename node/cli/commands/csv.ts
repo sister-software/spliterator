@@ -6,6 +6,7 @@
  */
 
 import { resolve as resolvePath } from "node:path"
+
 import {
 	CharacterSequence,
 	CSVSpliterator,
@@ -16,6 +17,7 @@ import {
 } from "spliterator"
 import { createFileWritableStream, createReadStream } from "spliterator/node/fs"
 import { type ArgumentsCamelCase, type Argv } from "yargs"
+
 import { commonCommandsBuilder, type PluckArgv, type SpliteratorFilter } from "../utils.js"
 
 export const command = "csv [source] [destination]"
@@ -60,6 +62,7 @@ export const handler = async (argv: ArgumentsCamelCase<CSVCommandArgs>) => {
 	}
 
 	let filter: SpliteratorFilter = () => true
+
 	if (argv.filter) {
 		const module = await import(resolvePath(argv.filter))
 		filter = module.default

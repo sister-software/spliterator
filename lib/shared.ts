@@ -67,8 +67,7 @@ export function isFileHandleLike(input: unknown): input is FileHandleLike {
 /**
  * Type-helper to determine the destination type for a typed array.
  *
- * This is useful to infer the ultimate return type of a function which optionally accepts a typed
- * array destination.
+ * This is useful to infer the ultimate return type of a function which optionally accepts a typed array destination.
  */
 export type TypedArrayFallback<T> = T extends TypedArray ? T : Uint8Array
 
@@ -101,8 +100,8 @@ export interface ReadBytesOptions {
 /**
  * A trait for reading a range of bytes from a source.
  *
- * While possible with a variety of platform-specific APIs, this trait provides a common interface
- * for reading byte ranges.
+ * While possible with a variety of platform-specific APIs, this trait provides a common interface for reading byte
+ * ranges.
  */
 export interface ByteRangeReader extends AsyncIterator<Uint8Array> {
 	/**
@@ -223,6 +222,7 @@ export function zippedEntries<T, U>(zipped: Zipped<T, U>): ZippedEntries<Zipped<
  *
  * @param a The first iterable to zip.
  * @param b The second iterable to zip.
+ *
  * @yields Pairs of elements from the two iterables.
  * @see {@linkcode zipAsync} for the asynchronous version.
  */
@@ -253,6 +253,7 @@ export function* zipSync<T, U>(a: Iterable<T>, b: Iterable<U>): Generator<Zipped
  *
  * @param a The first iterable to zip.
  * @param b The second iterable to zip.
+ *
  * @yields Pairs of elements from the two iterables.
  * @see {@linkcode zipSync} for the synchronous version.
  */

@@ -32,6 +32,7 @@ if (tableMode) {
 	console.log("Line Number, Line Content")
 
 	let idx = 0
+
 	for await (const line of spliterator) {
 		idx++
 		console.log(`${Colorette.bold(idx)}, ${Colorette.yellow(debugAsVisibleCharacters(line))}`)

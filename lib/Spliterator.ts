@@ -75,8 +75,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 */
 	static from(source: AsyncDataResource, init?: AsyncSpliteratorInit): Promise<AsyncSpliterator>
 	/**
-	 * Create a new delimited generator from a resource such as a **file handle, URL, or byte
-	 * stream**.
+	 * Create a new delimited generator from a resource such as a **file handle, URL, or byte stream**.
 	 *
 	 * @param source - The data resource to read from.
 	 * @param init - The initialization options for the generator.
@@ -178,8 +177,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 *
 	 * Note that indices are relative to the buffer, not the file.
 	 *
-	 * This means that the start index is always 0, and the end index is the byte length of the
-	 * buffer.
+	 * This means that the start index is always 0, and the end index is the byte length of the buffer.
 	 */
 	readonly #indices = new IndexQueue()
 
@@ -266,8 +264,8 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	#finalize(): IteratorReturnResult<undefined> {
 		if (this.#debug) {
 			/**
-			 * The total number of bytes we expect to be omitted from the buffer. This is derived from the
-			 * number of of yields and the length of the delimiter.
+			 * The total number of bytes we expect to be omitted from the buffer. This is derived from the number of of yields
+			 * and the length of the delimiter.
 			 */
 			const expectedYieldedDelimitedBytes = (this.#yieldCount - 1) * this.#needle.length
 			const omittedBytes = this.#yieldByteEstimate - (this.#yieldedByteLength + expectedYieldedDelimitedBytes)
@@ -449,6 +447,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 
 		if (!currentByteRange) {
 			this.#done = true
+
 			return this.#finalize()
 		}
 

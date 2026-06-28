@@ -5,6 +5,7 @@
  */
 
 import { ReadableStream, type ReadableWritablePair, type StreamPipeOptions } from "stream/web"
+
 import { BufferController } from "./BufferController.js"
 import { CharacterSequence, type CharacterSequenceInput } from "./CharacterSequence.js"
 import { IndexQueue } from "./IndexQueue.js"
@@ -68,8 +69,7 @@ export interface SpliteratorInit {
  */
 export interface AsyncSpliteratorInit extends SpliteratorInit {
 	/**
-	 * The buffer chunk size to read from the file, i.e. the high-water mark for the file read
-	 * operation.
+	 * The buffer chunk size to read from the file, i.e. the high-water mark for the file read operation.
 	 *
 	 * @default BlockSize * 16
 	 * @minimum The delimiter byte length * 4 or block size of the file system. Whichever is greater.
@@ -94,7 +94,7 @@ export interface AsyncSpliteratorInit extends SpliteratorInit {
  * const file = await AsyncSpliterator.from("data.csv")
  *
  * for await (const line of file) {
- *  console.log(line)
+ * 	console.log(line)
  * }
  * ```
  *
@@ -238,8 +238,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	 *
 	 * Note that indices are relative to the buffer, not the file.
 	 *
-	 * This means that the start index is always 0, and the end index is the byte length of the
-	 * buffer.
+	 * This means that the start index is always 0, and the end index is the byte length of the buffer.
 	 */
 	readonly #indices = new IndexQueue()
 
@@ -249,8 +248,8 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	readonly #needle: CharacterSequence
 
 	/**
-	 * The buffer containing the current chunks of data. This will be resized as needed to accommodate
-	 * the file read operation.
+	 * The buffer containing the current chunks of data. This will be resized as needed to accommodate the file read
+	 * operation.
 	 */
 	readonly #controller: BufferController
 
@@ -272,8 +271,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	/**
 	 * The high water mark for the buffer.
 	 *
-	 * This defines the size of each read operation, as well as the total size of indices to keep in
-	 * memory.
+	 * This defines the size of each read operation, as well as the total size of indices to keep in memory.
 	 */
 	readonly #highWaterMark: number
 
@@ -316,8 +314,8 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	/**
 	 * Find and enqueue delimiter positions.
 	 *
-	 * The search is bounded by `bytesWritten` so we never scan into uninitialized buffer memory and
-	 * never enqueue ranges whose `end` exceeds the valid byte length.
+	 * The search is bounded by `bytesWritten` so we never scan into uninitialized buffer memory and never enqueue ranges
+	 * whose `end` exceeds the valid byte length.
 	 */
 	#search() {
 		const lastByteRange = this.#indices.peekLast()
@@ -398,8 +396,8 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	async #finalize(): Promise<IteratorReturnResult<undefined>> {
 		if (this.#debug) {
 			/**
-			 * The total number of bytes we expect to be omitted from the buffer. This is derived from the
-			 * number of of yields and the length of the delimiter.
+			 * The total number of bytes we expect to be omitted from the buffer. This is derived from the number of of yields
+			 * and the length of the delimiter.
 			 */
 			const expectedYieldedDelimitedBytes = (this.#yieldCount - 1) * this.#needle.length
 
@@ -443,6 +441,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 
 		if (!currentByteRange) {
 			this.#done = true
+
 			return this.#finalize()
 		}
 
@@ -541,31 +540,28 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	//#region Experimental
 
 	/**
-	 * Given a file handle containing delimited data and a desired slice count, returns an array of
-	 * slices of the buffer between delimiters.
+	 * Given a file handle containing delimited data and a desired slice count, returns an array of slices of the buffer
+	 * between delimiters.
 	 *
 	 * This is an advanced function so an analogy is provided:
 	 *
-	 * Suppose you had to manually search through a very large book page by page to find where each
-	 * chapter begins and ends. For a book with 1,000,000 pages, a single person would take a long
-	 * time to go through it all.
+	 * Suppose you had to manually search through a very large book page by page to find where each chapter begins and
+	 * ends. For a book with 1,000,000 pages, a single person would take a long time to go through it all.
 	 *
-	 * You could add more people to the task by laying out all the pages, measuring the length and
-	 * assigning each person a length of pages to traverse.
+	 * You could add more people to the task by laying out all the pages, measuring the length and assigning each person a
+	 * length of pages to traverse.
 	 *
 	 * There's a few ways to go about this:
 	 *
-	 * We could approach this in serial -- having the first worker start from page 1 and scanning
-	 * until they find the beginning of the next chapter, handing off the range to the next worker.
-	 * This is how `AsyncSpliterator` works.
+	 * We could approach this in serial -- having the first worker start from page 1 and scanning until they find the
+	 * beginning of the next chapter, handing off the range to the next worker. This is how `AsyncSpliterator` works.
 	 *
-	 * However this is inefficient because no matter how many workers we have, they must wait for the
-	 * previous worker to finish before they can start. Ideally, a desired number of workers would be
-	 * able to scan their own _length_ of pages simultaneously, and settle up on the boundaries of the
-	 * chapters they find.
+	 * However this is inefficient because no matter how many workers we have, they must wait for the previous worker to
+	 * finish before they can start. Ideally, a desired number of workers would be able to scan their own _length_ of
+	 * pages simultaneously, and settle up on the boundaries of the chapters they find.
 	 *
-	 * `AsyncSpliterator.asMany` is like the second approach, spltting the book into mostly equal
-	 * lengths and having each worker scan their own length of pages.
+	 * `AsyncSpliterator.asMany` is like the second approach, spltting the book into mostly equal lengths and having each
+	 * worker scan their own length of pages.
 	 *
 	 * @param source - The file handle to read from.
 	 * @param delimiter - The character to delimit by. Typically a newline or comma.
@@ -587,6 +583,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 
 		const { createChunkIterator, readFileSize } = await import("spliterator/node/fs")
 		const fileSize = await readFileSize(source)
+
 		// const file = createChunkIterator(source, {
 		// 	start: 0,
 		// })

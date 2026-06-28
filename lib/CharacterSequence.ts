@@ -186,6 +186,7 @@ export class CharacterSequence extends Uint8Array {
 
 		super(bytes)
 
+		// oxlint-disable-next-line unicorn/no-new-array -- fixed length (256), immediately .fill()-ed
 		this.#skipIndex = new Array(256).fill(this.length)
 
 		// Build the jump table - simpler than full Boyer-Moore

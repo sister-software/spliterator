@@ -42,6 +42,7 @@ export const CSVSpliteratorEmitters = {
 		return Array.from(zipSync(headerColumns, columns), ([transformer, value], idx) => {
 			const key = transformer?.[0]
 			const transform = transformer?.[1] ?? identity
+
 			return [key ?? `column_${idx}`, transform(value ?? ""), idx]
 		})
 	},
@@ -82,8 +83,8 @@ export interface CSVSpliteratorInit extends SpliteratorInit {
 	/**
 	 * Whether to normalize the keys of the header row.
 	 *
-	 * This will convert all header names to lowercase and replace spaces with underscores, making
-	 * them more suitable for use as object keys.
+	 * This will convert all header names to lowercase and replace spaces with underscores, making them more suitable for
+	 * use as object keys.
 	 */
 	normalizeKeys?: boolean
 
@@ -184,6 +185,7 @@ export abstract class CSVSpliterator {
 			} else {
 				transformers = headers.map((columnName) => {
 					const transform = (transformersInput as CSVTransformerRecord)[columnName] || identity
+
 					return [columnName, transform]
 				})
 			}
@@ -226,11 +228,12 @@ export abstract class CSVSpliterator {
 		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode?: "array" }
 	): AsyncGenerator<T>
 	/**
-	 * Given an asychronous data source, splits the data by rows(usually by newline) and then by
-	 * columns (usually by comma).
+	 * Given an asychronous data source, splits the data by rows(usually by newline) and then by columns (usually by
+	 * comma).
 	 *
 	 * @param source The data source to split.
 	 * @param init Options for the spliterator.
+	 *
 	 * @yields Each row, shaped according to the `mode` option.
 	 */
 	static fromAsync(
@@ -238,11 +241,12 @@ export abstract class CSVSpliterator {
 		init?: CSVSpliteratorInit & AsyncSpliteratorInit
 	): AsyncGenerator<unknown>
 	/**
-	 * Given an asychronous data source, splits the data by rows (usually by newline) and then by
-	 * columns (usually by comma).
+	 * Given an asychronous data source, splits the data by rows (usually by newline) and then by columns (usually by
+	 * comma).
 	 *
 	 * @param source The data source to split.
 	 * @param init Options for the spliterator.
+	 *
 	 * @yields Each row, shaped according to the `mode` option.
 	 */
 	static async *fromAsync(
@@ -289,6 +293,7 @@ export abstract class CSVSpliterator {
 			} else {
 				transformers = headers.map((columnName) => {
 					const transform = (transformersInput as CSVTransformerRecord)[columnName] || identity
+
 					return [columnName, transform]
 				})
 			}

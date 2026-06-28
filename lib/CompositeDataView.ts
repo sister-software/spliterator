@@ -31,8 +31,8 @@ interface ChunkInfo {
 }
 
 /**
- * Locally-defined mirror of the TC39 `RelativeIndexable` interface, which is no longer surfaced by
- * the `ESNext` lib used here.
+ * Locally-defined mirror of the TC39 `RelativeIndexable` interface, which is no longer surfaced by the `ESNext` lib
+ * used here.
  */
 interface RelativeIndexable<T> {
 	at(index: number): T | undefined
@@ -64,9 +64,11 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 	 */
 	#inferChunkConstructor(): MutableTypedArrayConstructor<Chunk[0]> {
 		const first = this.#chunks[0]
+
 		if (!first) {
 			throw new TypeError("No chunks in composite buffer, cannot infer constructor")
 		}
+
 		return first.constructor as MutableTypedArrayConstructor<Chunk[0]>
 	}
 
@@ -164,11 +166,13 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 	 */
 	public at(index: number): Chunk[0] {
 		const result = this.#findChunkForIndex(index)
+
 		if (!result) {
 			throw new RangeError("Index out of range")
 		}
 
 		const { chunk, chunkInfo } = result
+
 		return chunk[index - chunkInfo.offset]!
 	}
 
@@ -194,6 +198,7 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 		this.#chunks.unshift(chunk)
 		this.#memoizedByteLength += chunk.length
 		this.#updateChunkOffsets()
+
 		return this.#memoizedByteLength
 	}
 
@@ -208,6 +213,7 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 
 			this.#updateChunkOffsets()
 		}
+
 		return chunk
 	}
 
@@ -234,8 +240,7 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 		 */
 		begin: number = 0,
 		/**
-		 * Element to end at. The offset is exclusive. If not provided, the view extends to the end of
-		 * the buffer.
+		 * Element to end at. The offset is exclusive. If not provided, the view extends to the end of the buffer.
 		 */
 		end: number = this.#memoizedByteLength
 	): Chunk {
@@ -259,6 +264,7 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 		if (startChunk.chunk === endChunk.chunk) {
 			const relativeStart = begin - startChunk.chunkInfo.offset
 			const relativeEnd = end - startChunk.chunkInfo.offset
+
 			return startChunk.chunk.subarray(relativeStart, relativeEnd) as Chunk
 		}
 

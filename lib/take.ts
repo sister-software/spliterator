@@ -12,6 +12,7 @@
  * @param collection The collection to batch.
  * @param batchSize The size of each batch.
  * @param callback The async callback to execute on each batch.
+ *
  * @yields The result of each callback execution
  */
 export async function* asyncParallelIterator<T, C extends (entry: T) => Promise<unknown>>(
@@ -73,8 +74,7 @@ export async function* asyncParallelIterator<T, C extends (entry: T) => Promise<
 /**
  * Given an async iterable collection, returns an async iterable, yielding batches of items.
  *
- * This is useful for emitting asynchronous items in batches, such as when processing a stream of
- * data.
+ * This is useful for emitting asynchronous items in batches, such as when processing a stream of data.
  *
  * @yields Each batch of items.
  */

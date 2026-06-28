@@ -42,6 +42,7 @@ export function createNewlineWriter(filePath: PathLike): NewlineWriter {
 			writer.write(content, "utf8", (error) => {
 				if (error) {
 					reject(error)
+
 					return
 				}
 
@@ -55,6 +56,7 @@ export function createNewlineWriter(filePath: PathLike): NewlineWriter {
 			writer.close((error) => {
 				if (error) {
 					reject(error)
+
 					return
 				}
 

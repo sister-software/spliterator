@@ -7,6 +7,7 @@
 import { type CreateWriteStreamOptions, open, stat } from "node:fs/promises"
 import { Writable } from "node:stream"
 import { WritableStream } from "node:stream/web"
+
 import { type AsyncChunkIterator, type AsyncDataResource, isFileHandleLike } from "../../lib/shared.js"
 
 /**
@@ -40,8 +41,8 @@ export async function createReadStream(source: unknown, highWaterMark: number): 
 /**
  * Create a writable stream from a file system destination.
  *
- * Unlike Node's native `fs.createWriteStream`, this function will return `process.stdout` if the
- * destination is not a string or URL.
+ * Unlike Node's native `fs.createWriteStream`, this function will return `process.stdout` if the destination is not a
+ * string or URL.
  *
  * @param destination The destination to write to.
  *
@@ -73,6 +74,7 @@ export async function createFileWritableStream(
 	return new WritableStream({
 		async write(chunk) {
 			const canWrite = nodeWriteStream.write(chunk)
+
 			if (canWrite) return Promise.resolve()
 
 			return new Promise((resolve) => {
