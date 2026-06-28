@@ -54,6 +54,11 @@ pids
 !.yarn/versions
 
 
+## Rust/WASM build artifacts
+wasm/target/
+wasm/*.wasm
+wasm/Cargo.lock
+
 ## Build asset directories
 dist
 out
@@ -62,3 +67,4 @@ schema/generated
 
 # Agents
 .claude/settings.local.json
+.pi/

@@ -4,6 +4,8 @@
  * @author Teffen Ellis, et al.
  */
 
+import { loadWasmModule, WASM_THRESHOLD, type WasmDelimiterScanner, type WasmMemory } from "./wasm_module.js"
+
 /**
  * Type-predicate to determine if a value is an array-like object.
  */
@@ -103,6 +105,8 @@ export function debugAsVisibleCharacters(delimiter: Uint8Array): string {
 		.join("")
 }
 
+const encoder = new TextEncoder()
+
 export function normalizeCharacterInput(input: CharacterSequenceInput): Uint8Array {
 	switch (typeof input) {
 		case "number":
@@ -112,7 +116,7 @@ export function normalizeCharacterInput(input: CharacterSequenceInput): Uint8Arr
 
 			return Uint8Array.from([input])
 		case "string":
-			return new TextEncoder().encode(input)
+			return encoder.encode(input)
 		case "object":
 			if (isArrayLike(input)) {
 				return input
@@ -130,6 +134,17 @@ export function normalizeCharacterInput(input: CharacterSequenceInput): Uint8Arr
 }
 
 /**
+ * Ensure WASM memory has capacity for `required` bytes, growing if necessary.
+ */
+function ensureWasmCapacity(memory: WasmMemory, required: number): void {
+	if (required <= memory.buffer.byteLength) return
+
+	const pageSize = 64 * 1024
+	const neededPages = Math.ceil((required - memory.buffer.byteLength) / pageSize)
+	memory.grow(neededPages)
+}
+
+/**
  * An encoded sequence of characters, typically bytes representing a delimiter.
  *
  * Unlike a string, this class is optimized for searching and slicing.
@@ -143,31 +158,108 @@ export class CharacterSequence extends Uint8Array {
 	#skipIndex: number[]
 
 	/**
+	 * Lazily-loaded WASM SIMD delimiter scanner.
+	 *
+	 * - `undefined`: not yet attempted (will trigger async load on next search).
+	 * - `null`: load failed or WASM unavailable (never try again).
+	 * - `WasmDelimiterScanner`: ready to use.
+	 */
+	static #wasmScanner: WasmDelimiterScanner | null | undefined
+
+	/**
+	 * Cached last haystack reference + layout to avoid re-copying.
+	 */
+	static #wasmHaystack: Uint8Array | null = null
+
+	/**
+	 * Byte offset in WASM memory where the haystack begins (always 0).
+	 */
+	static #wasmHaystackOffset = 0
+
+	/**
+	 * Byte offset in WASM memory where the DELIMITER PATTERN begins.
+	 *
+	 * Set once when the haystack is first copied. Remains stable across
+	 * repeated searches on the same buffer.
+	 */
+	static #wasmPatternOffset = 0
+
+	/**
+	 * Initiate WASM module loading (idempotent — safe to call multiple times).
+	 */
+	static #ensureWasm(): void {
+		if (CharacterSequence.#wasmScanner !== undefined) return
+
+		CharacterSequence.#wasmScanner = null
+
+		loadWasmModule().then((mod) => {
+			CharacterSequence.#wasmScanner = mod
+		})
+	}
+
+	/**
 	 * Perform a Boyer-Moore-Horspool search for the pattern in the text.
 	 *
-	 * @param haystack The encoded text to search.
-	 * @param start The byte index to start searching from.
-	 * @param end The byte index to stop searching at.
-	 *
-	 * @returns The byte index of the pattern in the text, or -1 if not found.
+	 * For multi-byte delimiters with large haystacks, delegates to the WASM SIMD
+	 * scanner if available. Falls back to JS BMH otherwise.
 	 */
 	public search(haystack: Uint8Array, start: number = 0, end = haystack.length): number {
 		const sequenceLength = this.length
 
+		// Multi-byte + large haystack + WASM available → SIMD path
+		if (sequenceLength > 1 && end - start >= WASM_THRESHOLD) {
+			const wasm = CharacterSequence.#wasmScanner
+
+			if (wasm) {
+				// Only copy if the haystack changed
+				if (haystack !== CharacterSequence.#wasmHaystack) {
+					const haystackLen = end - start
+					const totalNeeded = haystackLen + sequenceLength
+
+					ensureWasmCapacity(wasm.memory, totalNeeded)
+
+					const buffer = new Uint8Array(wasm.memory.buffer, 0, totalNeeded)
+
+					buffer.set(haystack.subarray(start, end), 0)
+					buffer.set(this, haystackLen)
+
+					CharacterSequence.#wasmHaystack = haystack
+					CharacterSequence.#wasmPatternOffset = haystackLen
+				}
+
+				// Search from `start` within the copied buffer.
+				// The haystack is at WASM offset 0 and length = #wasmPatternOffset bytes.
+				const result = wasm.findDelimiter(
+					start,
+					CharacterSequence.#wasmPatternOffset - start,
+					CharacterSequence.#wasmPatternOffset,
+					sequenceLength
+				)
+
+				return result >= 0 ? start + result : -1
+			}
+
+			// WASM not yet loaded — trigger load for next time, fall through to BMH
+			if (CharacterSequence.#wasmScanner === undefined) {
+				CharacterSequence.#ensureWasm()
+			}
+		}
+
+		// Clear WASM haystack cache so next *different* buffer triggers a fresh copy
+		CharacterSequence.#wasmHaystack = null
+
+		// --- JS Boyer-Moore-Horspool path ---
 		let startIndex = start
 
 		while (startIndex <= end - sequenceLength) {
 			let lastIndex = sequenceLength - 1
 
-			// Match pattern from right to left
 			while (lastIndex >= 0 && this[lastIndex] === haystack[startIndex + lastIndex]) {
 				lastIndex--
 			}
 
-			// Pattern found
 			if (lastIndex < 0) return startIndex
 
-			// Jump based on the last character in the window
 			startIndex += this.#skipIndex[haystack[startIndex + sequenceLength - 1]!]!
 		}
 
@@ -178,18 +270,14 @@ export class CharacterSequence extends Uint8Array {
 		return new TextDecoder(encoding).decode(this)
 	}
 
-	/**
-	 * Create a new character sequence from a delimiter.
-	 */
 	constructor(input: CharacterSequenceInput = Delimiters.LineFeed) {
 		const bytes = normalizeCharacterInput(input)
 
 		super(bytes)
 
-		// oxlint-disable-next-line unicorn/no-new-array -- fixed length (256), immediately .fill()-ed
+		// oxlint-disable-next-line unicorn/no-new-array
 		this.#skipIndex = new Array(256).fill(this.length)
 
-		// Build the jump table - simpler than full Boyer-Moore
 		for (let i = 0; i < this.length - 1; i++) {
 			this.#skipIndex[this[i]!] = this.length - 1 - i
 		}
