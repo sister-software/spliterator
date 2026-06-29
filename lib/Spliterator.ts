@@ -1,6 +1,6 @@
 /**
  * @copyright Sister Software
- * @license AGPL-3.0
+ * @license MIT
  * @author Teffen Ellis, et al.
  */
 
@@ -158,6 +158,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 		this.#yieldByteEstimate = this.#source.byteLength - this.#readPosition
 
 		this.#skipEmpty = init.skipEmpty ?? true
+		this.#enableQuoteHandling = init.enableQuoteHandling ?? false
 
 		this.#debug = init.debug ?? false
 		this.#log = this.#debug ? console.debug.bind(console) : () => void 0
@@ -190,6 +191,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 * The byte sequence for a double quote.
 	 */
 	readonly #doubleQuoteSequence: CharacterSequence = new CharacterSequence('"')
+	readonly #enableQuoteHandling: boolean
 
 	/**
 	 * How many yields to skip.
@@ -295,26 +297,19 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 		// There's a few special cases we could get this far and not have drained the buffer.
 		const lastByteRange = this.#previousByteRange
 
-		if (lastByteRange) {
-			const lastByteIndex = lastByteRange[1]
-
-			// There's a special case where the last delimiter is at the end of the *file*.
-
-			// We need to determine if we're at the end of the *file* and there's no delimiter.
-			const possibleDelimiterIndex = this.#needle.search(this.#source, sourceByteLength - this.#needle.length)
-
-			if (possibleDelimiterIndex !== -1) {
-				this.#log("Inserted byte range at the last delimiter", [possibleDelimiterIndex, sourceByteLength])
-				// We found a delimiter at the end of the file, so we enqueue the byte range.
-				this.#indices.enqueue([possibleDelimiterIndex + this.#needle.length, sourceByteLength])
-			} else {
-				this.#log("Inserted byte range at the last byte", [lastByteIndex, sourceByteLength])
-				// The file didn't end with a delimiter, so we just enqueue the last byte range.
-				this.#indices.enqueue([lastByteIndex + this.#needle.length, sourceByteLength])
-			}
+		if (this.#readPosition < sourceByteLength) {
+			this.#indices.enqueue([this.#readPosition, sourceByteLength])
 		} else if (this.#yieldCount === 0) {
-			// We didn't find any delimiters in the file, so we just enqueue the whole buffer.
+			// No content was ever yielded — emit the whole buffer.
 			this.#indices.enqueue([0, sourceByteLength])
+		} else if (!this.#enableQuoteHandling) {
+			// Simple path: emit empty field for trailing delimiter (match String.split).
+			// Quote-aware path handles this inside #fill() via searchMatches.
+			const trailingDelimPos = sourceByteLength - this.#needle.length
+
+			if (trailingDelimPos >= 0 && this.#needle.search(this.#source, trailingDelimPos) !== -1) {
+				this.#indices.enqueue([sourceByteLength, sourceByteLength])
+			}
 		}
 
 		this.#done = true
@@ -326,103 +321,74 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	#fill(): void {
 		const sourceByteLength = this.#source.byteLength
 
-		while (this.#readPosition < sourceByteLength && this.#indices.byteLength < this.#highWaterMark) {
-			const doubleQuoteStartIndex = this.#doubleQuoteStartIndex
+		if (!this.#enableQuoteHandling) {
+			while (this.#readPosition < sourceByteLength && this.#indices.byteLength < this.#highWaterMark) {
+				const delimiterIndex = this.#needle.search(this.#source, this.#readPosition)
 
-			let nextDoubleQuoteIndex: number
-			let delimiterSearchStart = this.#readPosition
-			let sliceEnd: number
-			let sliceStart: number = this.#readPosition
+				if (delimiterIndex === -1) return
 
-			// if (doubleQuoteStartIndex !== -1) {
-			// 	nextDoubleQuoteIndex = this.#doubleQuoteSequence.search(this.#source, doubleQuoteStartIndex + 1)
-			// } else {
-			// 	nextDoubleQuoteIndex = this.#doubleQuoteSequence.search(this.#source, this.#readPosition)
-
-			// }
-
-			// 	if (nextDoubleQuoteIndex !== -1) {
-			// 		console.log("Next double quote at", nextDoubleQuoteIndex)
-
-			// 		delimiterSearchStart = nextDoubleQuoteIndex + 1
-			// 	} else {
-			// 		// console.log("No double quote found after previous double quote")
-
-			// 		delimiterSearchStart = this.#readPosition
-			// 	}
-
-			// 	this.#doubleQuoteStartIndex = -1
-			// } else {
-			// 	// console.log("Searching for double quote at read position", this.#readPosition)
-
-			// 	nextDoubleQuoteIndex = this.#doubleQuoteSequence.search(this.#source, this.#readPosition)
-
-			// 	if (nextDoubleQuoteIndex !== -1) {
-			// 		console.log("Found double quote at", nextDoubleQuoteIndex)
-			// 		this.#doubleQuoteStartIndex = nextDoubleQuoteIndex
-			// 		sliceStart = doubleQuoteStartIndex + 1
-
-			// 		delimiterSearchStart = nextDoubleQuoteIndex + 1
-			// 	} else {
-			// 		// console.log("No double quote found at read position")
-
-			// 		delimiterSearchStart = this.#readPosition
-			// 	}
-			// }
-			let delimiterIndex: number
-
-			while (true) {
-				delimiterIndex = this.#needle.search(this.#source, delimiterSearchStart)
-
-				if (delimiterIndex === -1) {
-					// this.#log(`No delimiters left. Breaking.`)
-					return
-				}
-
-				nextDoubleQuoteIndex = this.#doubleQuoteSequence.search(this.#source, delimiterSearchStart, delimiterIndex)
-
-				// Didn't find a double quote before the delimiter.
-				if (nextDoubleQuoteIndex === -1 && this.#doubleQuoteStartIndex === -1) {
-					// And we haven't found a double quote before.
-					sliceEnd = delimiterIndex
-
-					this.#readPosition = sliceEnd + this.#needle.length
-
-					break
-				}
-
-				if (nextDoubleQuoteIndex !== -1) {
-					// We found a double quote before the delimiter...
-
-					if (this.#doubleQuoteStartIndex === -1) {
-						// But this is the first double quote we've found.
-						this.#doubleQuoteStartIndex = nextDoubleQuoteIndex
-
-						delimiterSearchStart = delimiterIndex + 1
-						continue
-					} else {
-						sliceStart = this.#doubleQuoteStartIndex + 1
-					}
-				}
-
-				// We found a double quote before the delimiter, but it's not the first one.
-				sliceEnd = delimiterIndex - 1
-
+				this.#indices.enqueue([this.#readPosition, delimiterIndex])
 				this.#readPosition = delimiterIndex + this.#needle.length
-				this.#doubleQuoteStartIndex = -1
-
-				break
 			}
 
-			const byteRange: ByteRange = [sliceStart, sliceEnd]
+			return
+		}
 
-			// this.#log("Found byte ranges", byteRange)
-			this.#log(
-				`${byteRange} --> (${sliceStart - delimiterSearchStart})`,
-				debugAsVisibleCharacters(this.#source.subarray(...byteRange))
+		while (this.#readPosition < sourceByteLength && this.#indices.byteLength < this.#highWaterMark) {
+			const matches = this.#needle.searchMatches(
+				this.#source,
+				this.#doubleQuoteSequence,
+				this.#readPosition,
+				sourceByteLength
 			)
 
-			this.#indices.enqueue(byteRange)
+			if (matches.length === 0) return
+
+			let sliceStart = this.#readPosition
+			let insideQuotes = false
+			let quoteStart = -1
+
+			for (const match of matches) {
+				if (match.patternId === 1) {
+					// Quote found
+					if (!insideQuotes) {
+						// Emit normal field before the opening quote
+						if (match.offset > sliceStart) {
+							this.#indices.enqueue([sliceStart, match.offset])
+						}
+						insideQuotes = true
+						quoteStart = match.offset
+					} else {
+						// Closing quote: emit quoted field, advance past quote
+						this.#indices.enqueue([quoteStart + 1, match.offset])
+						insideQuotes = false
+						sliceStart = match.offset + 1
+					}
+				} else {
+					// Delimiter found
+					if (insideQuotes) continue // ignore delimiter inside quotes
+
+					// Emit content before this delimiter (empty if delimiter follows closing quote)
+					if (sliceStart < match.offset) {
+						this.#indices.enqueue([sliceStart, match.offset])
+					}
+					sliceStart = match.offset + this.#needle.length
+				}
+			}
+
+			const lastMatch = matches[matches.length - 1]!
+			this.#readPosition = lastMatch.offset +
+				(lastMatch.patternId === 0 ? this.#needle.length : 1)
+
+			// Emit trailing content after the last match
+			// Case 1: Content after last delimiter (final field, no trailing delimiter)
+			if (sliceStart < this.#readPosition) {
+				this.#indices.enqueue([sliceStart, sourceByteLength])
+				this.#readPosition = sourceByteLength
+			// Case 2: Trailing delimiter (emit empty field to match String.split)
+			} else if (sliceStart === sourceByteLength && this.#readPosition === sourceByteLength) {
+				this.#indices.enqueue([sourceByteLength, sourceByteLength])
+			}
 		}
 	}
 

@@ -1,6 +1,6 @@
 {
 	"name": "spliterator",
-	"version": "2.2.2",
+	"version": "2.2.3",
 	"description": "Line-delimited iterator library for CSV, NDJSON, and other delimited formats.",
 	"keywords": [
 		"csv",
@@ -14,7 +14,7 @@
 	"bugs": {
 		"url": "https://github.com/sister-software/spliterator/issues"
 	},
-	"license": "AGPL-3.0-only",
+	"license": "MIT",
 	"contributors": [
 		{
 			"name": "Teffen Ellis",

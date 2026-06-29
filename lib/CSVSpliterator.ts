@@ -1,6 +1,6 @@
 /**
  * @copyright Sister Software
- * @license AGPL-3.0
+ * @license MIT
  * @author Teffen Ellis, et al.
  */
 
@@ -199,7 +199,8 @@ export abstract class CSVSpliterator {
 
 			if (yieldCount >= yieldLimit) break
 
-			const columns = new Spliterator(row, columnSpliteratorInit).toDecodedArray(decoder)
+			const columnRanges = columnDelimiter.searchAll(row)
+			const columns = columnRanges.map(([s, e]) => decoder.decode(row.subarray(s, e)))
 
 			yield emitter ? emitter(columns, transformers) : columns
 		}
@@ -307,7 +308,8 @@ export abstract class CSVSpliterator {
 
 			if (yieldCount >= yieldLimit) break
 
-			const columns = new Spliterator(row, columnSpliteratorInit).toDecodedArray(decoder)
+			const columnRanges = columnDelimiter.searchAll(row)
+			const columns = columnRanges.map(([s, e]) => decoder.decode(row.subarray(s, e)))
 
 			yield emitter ? emitter(columns, transformers) : columns
 

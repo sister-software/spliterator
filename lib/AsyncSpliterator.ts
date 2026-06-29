@@ -1,6 +1,6 @@
 /**
  * @copyright Sister Software
- * @license AGPL-3.0
+ * @license MIT
  * @author Teffen Ellis, et al.
  */
 
@@ -57,6 +57,14 @@ export interface SpliteratorInit {
 	 * @default Infinity
 	 */
 	take?: number
+
+	/**
+	 * Whether to handle quoted fields (e.g., CSV). When enabled, delimiters inside
+	 * double-quoted fields are ignored and quoted fields are emitted without quotes.
+	 *
+	 * @default false
+	 */
+	enableQuoteHandling?: boolean
 
 	/**
 	 * Whether to emit debug information.
