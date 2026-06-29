@@ -327,104 +327,60 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 		const sourceByteLength = this.#source.byteLength
 
 		while (this.#readPosition < sourceByteLength && this.#indices.byteLength < this.#highWaterMark) {
-			const doubleQuoteStartIndex = this.#doubleQuoteStartIndex
-
-			let nextDoubleQuoteIndex: number
-			let delimiterSearchStart = this.#readPosition
-			let sliceEnd: number
-			let sliceStart: number = this.#readPosition
-
-			// if (doubleQuoteStartIndex !== -1) {
-			// 	nextDoubleQuoteIndex = this.#doubleQuoteSequence.search(this.#source, doubleQuoteStartIndex + 1)
-			// } else {
-			// 	nextDoubleQuoteIndex = this.#doubleQuoteSequence.search(this.#source, this.#readPosition)
-
-			// }
-
-			// 	if (nextDoubleQuoteIndex !== -1) {
-			// 		console.log("Next double quote at", nextDoubleQuoteIndex)
-
-			// 		delimiterSearchStart = nextDoubleQuoteIndex + 1
-			// 	} else {
-			// 		// console.log("No double quote found after previous double quote")
-
-			// 		delimiterSearchStart = this.#readPosition
-			// 	}
-
-			// 	this.#doubleQuoteStartIndex = -1
-			// } else {
-			// 	// console.log("Searching for double quote at read position", this.#readPosition)
-
-			// 	nextDoubleQuoteIndex = this.#doubleQuoteSequence.search(this.#source, this.#readPosition)
-
-			// 	if (nextDoubleQuoteIndex !== -1) {
-			// 		console.log("Found double quote at", nextDoubleQuoteIndex)
-			// 		this.#doubleQuoteStartIndex = nextDoubleQuoteIndex
-			// 		sliceStart = doubleQuoteStartIndex + 1
-
-			// 		delimiterSearchStart = nextDoubleQuoteIndex + 1
-			// 	} else {
-			// 		// console.log("No double quote found at read position")
-
-			// 		delimiterSearchStart = this.#readPosition
-			// 	}
-			// }
-			let delimiterIndex: number
-
-			while (true) {
-				delimiterIndex = this.#needle.search(this.#source, delimiterSearchStart)
-
-				if (delimiterIndex === -1) {
-					// this.#log(`No delimiters left. Breaking.`)
-					return
-				}
-
-				nextDoubleQuoteIndex = this.#doubleQuoteSequence.search(this.#source, delimiterSearchStart, delimiterIndex)
-
-				// Didn't find a double quote before the delimiter.
-				if (nextDoubleQuoteIndex === -1 && this.#doubleQuoteStartIndex === -1) {
-					// And we haven't found a double quote before.
-					sliceEnd = delimiterIndex
-
-					this.#readPosition = sliceEnd + this.#needle.length
-
-					break
-				}
-
-				if (nextDoubleQuoteIndex !== -1) {
-					// We found a double quote before the delimiter...
-
-					if (this.#doubleQuoteStartIndex === -1) {
-						// But this is the first double quote we've found.
-						this.#doubleQuoteStartIndex = nextDoubleQuoteIndex
-
-						delimiterSearchStart = delimiterIndex + 1
-						continue
-					} else {
-						sliceStart = this.#doubleQuoteStartIndex + 1
-					}
-				}
-
-				// We found a double quote before the delimiter, but it's not the first one.
-				sliceEnd = delimiterIndex - 1
-
-				this.#readPosition = delimiterIndex + this.#needle.length
-				this.#doubleQuoteStartIndex = -1
-
-				break
-			}
-
-			const byteRange: ByteRange = [sliceStart, sliceEnd]
-
-			// this.#log("Found byte ranges", byteRange)
-			this.#log(
-				`${byteRange} --> (${sliceStart - delimiterSearchStart})`,
-				debugAsVisibleCharacters(this.#source.subarray(...byteRange))
+			const matches = this.#needle.searchMatches(
+				this.#source,
+				this.#doubleQuoteSequence,
+				this.#readPosition,
+				sourceByteLength
 			)
 
-			this.#indices.enqueue(byteRange)
-		}
+			if (matches.length === 0) return
+
+			let sliceStart = this.#readPosition
+			let insideQuotes = false
+			let quoteStart = -1
+			let emittedAfterClose = false
+
+			for (const match of matches) {
+				if (match.patternId === 1) {
+					// Quote found
+					if (!insideQuotes) {
+						insideQuotes = true
+						quoteStart = match.offset
+						emittedAfterClose = false
+					} else {
+						// Closing quote
+						const byteRange: ByteRange = [quoteStart + 1, match.offset]
+						this.#indices.enqueue(byteRange)
+						insideQuotes = false
+						emittedAfterClose = true
+					}
+				} else {
+					// Delimiter found
+					if (insideQuotes) {
+						// Delimiter inside quoted field — ignore
+						continue
+					}
+
+					if (emittedAfterClose) {
+						// This delimiter follows a closing quote — it's the field separator.
+						// Don't emit another range, just advance past it.
+						sliceStart = match.offset + this.#needle.length
+						emittedAfterClose = false
+					} else {
+						// Normal field
+						const byteRange: ByteRange = [sliceStart, match.offset]
+						this.#indices.enqueue(byteRange)
+						sliceStart = match.offset + this.#needle.length
+					}
+				}
+			}
+
+			const lastMatch = matches[matches.length - 1]!
+			this.#readPosition = lastMatch.offset +
+				(lastMatch.patternId === 0 ? this.#needle.length : 1)
 	}
+}
 
 	//#endregion
 
