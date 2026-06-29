@@ -33,6 +33,7 @@ export async function computeSegments(source: AsyncDataResource, options: Segmen
 	const fileSize = await readFileSize(source)
 
 	if (fileSize === 0) return []
+
 	if (concurrency === 1) return [[0, fileSize]]
 
 	const idealCuts = Array.from({ length: concurrency - 1 }, (_, i) => Math.round(((i + 1) * fileSize) / concurrency))

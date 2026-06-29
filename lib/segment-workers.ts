@@ -4,6 +4,12 @@
  * @author Teffen Ellis, et al.
  */
 
+import { Worker } from "node:worker_threads"
+
+import type { CharacterSequenceInput } from "./CharacterSequence.js"
+import { computeSegments } from "./segments.js"
+import type { AsyncDataResource, ByteRange } from "./shared.js"
+
 export interface MinimalWorker {
 	on(event: "message", cb: (msg: unknown) => void): void
 	on(event: "error", cb: (err: Error) => void): void
@@ -60,6 +66,7 @@ export function workerToIterable<R>(worker: MinimalWorker, onBatchConsumed: () =
 			}
 
 			if (error) throw error
+
 			if (done) return
 
 			await new Promise<void>((resolve) => (wake = resolve))
@@ -67,4 +74,77 @@ export function workerToIterable<R>(worker: MinimalWorker, onBatchConsumed: () =
 	}
 
 	return drain()
+}
+
+export interface AsManyWorkersOptions {
+	/** Module path or URL exporting `handleRecord(bytes, ctx)`. Runs once per worker at import. */
+	worker: string | URL
+	/** The record delimiter. @default LineFeed */
+	delimiter?: CharacterSequenceInput
+	/** Desired number of segments/workers. Clamped to ≥ 1; fewer may run. */
+	concurrency: number
+	/** Bytes read at each ideal boundary to find the next delimiter. @default 65536 */
+	probeSize?: number
+	/** Results per message. @default 256 */
+	batchSize?: number
+	/** Unacked batches per worker before it pauses. @default 4 */
+	maxInFlight?: number
+	/** Forwarded to every worker via `workerData.userData`. */
+	workerData?: unknown
+}
+
+/**
+ * Spawn one worker per delimiter-aligned segment, each running the `worker` handler module over its own handle, and
+ * merge their results into a single async iterator. Results interleave across segments. Sends an `ack` per consumed
+ * batch (backpressure); terminates all workers on completion, error, or early return.
+ */
+export async function* runSegmentWorkers<R>(
+	source: AsyncDataResource,
+	options: AsManyWorkersOptions
+): AsyncIterableIterator<R> {
+	if (typeof source !== "string" && !(source instanceof URL)) {
+		throw new TypeError("asManyWorkers requires a file path or URL — file handles cannot cross threads.")
+	}
+
+	const handlerUrl =
+		options.worker instanceof URL ? options.worker.href : new URL(options.worker, `file://${process.cwd()}/`).href
+	const sourcePath = source instanceof URL ? source.href : source
+	const segments: ByteRange[] = await computeSegments(source, {
+		delimiter: options.delimiter,
+		concurrency: options.concurrency,
+		probeSize: options.probeSize,
+	})
+
+	const workers: Worker[] = []
+	const entryUrl = new URL("./segment-worker-entry.js", import.meta.url)
+
+	try {
+		const iterables = segments.map(([start, end], segmentIndex) => {
+			const worker = new Worker(entryUrl, {
+				workerData: {
+					source: sourcePath,
+					handlerUrl,
+					start,
+					end,
+					delimiter: options.delimiter ?? null,
+					segmentIndex,
+					batchSize: options.batchSize ?? 256,
+					maxInFlight: options.maxInFlight ?? 4,
+					userData: options.workerData,
+				},
+			})
+
+			workers.push(worker)
+
+			return workerToIterable<R>(worker, () => worker.postMessage("ack"))
+		})
+
+		// Each worker runs concurrently and fills ahead (bounded by maxInFlight); draining their
+		// iterators in turn still interleaves wall-clock work. Order across segments is not guaranteed.
+		for (const iterable of iterables) {
+			yield* iterable
+		}
+	} finally {
+		await Promise.all(workers.map((w) => w.terminate()))
+	}
 }

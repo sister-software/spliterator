@@ -9,6 +9,7 @@ import { ReadableStream, type ReadableWritablePair, type StreamPipeOptions } fro
 import { BufferController } from "./BufferController.js"
 import { CharacterSequence, type CharacterSequenceInput } from "./CharacterSequence.js"
 import { IndexQueue } from "./IndexQueue.js"
+import { type AsManyWorkersOptions, runSegmentWorkers } from "./segment-workers.js"
 import { computeSegments, type SegmentOptions } from "./segments.js"
 import type { AsyncChunkIterator, AsyncDataResource, ByteRange } from "./shared.js"
 
@@ -595,5 +596,28 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 				return new AsyncSpliterator(chunkIterator, { delimiter: options.delimiter, autoDispose: true })
 			})
 		)
+	}
+
+	/**
+	 * Parse `source` across worker threads. Each worker owns a handle to a delimiter-aligned segment, runs the `worker`
+	 * handler module per record, and streams results back to the main thread as one merged async iterator — for a
+	 * single-thread writer. Results interleave across segments.
+	 *
+	 * The handler returns a value (structured-cloned back), a `Uint8Array` (transferred zero-copy), or `undefined` (the
+	 * record is skipped). The handler module's top-level code runs once per worker — load models/handles there.
+	 *
+	 * @param source A file path or URL (file handles cannot cross threads → `TypeError` otherwise).
+	 * @param options Handler module, delimiter, concurrency, and batching/backpressure tuning.
+	 */
+	public static asManyWorkers<R = unknown>(
+		source: AsyncDataResource,
+		options: AsManyWorkersOptions
+	): AsyncIterableIterator<R> {
+		// Validate eagerly so callers fail fast (the generator body is otherwise lazy until consumed).
+		if (typeof source !== "string" && !(source instanceof URL)) {
+			throw new TypeError("asManyWorkers requires a file path or URL — file handles cannot cross threads.")
+		}
+
+		return runSegmentWorkers<R>(source, options)
 	}
 }
