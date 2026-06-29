@@ -167,6 +167,8 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 		this.#indices.clear()
 		this.#controller.clear()
 
+		await this.#closeReader()
+
 		if (this.#autoDispose) {
 			await this.#source[Symbol.asyncDispose]?.()
 		}
@@ -401,7 +403,18 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 		}
 	}
 
+	/** Signal the underlying chunk reader to stop, destroying an owned read stream (closing its fd). */
+	async #closeReader(): Promise<void> {
+		try {
+			await this.#chunkReader.return?.()
+		} catch {
+			// The reader may already be closed; ignore.
+		}
+	}
+
 	async #finalize(): Promise<IteratorReturnResult<undefined>> {
+		await this.#closeReader()
+
 		if (this.#debug) {
 			/**
 			 * The total number of bytes we expect to be omitted from the buffer. This is derived from the number of of yields
