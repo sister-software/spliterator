@@ -1,6 +1,8 @@
 /**
+ * @copyright Sister Software
+ * @license MIT
+ * @author Teffen Ellis, et al.
  * Benchmark: WASM searchAll vs Spliterator for CSV column splitting.
- *
  * Usage: node out/benchmarks/csv-columns.js
  */
 
@@ -16,6 +18,7 @@ function generateCSV(rows: number, cols: number): Uint8Array {
 	for (let r = 0; r < rows; r++) {
 		for (let c = 0; c < cols; c++) {
 			parts.push(encoder.encode(cell))
+
 			if (c < cols - 1) parts.push(new Uint8Array([Delimiters.Comma]))
 		}
 		parts.push(new Uint8Array([Delimiters.LineFeed]))

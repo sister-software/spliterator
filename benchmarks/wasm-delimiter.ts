@@ -1,6 +1,8 @@
 /**
+ * @copyright Sister Software
+ * @license MIT
+ * @author Teffen Ellis, et al.
  * Benchmark: WASM SIMD vs JS Boyer-Moore-Horspool for multi-byte delimiter scanning.
- *
  * Usage: node out/benchmarks/wasm-delimiter.js
  */
 

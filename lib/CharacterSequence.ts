@@ -58,17 +58,48 @@ function ensureWasmCapacity(memory: WasmMemory, required: number): void {
 	memory.grow(pages)
 }
 
+/** Round `offset` up to the next multiple of 4 — `Int32Array` views require a 4-byte-aligned base. */
+function alignTo4(offset: number): number {
+	return Math.ceil(offset / 4) * 4
+}
+
 export class CharacterSequence extends Uint8Array {
 	#skipIndex: number[]
 
 	static #wasmScanner: WasmDelimiterScanner | null | undefined
 	static #wasmHaystack: Uint8Array | null = null
 	static #wasmPatternOffset = 0
+	static #wasmReadyPromise: Promise<WasmDelimiterScanner | null> | undefined
+
+	static #loadWasm(): Promise<WasmDelimiterScanner | null> {
+		if (CharacterSequence.#wasmReadyPromise === undefined) {
+			// Reflect "load in progress" synchronously so search()'s fast path stops
+			// re-triggering loads on every call while the module compiles.
+			if (CharacterSequence.#wasmScanner === undefined) CharacterSequence.#wasmScanner = null
+
+			CharacterSequence.#wasmReadyPromise = loadWasmModule().then((mod) => {
+				CharacterSequence.#wasmScanner = mod
+
+				return mod
+			})
+		}
+
+		return CharacterSequence.#wasmReadyPromise
+	}
 
 	static #ensureWasm(): void {
-		if (CharacterSequence.#wasmScanner !== undefined) return
-		CharacterSequence.#wasmScanner = null
-		loadWasmModule().then((mod) => { CharacterSequence.#wasmScanner = mod })
+		void CharacterSequence.#loadWasm()
+	}
+
+	/**
+	 * Resolve once the WASM SIMD scanner has finished loading, yielding whether it is active.
+	 *
+	 * The module loads asynchronously, so synchronous callers (`Spliterator.fromSync`, `CSVSpliterator.from`) that run to
+	 * completion in a single tick would otherwise always fall back to the JS scanner. Await this first to opt into SIMD
+	 * acceleration.
+	 */
+	public static whenReady(): Promise<boolean> {
+		return CharacterSequence.#loadWasm().then((mod) => mod !== null)
 	}
 
 	public search(haystack: Uint8Array, start: number = 0, end: number = haystack.length): number {
@@ -78,19 +109,24 @@ export class CharacterSequence extends Uint8Array {
 			const wasm = CharacterSequence.#wasmScanner
 
 			if (wasm) {
-				const haystackLen = end - start
-				const totalNeeded = haystackLen + sequenceLength
-
+				// Cache the *entire* haystack at offset 0 (so WASM byte `i` === `haystack[i]`),
+				// keyed by identity. This keeps repeated searches over the same source (the
+				// Spliterator fill loop) copy-free while staying correct for any start/end — the
+				// previous "copy [start,end)" scheme mis-mapped offsets when start !== 0 and
+				// silently ignored a shrinking `end`.
 				if (haystack !== CharacterSequence.#wasmHaystack) {
+					const fullLen = haystack.length
+					const totalNeeded = fullLen + sequenceLength
 					ensureWasmCapacity(wasm.memory, totalNeeded)
 					const buffer = new Uint8Array(wasm.memory.buffer, 0, totalNeeded)
-					buffer.set(haystack.subarray(start, end), 0)
-					buffer.set(this, haystackLen)
+					buffer.set(haystack, 0)
+					buffer.set(this, fullLen)
 					CharacterSequence.#wasmHaystack = haystack
-					CharacterSequence.#wasmPatternOffset = haystackLen
+					CharacterSequence.#wasmPatternOffset = fullLen
 				}
 
-				const result = wasm.findDelimiter(start, CharacterSequence.#wasmPatternOffset - start, CharacterSequence.#wasmPatternOffset, sequenceLength)
+				const result = wasm.findDelimiter(start, end - start, CharacterSequence.#wasmPatternOffset, sequenceLength)
+
 				return result >= 0 ? start + result : -1
 			}
 
@@ -102,7 +138,9 @@ export class CharacterSequence extends Uint8Array {
 
 		while (startIndex <= end - sequenceLength) {
 			let lastIndex = sequenceLength - 1
+
 			while (lastIndex >= 0 && this[lastIndex] === haystack[startIndex + lastIndex]) lastIndex--
+
 			if (lastIndex < 0) return startIndex
 			startIndex += this.#skipIndex[haystack[startIndex + sequenceLength - 1]!]!
 		}
@@ -118,43 +156,65 @@ export class CharacterSequence extends Uint8Array {
 			const wasm = CharacterSequence.#wasmScanner
 
 			if (wasm) {
+				const resultsOffset = alignTo4(haystackLen + sequenceLength)
 				const resultsSize = WASM_MAX_RESULTS * 2 * 4
-				const totalNeeded = haystackLen + sequenceLength + resultsSize
+				const totalNeeded = resultsOffset + resultsSize
 				ensureWasmCapacity(wasm.memory, totalNeeded)
 				const buffer = new Uint8Array(wasm.memory.buffer, 0, totalNeeded)
 				buffer.set(haystack.subarray(start, end), 0)
 				buffer.set(this, haystackLen)
+				// We just overwrote offset 0; any haystack search() cached there is now stale.
+				CharacterSequence.#wasmHaystack = null
 
-				const count = wasm.findAllDelimiters(0, haystackLen, haystackLen, sequenceLength, haystackLen + sequenceLength, WASM_MAX_RESULTS)
-				const rv = new Int32Array(wasm.memory.buffer, haystackLen + sequenceLength, count * 2)
+				const count = wasm.findAllDelimiters(
+					0,
+					haystackLen,
+					haystackLen,
+					sequenceLength,
+					resultsOffset,
+					WASM_MAX_RESULTS
+				)
+				const rv = new Int32Array(wasm.memory.buffer, resultsOffset, count * 2)
 				const ranges: ByteRange[] = []
 
 				for (let i = 0; i < count; i++) ranges.push([start + rv[i * 2]!, start + rv[i * 2 + 1]!])
-				return ranges
+
+				// A full results buffer means the scan may have hit the cap and dropped
+				// trailing delimiters; fall back to the uncapped JS scan rather than truncate.
+				if (count < WASM_MAX_RESULTS) return ranges
 			}
 
 			if (CharacterSequence.#wasmScanner === undefined) CharacterSequence.#ensureWasm()
 		}
 
 		const ranges: ByteRange[] = []
-		let searchStart = start, rangeStart = start
+		let searchStart = start,
+			rangeStart = start
 
 		while (searchStart <= end - sequenceLength) {
 			let lastIndex = sequenceLength - 1
+
 			while (lastIndex >= 0 && this[lastIndex] === haystack[searchStart + lastIndex]) lastIndex--
-			if (lastIndex < 0) { ranges.push([rangeStart, searchStart]); searchStart += sequenceLength; rangeStart = searchStart; continue }
+
+			if (lastIndex < 0) {
+				ranges.push([rangeStart, searchStart])
+				searchStart += sequenceLength
+				rangeStart = searchStart
+				continue
+			}
 			searchStart += this.#skipIndex[haystack[searchStart + sequenceLength - 1]!]!
 		}
 
 		if (rangeStart <= end) ranges.push([rangeStart, end])
+
 		return ranges
 	}
 
 	/**
 	 * Scan for two patterns simultaneously (delimiter + quote) for CSV parsing.
 	 *
-	 * Returns sorted MatchResult[] with patternId 0=delimiter, 1=quote.
-	 * Uses WASM SIMD double-scan when available; JS fallback otherwise.
+	 * Returns sorted MatchResult[] with patternId 0=delimiter, 1=quote. Uses WASM SIMD double-scan when available; JS
+	 * fallback otherwise.
 	 */
 	public searchMatches(
 		haystack: Uint8Array,
@@ -172,21 +232,35 @@ export class CharacterSequence extends Uint8Array {
 
 		if (wasm && haystackLen >= WASM_THRESHOLD) {
 			const patternsSize = delimiterLen + quoteLen
+			const resultsOffset = alignTo4(haystackLen + patternsSize)
 			const resultsSize = WASM_MAX_RESULTS * 2 * 4
-			const totalNeeded = haystackLen + patternsSize + resultsSize
+			const totalNeeded = resultsOffset + resultsSize
 
 			ensureWasmCapacity(wasm.memory, totalNeeded)
 			const buffer = new Uint8Array(wasm.memory.buffer, 0, totalNeeded)
 			buffer.set(haystack.subarray(start, end), 0)
 			buffer.set(this, haystackLen)
 			buffer.set(quotePattern, haystackLen + delimiterLen)
+			// We just overwrote offset 0; any haystack search() cached there is now stale.
+			CharacterSequence.#wasmHaystack = null
 
-			const count = wasm.findAllMatches(0, haystackLen, haystackLen, delimiterLen, quoteLen, haystackLen + patternsSize, WASM_MAX_RESULTS)
-			const rv = new Int32Array(wasm.memory.buffer, haystackLen + patternsSize, count * 2)
+			const count = wasm.findAllMatches(
+				0,
+				haystackLen,
+				haystackLen,
+				delimiterLen,
+				quoteLen,
+				resultsOffset,
+				WASM_MAX_RESULTS
+			)
+			const rv = new Int32Array(wasm.memory.buffer, resultsOffset, count * 2)
 			const matches: MatchResult[] = []
 
 			for (let i = 0; i < count; i++) matches.push({ offset: start + rv[i * 2]!, patternId: rv[i * 2 + 1]! })
-			return matches
+
+			// A full results buffer means the scan may have hit the cap and dropped
+			// trailing matches; fall back to the uncapped JS scan rather than truncate.
+			if (count < WASM_MAX_RESULTS) return matches
 		}
 
 		if (CharacterSequence.#wasmScanner === undefined) CharacterSequence.#ensureWasm()
@@ -222,6 +296,7 @@ export class CharacterSequence extends Uint8Array {
 		const bytes = normalizeCharacterInput(input)
 		super(bytes)
 		this.#skipIndex = new Array(256).fill(this.length)
+
 		for (let i = 0; i < this.length - 1; i++) this.#skipIndex[this[i]!] = this.length - 1 - i
 	}
 }

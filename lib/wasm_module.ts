@@ -1,3 +1,9 @@
+/**
+ * @copyright Sister Software
+ * @license MIT
+ * @author Teffen Ellis, et al.
+ */
+
 import { WASM_BASE64 } from "./wasm_base64.js"
 
 type BufferSource = ArrayBuffer | ArrayBufferView
@@ -37,7 +43,15 @@ type WasmFindDelimiter = (ho: number, hl: number, po: number, pl: number) => num
 
 type WasmFindAllDelimiters = (ho: number, hl: number, po: number, pl: number, ro: number, mr: number) => number
 
-type WasmFindAllMatches = (ho: number, hl: number, p1o: number, p1l: number, p2l: number, ro: number, mr: number) => number
+type WasmFindAllMatches = (
+	ho: number,
+	hl: number,
+	p1o: number,
+	p1l: number,
+	p2l: number,
+	ro: number,
+	mr: number
+) => number
 
 export interface WasmMemory {
 	readonly buffer: ArrayBuffer
