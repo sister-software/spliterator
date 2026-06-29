@@ -40,6 +40,8 @@
 		"./package.json": "./package.json",
 		".": "./out/index.js",
 		"./node/fs": "./out/node/fs/index.js",
+		"./segment-runtime": "./out/lib/segment-runtime.js",
+		"./segment-workers": "./out/lib/segment-workers.js",
 		"./test/utils": "./out/test/utils.js"
 	},
 	"publishConfig": {
