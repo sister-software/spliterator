@@ -113,6 +113,12 @@ export interface CreateChunkIteratorOptions {
 	 * The byte position to start reading from.
 	 */
 	start?: number
+
+	/**
+	 * The byte position to stop reading at, **inclusive** (matches Node `createReadStream({ end })`). To read the
+	 * half-open range `[start, end)`, pass `{ start, end: end - 1 }`.
+	 */
+	end?: number
 }
 
 /**
@@ -136,6 +142,30 @@ export async function readFileSize(source: AsyncDataResource): Promise<number> {
 }
 
 /**
+ * Read a fixed-length window of bytes from `start`. The result is EOF-clamped, so it may be shorter than `length`. Used
+ * for delimiter-boundary probing.
+ *
+ * @internal
+ */
+export async function readBytes(source: AsyncDataResource, start: number, length: number): Promise<Uint8Array> {
+	if (typeof source !== "string" && !(source instanceof URL) && !isFileHandleLike(source)) {
+		throw new TypeError("readBytes requires a file path, URL, or file handle.")
+	}
+
+	const handle = isFileHandleLike(source) ? source : await open(source, "r")
+
+	try {
+		const buffer = new Uint8Array(length)
+		const { bytesRead } = await handle.read(buffer, 0, length, start)
+
+		return buffer.subarray(0, bytesRead)
+	} finally {
+		// Only close handles we opened.
+		if (!isFileHandleLike(source)) await handle.close()
+	}
+}
+
+/**
  * Create an async chunk iterator from a source.
  *
  * @param source The source to create the chunk iterator from.
@@ -143,7 +173,7 @@ export async function readFileSize(source: AsyncDataResource): Promise<number> {
  */
 export async function createChunkIterator(
 	source: AsyncDataResource | AsyncChunkIterator,
-	{ highWaterMark = 4096 * 16, start = 0 }: CreateChunkIteratorOptions = {}
+	{ highWaterMark = 4096 * 16, start = 0, end }: CreateChunkIteratorOptions = {}
 ): Promise<AsyncChunkIterator> {
 	if (!source) {
 		throw new TypeError("Cannot create a chunk iterator from an undefined or null source.")
@@ -166,6 +196,7 @@ export async function createChunkIterator(
 
 		const readStream = handle.createReadStream({
 			start,
+			end,
 			highWaterMark,
 			autoClose: true,
 		})
@@ -181,6 +212,7 @@ export async function createChunkIterator(
 		if (source.createReadStream) {
 			return source.createReadStream({
 				start,
+				end,
 				highWaterMark,
 			})
 		}
