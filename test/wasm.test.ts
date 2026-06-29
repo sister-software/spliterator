@@ -193,6 +193,27 @@ describe("WASM SIMD scanner", () => {
 		expect(matches.length).toBeGreaterThan(4096)
 	})
 
+	// WASM_THRESHOLD is 512, so a ~1 KB buffer now takes the WASM path. Guard that the
+	// newly-included mid-size range stays at parity with the JS oracle for both scanners.
+	test("searchAll matches the oracle for a mid-size (>= threshold, < 4096) haystack", () => {
+		const comma = new CharacterSequence(Delimiters.Comma)
+		const buf = commaHaystack(1024, [10, 200, 700, 1000])
+
+		expect(comma.searchAll(buf)).toEqual(referenceRanges(buf, comma))
+	})
+
+	test("searchMatches matches the oracle for a mid-size (>= threshold, < 4096) haystack", () => {
+		const comma = new CharacterSequence(Delimiters.Comma)
+		const quote = new CharacterSequence(Delimiters.DoubleQuote)
+		const buf = new Uint8Array(1024).fill(Delimiters.Zero)
+		buf[10] = Delimiters.Comma
+		buf[11] = Delimiters.DoubleQuote
+		buf[500] = Delimiters.DoubleQuote
+		buf[1000] = Delimiters.Comma
+
+		expect(comma.searchMatches(buf, quote)).toEqual(referenceMatches(buf, Delimiters.Comma, Delimiters.DoubleQuote))
+	})
+
 	// A haystack ending exactly on a delimiter has a trailing empty field. The JS scan emits
 	// it (matching String.split); the WASM kernel must too, or the last column silently
 	// disappears for wide rows ending in a separator.

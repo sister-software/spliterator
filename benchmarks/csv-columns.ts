@@ -71,6 +71,21 @@ function parseWithSearchAll(buf: Uint8Array, commaDelim: CharacterSequence): str
 	return rows
 }
 
+/** Warm up once (JIT + allocation), then time `iterations` runs and return the fastest (least noisy). */
+function bestOf(fn: () => void, iterations = 5): number {
+	fn()
+
+	let best = Infinity
+
+	for (let i = 0; i < iterations; i++) {
+		const start = performance.now()
+		fn()
+		best = Math.min(best, performance.now() - start)
+	}
+
+	return best
+}
+
 async function main(): Promise<void> {
 	console.log("=== CSV Column Splitting Benchmark ===\n")
 
@@ -91,6 +106,8 @@ async function main(): Promise<void> {
 		{ rows: 1000, cols: 1000, label: "1K × 1000 cols" },
 		{ rows: 500, cols: 2000, label: "500 × 2000 cols" },
 	]
+
+	const summary: Array<{ label: string; spliteratorMBps: number; searchAllMBps: number; speedup: number }> = []
 
 	for (const { rows, cols, label } of configs) {
 		console.log(`--- ${label} ---`)
@@ -128,52 +145,30 @@ async function main(): Promise<void> {
 			console.log(`  Parity: ${oldResult.length} rows × ${oldResult[0]!.length} cols ✓`)
 		}
 
-		// Benchmark: Spliterator approach
-		const spliteratorStart = performance.now()
-
-		parseWithSpliterator(buf, commaDelim)
-
-		const spliteratorMs = performance.now() - spliteratorStart
-		const spliteratorMBps = buf.byteLength / (1024 * 1024) / (spliteratorMs / 1000)
+		// Best-of-N timing to damp GC/JIT noise.
+		const mb = buf.byteLength / (1024 * 1024)
+		const spliteratorMs = bestOf(() => parseWithSpliterator(buf, commaDelim))
+		const searchAllMs = bestOf(() => parseWithSearchAll(buf, commaDelim))
+		const spliteratorMBps = mb / (spliteratorMs / 1000)
+		const searchAllMBps = mb / (searchAllMs / 1000)
+		const speedup = spliteratorMs / searchAllMs
 
 		console.log(
 			`  Spliterator:    ${spliteratorMs.toFixed(1).padStart(8)}ms  →  ${spliteratorMBps.toFixed(1).padStart(8)} MB/s`
 		)
-
-		// Benchmark: searchAll approach
-		const searchAllStart = performance.now()
-
-		parseWithSearchAll(buf, commaDelim)
-
-		const searchAllMs = performance.now() - searchAllStart
-		const searchAllMBps = buf.byteLength / (1024 * 1024) / (searchAllMs / 1000)
-		const speedup = spliteratorMs / searchAllMs
-
 		console.log(
 			`  searchAll:      ${searchAllMs.toFixed(1).padStart(8)}ms  →  ${searchAllMBps.toFixed(1).padStart(8)} MB/s  (${speedup.toFixed(2)}x)`
 		)
+
+		summary.push({ label, spliteratorMBps, searchAllMBps, speedup })
 	}
 
-	// Summary
+	// Summary (reuses the measurements above — no noisy re-run)
 	console.log("\n=== Summary ===")
 	console.log("Config          |  Spliterator    |  searchAll      |  Speedup")
 	console.log("----------------|-----------------|-----------------|----------")
 
-	for (const { rows, cols, label } of configs) {
-		const buf = generateCSV(rows, cols)
-
-		// Quick re-measure for summary
-		const s1 = performance.now()
-		parseWithSpliterator(buf, commaDelim)
-		const spliteratorMs = performance.now() - s1
-		const s2 = performance.now()
-		parseWithSearchAll(buf, commaDelim)
-		const searchAllMs = performance.now() - s2
-
-		const spliteratorMBps = buf.byteLength / (1024 * 1024) / (spliteratorMs / 1000)
-		const searchAllMBps = buf.byteLength / (1024 * 1024) / (searchAllMs / 1000)
-		const speedup = spliteratorMs / searchAllMs
-
+	for (const { label, spliteratorMBps, searchAllMBps, speedup } of summary) {
 		console.log(
 			`${label.padEnd(14)}  |  ${spliteratorMBps.toFixed(1).padStart(9)} MB/s  |  ${searchAllMBps.toFixed(1).padStart(9)} MB/s  |  ${speedup.toFixed(2)}x`
 		)

@@ -135,6 +135,24 @@ for await (const line of stream) {
 }
 ```
 
+### SIMD acceleration
+
+Spliterator ships a small WebAssembly SIMD scanner that accelerates delimiter and quote scanning (roughly 5–6× over the JavaScript scanner for multi-byte delimiters, more for column splitting). It is embedded in the package — no extra files, fetches, or configuration.
+
+The module loads **asynchronously**. Asynchronous parsing (`fromAsync`, streams) picks it up automatically once loaded. Purely synchronous parsing that finishes in a single tick would otherwise complete before the module is ready and transparently use the JavaScript scanner — to opt in, await it first:
+
+```ts
+import { CharacterSequence, CSVSpliterator } from "spliterator"
+
+await CharacterSequence.whenReady() // resolves to true once the SIMD scanner is active
+
+for (const row of CSVSpliterator.from(largeCsvString)) {
+	// ...now backed by the SIMD scanner
+}
+```
+
+Correctness is identical either way; `whenReady()` only affects which scanner runs.
+
 ### Custom generators
 
 While Spliterator includes premade exports for most use-cases, custom generators can be created via `Spliterator` and `AsyncSpliterator`. This class is a low-level interface that allows you to create your own generators for any kind of delimited content.

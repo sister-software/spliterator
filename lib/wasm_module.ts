@@ -73,5 +73,11 @@ export interface MatchResult {
 	patternId: number
 }
 
-export const WASM_THRESHOLD = 4096
+/**
+ * Minimum haystack size (bytes) at which the WASM SIMD scanner is used instead of the JS scan, once the module has
+ * loaded. Empirically WASM wins well below this — ~8x for single-byte `searchAll` and ~3x for multi-byte `search` at
+ * 512 bytes, with sub-µs fixed overhead — so 512 captures typical delimited rows while skipping only the tiny-buffer
+ * regime where it doesn't matter.
+ */
+export const WASM_THRESHOLD = 512
 export const WASM_MAX_RESULTS = 4096

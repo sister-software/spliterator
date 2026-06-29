@@ -50,7 +50,7 @@ class BmhSearcher {
 
 	constructor(needle: Uint8Array) {
 		this.#needle = needle
-		this.#skipTable = new Array(256).fill(needle.length)
+		this.#skipTable = Array.from({ length: 256 }, () => needle.length)
 
 		for (let i = 0; i < needle.length - 1; i++) {
 			this.#skipTable[needle[i]!] = needle.length - 1 - i
@@ -138,17 +138,13 @@ async function main(): Promise<void> {
 	const wasmPositions = wasmScanAll(testHaystack, crlf)
 
 	if (bmhPositions.length !== wasmPositions.length) {
-		console.error(
-			`PARITY FAIL: BMH=${bmhPositions.length} positions, WASM=${wasmPositions.length}`
-		)
+		console.error(`PARITY FAIL: BMH=${bmhPositions.length} positions, WASM=${wasmPositions.length}`)
 		process.exit(1)
 	}
 
 	for (let i = 0; i < bmhPositions.length; i++) {
 		if (bmhPositions[i] !== wasmPositions[i]) {
-			console.error(
-				`PARITY FAIL at index ${i}: BMH=${bmhPositions[i]}, WASM=${wasmPositions[i]}`
-			)
+			console.error(`PARITY FAIL at index ${i}: BMH=${bmhPositions[i]}, WASM=${wasmPositions[i]}`)
 			process.exit(1)
 		}
 	}
@@ -183,9 +179,7 @@ async function main(): Promise<void> {
 		const bmhMs = performance.now() - bmhStart
 		const bmhThroughput = (bytes * iterations) / (1024 * 1024) / (bmhMs / 1000)
 
-		console.log(
-			`  BMH (JS):      ${bmhMs.toFixed(1).padStart(8)}ms  →  ${bmhThroughput.toFixed(1).padStart(8)} MB/s`
-		)
+		console.log(`  BMH (JS):      ${bmhMs.toFixed(1).padStart(8)}ms  →  ${bmhThroughput.toFixed(1).padStart(8)} MB/s`)
 
 		results.push({
 			label: `${mb} MB`,

@@ -238,11 +238,6 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	#readPosition: number
 
 	/**
-	 * A bit of a hack to keep track of double quotes.
-	 */
-	#doubleQuoteStartIndex = -1
-
-	/**
 	 * The previous byte range seen while draining the buffer.
 	 */
 	#previousByteRange: ByteRange | undefined
@@ -365,8 +360,8 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 						sliceStart = match.offset + 1
 					}
 				} else {
-					// Delimiter found
-					if (insideQuotes) continue // ignore delimiter inside quotes
+					// Delimiter found; one inside quotes is part of the field, so skip it.
+					if (insideQuotes) continue
 
 					// Emit content before this delimiter (empty if delimiter follows closing quote)
 					if (sliceStart < match.offset) {
@@ -377,15 +372,14 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 			}
 
 			const lastMatch = matches[matches.length - 1]!
-			this.#readPosition = lastMatch.offset +
-				(lastMatch.patternId === 0 ? this.#needle.length : 1)
+			this.#readPosition = lastMatch.offset + (lastMatch.patternId === 0 ? this.#needle.length : 1)
 
 			// Emit trailing content after the last match
 			// Case 1: Content after last delimiter (final field, no trailing delimiter)
 			if (sliceStart < this.#readPosition) {
 				this.#indices.enqueue([sliceStart, sourceByteLength])
 				this.#readPosition = sourceByteLength
-			// Case 2: Trailing delimiter (emit empty field to match String.split)
+				// Case 2: Trailing delimiter (emit empty field to match String.split)
 			} else if (sliceStart === sourceByteLength && this.#readPosition === sourceByteLength) {
 				this.#indices.enqueue([sourceByteLength, sourceByteLength])
 			}

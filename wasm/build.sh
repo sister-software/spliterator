@@ -39,7 +39,8 @@ cat > ../lib/wasm_base64.ts << TSEOF
  *                         results_offset, max_results) → usize
  *     Writes (start, end) i32 pairs to results_offset, returns count.
  */
-export const WASM_BASE64 = "${BASE64}"
+export const WASM_BASE64 =
+	"${BASE64}"
 TSEOF
 
 echo "==> Done. WASM size: $(wc -c < "$WASM_OUT") bytes, base64: ${#BASE64} chars"

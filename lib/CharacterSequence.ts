@@ -4,6 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
+import type { ByteRange } from "./shared.js"
 import {
 	loadWasmModule,
 	WASM_MAX_RESULTS,
@@ -13,8 +14,6 @@ import {
 	type WasmMemory,
 } from "./wasm_module.js"
 
-import type { ByteRange } from "./shared.js"
-
 export function isArrayLike<T>(input: unknown): input is ArrayLike<T> {
 	return Boolean(input && typeof input === "object" && "length" in input)
 }
@@ -22,18 +21,34 @@ export function isArrayLike<T>(input: unknown): input is ArrayLike<T> {
 export type CharacterSequenceInput = number | string | DataView | ArrayBuffer | Buffer | Iterable<number>
 
 export const Delimiters = {
-	Null: 0, LineFeed: 10, CarriageReturn: 13, Comma: 44, Tab: 9, Space: 32,
-	One: 49, Zero: 48, DoubleQuote: 34, RecordSeparator: 30, Pipe: 124,
+	Null: 0,
+	LineFeed: 10,
+	CarriageReturn: 13,
+	Comma: 44,
+	Tab: 9,
+	Space: 32,
+	One: 49,
+	Zero: 48,
+	DoubleQuote: 34,
+	RecordSeparator: 30,
+	Pipe: 124,
 } as const satisfies Record<string, number>
 
 export const VisibleDelimiterMap = new Map<number, string>([
-	[Delimiters.LineFeed, "\u2424"], [Delimiters.CarriageReturn, "\u240D"],
-	[Delimiters.Comma, "-"], [Delimiters.Tab, "\u2409"], [Delimiters.Space, "\u2420"],
-	[Delimiters.DoubleQuote, '"'], [Delimiters.RecordSeparator, "\u241E"], [Delimiters.Null, "\u2400"],
+	[Delimiters.LineFeed, "\u2424"],
+	[Delimiters.CarriageReturn, "\u240D"],
+	[Delimiters.Comma, "-"],
+	[Delimiters.Tab, "\u2409"],
+	[Delimiters.Space, "\u2420"],
+	[Delimiters.DoubleQuote, '"'],
+	[Delimiters.RecordSeparator, "\u241E"],
+	[Delimiters.Null, "\u2400"],
 ])
 
 export function debugAsVisibleCharacters(delimiter: Uint8Array): string {
-	return Array.from(delimiter).map((c) => VisibleDelimiterMap.get(c) ?? String.fromCharCode(c)).join("")
+	return Array.from(delimiter)
+		.map((c) => VisibleDelimiterMap.get(c) ?? String.fromCharCode(c))
+		.join("")
 }
 
 const encoder = new TextEncoder()
@@ -43,12 +58,14 @@ export function normalizeCharacterInput(input: CharacterSequenceInput): Uint8Arr
 		case "number":
 			if (!Number.isInteger(input)) throw new TypeError(`Numeric delimiters must be integers.`)
 			return Uint8Array.from([input])
-		case "string": return encoder.encode(input)
+		case "string":
+			return encoder.encode(input)
 		case "object":
 			if (isArrayLike(input)) return input
 			if (Symbol.iterator in input) return Uint8Array.from(input)
 			throw new TypeError(`Invalid delimiter type.`)
-		default: throw new TypeError(`Invalid delimiter type.`)
+		default:
+			throw new TypeError(`Invalid delimiter type.`)
 	}
 }
 
@@ -104,6 +121,15 @@ export class CharacterSequence extends Uint8Array {
 
 	public search(haystack: Uint8Array, start: number = 0, end: number = haystack.length): number {
 		const sequenceLength = this.length
+
+		// Single-byte delimiters (newline, comma, tab — the common case) are far faster via
+		// the native indexOf than the per-match Boyer-Moore-Horspool loop below. indexOf has
+		// no end bound, so clamp the result to keep `end` exclusive.
+		if (sequenceLength === 1) {
+			const index = haystack.indexOf(this[0]!, start)
+
+			return index !== -1 && index < end ? index : -1
+		}
 
 		if (sequenceLength > 1 && end - start >= WASM_THRESHOLD) {
 			const wasm = CharacterSequence.#wasmScanner
@@ -265,23 +291,25 @@ export class CharacterSequence extends Uint8Array {
 
 		if (CharacterSequence.#wasmScanner === undefined) CharacterSequence.#ensureWasm()
 
-		// JS fallback: scan independently, merge
+		// JS fallback: scan both patterns independently and merge in offset order. Both
+		// searches honour `end` exclusivity and handle multi-byte patterns (the quote is
+		// wrapped in a CharacterSequence so it isn't limited to a single byte).
 		const matches: MatchResult[] = []
+		const quoteSeq = new CharacterSequence(quotePattern)
 		let searchStart = start
 
 		while (searchStart <= end) {
 			const delimIdx = this.search(haystack, searchStart, end)
-			const quoteIdx = quoteLen === 1 ? haystack.indexOf(quotePattern[0]!, searchStart) : -1
-			const adjQuoteIdx = quoteIdx >= 0 && quoteIdx < end ? quoteIdx : -1
+			const quoteIdx = quoteSeq.search(haystack, searchStart, end)
 
-			if (delimIdx < 0 && adjQuoteIdx < 0) break
+			if (delimIdx < 0 && quoteIdx < 0) break
 
-			if (delimIdx >= 0 && (adjQuoteIdx < 0 || delimIdx <= adjQuoteIdx)) {
+			if (delimIdx >= 0 && (quoteIdx < 0 || delimIdx <= quoteIdx)) {
 				matches.push({ offset: delimIdx, patternId: 0 })
 				searchStart = delimIdx + delimiterLen
 			} else {
-				matches.push({ offset: adjQuoteIdx, patternId: 1 })
-				searchStart = adjQuoteIdx + quoteLen
+				matches.push({ offset: quoteIdx, patternId: 1 })
+				searchStart = quoteIdx + quoteLen
 			}
 		}
 
@@ -295,7 +323,7 @@ export class CharacterSequence extends Uint8Array {
 	constructor(input: CharacterSequenceInput = Delimiters.LineFeed) {
 		const bytes = normalizeCharacterInput(input)
 		super(bytes)
-		this.#skipIndex = new Array(256).fill(this.length)
+		this.#skipIndex = Array.from({ length: 256 }, () => this.length)
 
 		for (let i = 0; i < this.length - 1; i++) this.#skipIndex[this[i]!] = this.length - 1 - i
 	}
