@@ -2,54 +2,36 @@
  * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ *
+ * Split a large file into delimiter-aligned segments and parse each independently. All segments
+ * share the event loop here; see `AsyncSpliterator.asManyWorkers` for the worker-thread version.
  */
 
 import * as fs from "node:fs/promises"
 
-import { AsyncSpliterator, CharacterSequence } from "spliterator"
+import { AsyncSpliterator } from "spliterator"
 import { fixturesDirectory } from "spliterator/test/utils"
 
 const fixturePath = fixturesDirectory("bdc_06_Cable_fixed_broadband_J24_10dec2024.csv")
-
-const delimiter = new CharacterSequence()
-const chunkReader = await AsyncSpliterator.asMany(fixturePath, "\n", 12)
-
 const fileSize = await fs.stat(fixturePath).then((stat) => stat.size)
 
-console.log(`Expected File Size: ${fileSize} bytes`)
+console.log(`File size: ${fileSize.toLocaleString()} bytes`)
 
-// let totalByteLength = 0
-// let previousRangeEnd = 0
-// let idx = 0
+const ranges = await AsyncSpliterator.segments(fixturePath, { delimiter: "\n", concurrency: 12 })
+console.log(`Split into ${ranges.length} delimiter-aligned segments.`)
 
-// for (const [start, end] of chunkReader) {
-// 	idx++
+const spliterators = await AsyncSpliterator.asMany(fixturePath, { delimiter: "\n", concurrency: 12 })
 
-// 	const byteLength = end - start
-// 	totalByteLength += byteLength
-// 	const rangeDistance = previousRangeEnd - start + idx * delimiter.length
-// 	const percentage = (byteLength / fileSize) * 100
+let total = 0
 
-// 	console.log(
-// 		`#${idx}: [${start}, ${end}] (${totalByteLength.toLocaleString()}) ${rangeDistance}, ${percentage.toFixed(8)}%`
-// 	)
+for (let i = 0; i < spliterators.length; i++) {
+	let rows = 0
 
-// 	const rangeFilename = fixturesDirectory(`range-${idx}.csv`)
+	for await (const _ of spliterators[i]!) rows++
+	total += rows
 
-// 	const readStream = createReadStream(fixturePath, { start, end, autoClose: true })
+	const [start, end] = ranges[i]!
+	console.log(`segment #${i}: [${start}, ${end}] → ${rows.toLocaleString()} rows`)
+}
 
-// 	const writeStream = createWriteStream(rangeFilename, { autoClose: true })
-// 	await pipeline(readStream, writeStream)
-
-// 	previousRangeEnd = totalByteLength
-// 	// console.log(`Wrote range ${idx} to ${rangeFilename}`)
-// }
-
-// const omittedDelimiterByteLength = idx * delimiter.length
-// totalByteLength += omittedDelimiterByteLength
-// const shortage = fileSize - totalByteLength - (idx - 1) * delimiter.length
-
-// console.log("---")
-// console.log(`Total Ranges: ${idx}`)
-// console.log(`Total Byte Length: ${totalByteLength} bytes (${((totalByteLength / fileSize) * 100).toFixed(8)}%)`)
-// console.log(`Total Byte Shortage: ${shortage} bytes (${((shortage / fileSize) * 100).toFixed(8)}%)`)
+console.log(`Total rows: ${total.toLocaleString()}`)

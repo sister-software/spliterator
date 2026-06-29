@@ -9,6 +9,7 @@ import { ReadableStream, type ReadableWritablePair, type StreamPipeOptions } fro
 import { BufferController } from "./BufferController.js"
 import { CharacterSequence, type CharacterSequenceInput } from "./CharacterSequence.js"
 import { IndexQueue } from "./IndexQueue.js"
+import { computeSegments, type SegmentOptions } from "./segments.js"
 import type { AsyncChunkIterator, AsyncDataResource, ByteRange } from "./shared.js"
 
 const noop = () => void 0
@@ -565,60 +566,34 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	//#region Experimental
 
 	/**
-	 * Given a file handle containing delimited data and a desired slice count, returns an array of slices of the buffer
-	 * between delimiters.
-	 *
-	 * This is an advanced function so an analogy is provided:
-	 *
-	 * Suppose you had to manually search through a very large book page by page to find where each chapter begins and
-	 * ends. For a book with 1,000,000 pages, a single person would take a long time to go through it all.
-	 *
-	 * You could add more people to the task by laying out all the pages, measuring the length and assigning each person a
-	 * length of pages to traverse.
-	 *
-	 * There's a few ways to go about this:
-	 *
-	 * We could approach this in serial -- having the first worker start from page 1 and scanning until they find the
-	 * beginning of the next chapter, handing off the range to the next worker. This is how `AsyncSpliterator` works.
-	 *
-	 * However this is inefficient because no matter how many workers we have, they must wait for the previous worker to
-	 * finish before they can start. Ideally, a desired number of workers would be able to scan their own _length_ of
-	 * pages simultaneously, and settle up on the boundaries of the chapters they find.
-	 *
-	 * `AsyncSpliterator.asMany` is like the second approach, spltting the book into mostly equal lengths and having each
-	 * worker scan their own length of pages.
-	 *
-	 * @param source - The file handle to read from.
-	 * @param delimiter - The character to delimit by. Typically a newline or comma.
-	 * @param concurrency - The _desired_ number of `AsyncSpliterator` instances to create.
-	 *
-	 * @returns An array of `AsyncSpliterator` instances, possibly less than the desired concurrency.
-	 * @internal
+	 * Compute delimiter-aligned `[start, end)` byte ranges dividing `source` into up to `concurrency` segments. The
+	 * boundary primitive for parallel parsing — hand each range to a worker (with its own handle). See
+	 * {@linkcode asManyWorkers} for the turnkey worker version.
 	 */
-	public static async asMany(
-		source: AsyncDataResource,
-		delimiter: CharacterSequenceInput,
-		concurrency: number
-	): Promise<AsyncSpliterator[]> {
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
-		concurrency = Math.max(1, concurrency)
-		const needle = new CharacterSequence(delimiter)
+	public static segments(source: AsyncDataResource, options: SegmentOptions): Promise<ByteRange[]> {
+		return computeSegments(source, options)
+	}
 
-		const spliterators: AsyncSpliterator[] = []
+	/**
+	 * Split `source` into delimiter-aligned segments and return one {@linkcode AsyncSpliterator} per segment. All share
+	 * the event loop (no worker threads) — for moderate jobs or to overlap I/O. Returns at most `concurrency` instances.
+	 *
+	 * @param source - The data resource to read from.
+	 * @param options - Delimiter, desired concurrency, and optional probe size.
+	 *
+	 * @returns One `AsyncSpliterator` per non-empty segment, possibly fewer than `concurrency`.
+	 */
+	public static async asMany(source: AsyncDataResource, options: SegmentOptions): Promise<AsyncSpliterator[]> {
+		const { createChunkIterator } = await import("spliterator/node/fs")
+		const segments = await computeSegments(source, options)
 
-		const { createChunkIterator, readFileSize } = await import("spliterator/node/fs")
-		const fileSize = await readFileSize(source)
+		return Promise.all(
+			segments.map(async ([start, end]) => {
+				// `end` is exclusive here; createChunkIterator's `end` is inclusive.
+				const chunkIterator = await createChunkIterator(source, { start, end: end - 1 })
 
-		// const file = createChunkIterator(source, {
-		// 	start: 0,
-		// })
-
-		// The idea here is  we're going to split the file into `concurrency` chunks.
-
-		if (Date.now()) {
-			throw new Error("Not implemented.")
-		}
-
-		return spliterators
+				return new AsyncSpliterator(chunkIterator, { delimiter: options.delimiter, autoDispose: true })
+			})
+		)
 	}
 }
