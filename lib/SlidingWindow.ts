@@ -59,18 +59,19 @@ export class SlidingWindow<T extends TypedArray> implements IterableIterator<Byt
 	}
 
 	public next(): IteratorResult<ByteRange> {
-		for (let end = this.cursor; end < this.#byteLength; end++) {
-			// We walk through as many bytes as the delimiter has...
-			const match = this.#delimiter.every((byte, i) => byte === this.buffer[end + i])
+		if (this.cursor < this.#byteLength) {
+			// Delegate scanning to CharacterSequence.search, which uses native indexOf for
+			// single-byte delimiters and the SIMD/BMH paths otherwise — far faster than a
+			// per-byte `.every` callback across the buffer.
+			const delimiterIndex = this.#delimiter.search(this.buffer as unknown as Uint8Array, this.cursor, this.#byteLength)
 
-			// We didn't find a match, so we continue.
-			if (!match) continue
+			if (delimiterIndex !== -1) {
+				const range: ByteRange = [this.cursor, delimiterIndex]
 
-			const range: ByteRange = [this.cursor, end]
+				this.cursor = delimiterIndex + this.#delimiter.length
 
-			this.cursor = end + this.#delimiter.length
-
-			return { value: range, done: false }
+				return { value: range, done: false }
+			}
 		}
 
 		if (this.cursor <= this.#byteLength && !this.#done) {

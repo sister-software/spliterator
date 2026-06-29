@@ -431,47 +431,51 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	//#region Iterator Methods
 
 	public async next(): Promise<IteratorResult<R>> {
-		if (this.#done || this.#yieldCount >= this.#yieldStopCount) return this.#finalize()
+		// Loop rather than recurse: a long run of skipped (empty or dropped) ranges would
+		// otherwise grow the call stack one frame per skip and overflow.
+		while (true) {
+			if (this.#done || this.#yieldCount >= this.#yieldStopCount) return this.#finalize()
 
-		if (this.#indices.size === 0) {
-			await this.#fill()
-		}
+			if (this.#indices.size === 0) {
+				await this.#fill()
+			}
 
-		// The first `#fill` may have read into EOF without entering the EOF branch (the branch only
-		// triggers when fill is called with `done` already set). In that case the trailing tail
-		// hasn't been enqueued yet, so call fill once more to let the EOF branch flush it.
-		if (this.#lastReadResult?.done && this.#indices.size === 0 && !this.#done) {
-			await this.#fill()
-		}
+			// The first `#fill` may have read into EOF without entering the EOF branch (the branch only
+			// triggers when fill is called with `done` already set). In that case the trailing tail
+			// hasn't been enqueued yet, so call fill once more to let the EOF branch flush it.
+			if (this.#lastReadResult?.done && this.#indices.size === 0 && !this.#done) {
+				await this.#fill()
+			}
 
-		const currentByteRange = this.#indices.dequeue()
-		this.#lastByteRangeSeen = currentByteRange
+			const currentByteRange = this.#indices.dequeue()
+			this.#lastByteRangeSeen = currentByteRange
 
-		if (!currentByteRange) {
-			this.#done = true
+			if (!currentByteRange) {
+				this.#done = true
 
-			return this.#finalize()
-		}
+				return this.#finalize()
+			}
 
-		const [start, end] = currentByteRange
+			const [start, end] = currentByteRange
 
-		const slice = this.#controller.subarray(start, end)
+			const slice = this.#controller.subarray(start, end)
 
-		if (slice.length === 0 && this.#skipEmpty) {
-			return this.next()
-		}
+			if (slice.length === 0 && this.#skipEmpty) {
+				continue
+			}
 
-		this.#yieldCount++
+			this.#yieldCount++
 
-		if (this.#yieldCount <= this.#yieldDropCount) {
-			return this.next()
-		}
+			if (this.#yieldCount <= this.#yieldDropCount) {
+				continue
+			}
 
-		this.#yieldedByteLength += end - start
+			this.#yieldedByteLength += end - start
 
-		return {
-			value: slice as unknown as R,
-			done: false,
+			return {
+				value: slice as unknown as R,
+				done: false,
+			}
 		}
 	}
 

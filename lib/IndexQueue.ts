@@ -7,16 +7,31 @@
 import type { ByteRange } from "./shared.js"
 
 /**
+ * Number of consumed slots (`start`/`end` values, i.e. 2 per dequeued tuple) the head pointer may advance before the
+ * backing array is compacted. Bounds wasted space under partial draining while keeping compaction rare enough that
+ * `dequeue` stays amortized O(1).
+ */
+const COMPACT_THRESHOLD = 1024
+
+/**
  * A first-in, first-out queue for marking and dequeuing index tuples.
  */
 export class IndexQueue implements IterableIterator<ByteRange> {
+	/**
+	 * Flat backing store of `[start, end]` pairs. Consumed entries before `#head` are kept until the queue drains or
+	 * `#head` crosses {@link COMPACT_THRESHOLD}, so `dequeue` stays O(1) instead of shifting the whole array on every
+	 * yield.
+	 */
 	#tuples: number[] = []
+
+	/** Index of the next tuple's `start` in {@link #tuples}; advances by 2 per dequeue. */
+	#head = 0
 
 	/**
 	 * The number of tuples in the queue.
 	 */
 	public get size(): number {
-		return this.#tuples.length / 2
+		return (this.#tuples.length - this.#head) / 2
 	}
 
 	#byteLength = 0
@@ -34,7 +49,8 @@ export class IndexQueue implements IterableIterator<ByteRange> {
 	 * Append a new tuple to the queue.
 	 */
 	public enqueue(tuple: ByteRange): void {
-		this.#tuples.push(...tuple)
+		this.#tuples.push(tuple[0])
+		this.#tuples.push(tuple[1])
 
 		this.#byteLength += tuple[1] - tuple[0]
 	}
@@ -43,31 +59,46 @@ export class IndexQueue implements IterableIterator<ByteRange> {
 	 * Get the next tuple in the queue, removing it.
 	 */
 	public dequeue(): ByteRange | undefined {
-		if (this.#tuples.length < 2) return
+		if (this.#head >= this.#tuples.length) return
 
-		const tuple = this.#tuples.splice(0, 2) as ByteRange
+		const start = this.#tuples[this.#head]!
+		const end = this.#tuples[this.#head + 1]!
 
-		this.#byteLength -= tuple[1] - tuple[0]
+		this.#head += 2
+		this.#byteLength -= end - start
 
-		return tuple as ByteRange
+		// Reclaim consumed space: reset outright once fully drained (the common per-fill pattern
+		// in both engines), otherwise compact periodically so the backing array can't grow
+		// unbounded when the queue is only partially drained between enqueues.
+		if (this.#head >= this.#tuples.length) {
+			this.#tuples.length = 0
+			this.#head = 0
+		} else if (this.#head >= COMPACT_THRESHOLD) {
+			this.#tuples.splice(0, this.#head)
+			this.#head = 0
+		}
+
+		return [start, end]
 	}
 
 	/**
 	 * Peek at the next tuple in the queue without removing it.
 	 */
 	public peek(): ByteRange | undefined {
-		if (this.#tuples.length < 2) return
+		if (this.#head >= this.#tuples.length) return
 
-		return this.#tuples.slice(0, 2) as ByteRange
+		return [this.#tuples[this.#head]!, this.#tuples[this.#head + 1]!]
 	}
 
 	/**
 	 * Peek at the last tuple in the queue without removing it.
 	 */
 	public peekLast(): ByteRange | undefined {
-		if (this.#tuples.length < 2) return
+		if (this.#tuples.length - this.#head < 2) return
 
-		return this.#tuples.slice(-2) as ByteRange
+		const end = this.#tuples.length
+
+		return [this.#tuples[end - 2]!, this.#tuples[end - 1]!]
 	}
 
 	/**
@@ -75,6 +106,7 @@ export class IndexQueue implements IterableIterator<ByteRange> {
 	 */
 	public clear(): void {
 		this.#tuples.length = 0
+		this.#head = 0
 		this.#byteLength = 0
 	}
 

@@ -294,8 +294,11 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 
 		if (this.#readPosition < sourceByteLength) {
 			this.#indices.enqueue([this.#readPosition, sourceByteLength])
-		} else if (this.#yieldCount === 0) {
-			// No content was ever yielded — emit the whole buffer.
+		} else if (this.#yieldCount === 0 && lastByteRange === undefined) {
+			// Nothing was ever found or yielded (e.g. an empty source) — emit the whole buffer as
+			// a single field. A run of all-empty fields that `skipEmpty` dropped has a defined
+			// `lastByteRange`, so it falls through to the trailing-delimiter case instead of
+			// resurfacing the entire delimiter run as one (non-empty) row.
 			this.#indices.enqueue([0, sourceByteLength])
 		} else if (!this.#enableQuoteHandling) {
 			// Simple path: emit empty field for trailing delimiter (match String.split).
@@ -394,42 +397,46 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 * Read the next byte range from the source.
 	 */
 	public next(): IteratorResult<R> {
-		if (this.#done || this.#yieldCount >= this.#yieldStopCount) return this.#finalize()
+		// Loop rather than recurse: a long run of skipped (empty or dropped) ranges would
+		// otherwise grow the call stack one frame per skip and overflow.
+		while (true) {
+			if (this.#done || this.#yieldCount >= this.#yieldStopCount) return this.#finalize()
 
-		if (!this.#indices.size) this.#fill()
+			if (!this.#indices.size) this.#fill()
 
-		if (!this.#indices.size) {
-			this.#drain()
-		}
+			if (!this.#indices.size) {
+				this.#drain()
+			}
 
-		const currentByteRange = this.#indices.dequeue()
-		this.#previousByteRange = currentByteRange
+			const currentByteRange = this.#indices.dequeue()
+			this.#previousByteRange = currentByteRange
 
-		if (!currentByteRange) {
-			this.#done = true
+			if (!currentByteRange) {
+				this.#done = true
 
-			return this.#finalize()
-		}
+				return this.#finalize()
+			}
 
-		const [start, end] = currentByteRange
+			const [start, end] = currentByteRange
 
-		const slice = this.#source.subarray(start, end)
+			const slice = this.#source.subarray(start, end)
 
-		if (slice.length === 0 && this.#skipEmpty) {
-			return this.next()
-		}
+			if (slice.length === 0 && this.#skipEmpty) {
+				continue
+			}
 
-		this.#yieldCount++
+			this.#yieldCount++
 
-		if (this.#yieldCount <= this.#yieldDropCount) {
-			return this.next()
-		}
+			if (this.#yieldCount <= this.#yieldDropCount) {
+				continue
+			}
 
-		this.#yieldedByteLength += end - start
+			this.#yieldedByteLength += end - start
 
-		return {
-			value: slice as unknown as R,
-			done: false,
+			return {
+				value: slice as unknown as R,
+				done: false,
+			}
 		}
 	}
 

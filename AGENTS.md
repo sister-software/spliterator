@@ -129,9 +129,9 @@ Identified bottlenecks, ordered by impact. Check these off as they are addressed
 
   - Uses `this.#delimiter.every((byte, i) => ...)` — a JS callback per byte in the buffer. `CharacterSequence.search` (BMH) is available but unused here. Switching to `this.#delimiter.search(this.buffer, this.cursor, this.#byteLength)` would immediately apply the faster search (and benefit from the single-byte fix above).
 
-- [x] **`BufferController.compress` delays underlying `ArrayBuffer` GC** (`lib/BufferController.ts:72`)
+- [ ] **`BufferController.compress` delays underlying `ArrayBuffer` GC** (`lib/BufferController.ts:71`)
 
-  - `this.bytes = this.bytes.subarray(start, end)` creates a view into the same `ArrayBuffer`, so bytes before `start` are logically discarded but still retained in memory. The old buffer is not freed until `grow` is called. If chunks are always small enough to fit in the remaining view space, historical bytes linger. Physically copying remaining bytes into a fresh buffer after compress would resolve this.
+  - `this.bytes = this.bytes.subarray(start, end)` creates a view into the same `ArrayBuffer`, so bytes before `start` are logically discarded but still retained in memory. The old buffer is not freed until `grow` is called. Physically copying remaining bytes into a fresh buffer after compress would resolve this — but it adds an O(remaining) copy on every fill cycle, trading throughput for earlier GC. Left as a view deliberately; revisit only if memory pressure on long streams proves to be a problem.
 
 - [x] **`new TextEncoder()` created on every `normalizeCharacterInput` call** (`lib/CharacterSequence.ts:110`)
 
