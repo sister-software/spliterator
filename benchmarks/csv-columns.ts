@@ -8,6 +8,7 @@
 
 import { CharacterSequence, CSVSpliterator, Delimiters } from "../index.js"
 import { Spliterator } from "../lib/Spliterator.js"
+import { WASM_THRESHOLD } from "../lib/wasm_module.js"
 
 /** Generate a synthetic CSV buffer with `rows` rows × `cols` columns. */
 function generateCSV(rows: number, cols: number): Uint8Array {
@@ -73,29 +74,32 @@ function parseWithSearchAll(buf: Uint8Array, commaDelim: CharacterSequence): str
 async function main(): Promise<void> {
 	console.log("=== CSV Column Splitting Benchmark ===\n")
 
-	// Warm up WASM
-	console.log("Warming up WASM...")
+	// The scanner loads asynchronously; await it so searchAll actually takes the SIMD path
+	// rather than silently benchmarking the JS fallback.
+	console.log("Loading WASM...")
 	const commaDelim = new CharacterSequence(Delimiters.Comma)
-	const warmup = new Uint8Array(5000).fill(65)
+	const wasmReady = await CharacterSequence.whenReady()
+	console.log(`WASM scanner active: ${wasmReady}\n`)
 
-	commaDelim.searchAll(warmup)
-	await new Promise((resolve) => setTimeout(resolve, 100))
-	console.log("WASM warmup complete\n")
-
+	// searchAll only uses WASM when a row is at least WASM_THRESHOLD bytes. The cell below is
+	// ~9 bytes wide, so "narrow" configs stay on the JS path and "wide" ones (>= ~460 cols)
+	// cross into SIMD — both are shown so the threshold's effect is visible.
 	const configs = [
-		{ rows: 1000, cols: 10, label: "1K × 10 cols" },
-		{ rows: 1000, cols: 100, label: "1K × 100 cols" },
 		{ rows: 10000, cols: 10, label: "10K × 10 cols" },
 		{ rows: 10000, cols: 50, label: "10K × 50 cols" },
-		{ rows: 100000, cols: 10, label: "100K × 10 cols" },
+		{ rows: 2000, cols: 600, label: "2K × 600 cols" },
+		{ rows: 1000, cols: 1000, label: "1K × 1000 cols" },
+		{ rows: 500, cols: 2000, label: "500 × 2000 cols" },
 	]
 
 	for (const { rows, cols, label } of configs) {
 		console.log(`--- ${label} ---`)
 		const buf = generateCSV(rows, cols)
 		const sizeMB = (buf.byteLength / (1024 * 1024)).toFixed(2)
+		const rowBytes = Math.round(buf.byteLength / rows)
+		const path = rowBytes >= WASM_THRESHOLD ? "WASM" : "JS fallback"
 
-		console.log(`  Data size: ${sizeMB} MB`)
+		console.log(`  Data size: ${sizeMB} MB  |  ~${rowBytes} B/row  →  ${path}`)
 
 		// Parity check (small scale to keep fast)
 		if (rows <= 10000) {
@@ -130,9 +134,11 @@ async function main(): Promise<void> {
 		parseWithSpliterator(buf, commaDelim)
 
 		const spliteratorMs = performance.now() - spliteratorStart
-		const spliteratorMBps = (buf.byteLength / (1024 * 1024)) / (spliteratorMs / 1000)
+		const spliteratorMBps = buf.byteLength / (1024 * 1024) / (spliteratorMs / 1000)
 
-		console.log(`  Spliterator:    ${spliteratorMs.toFixed(1).padStart(8)}ms  →  ${spliteratorMBps.toFixed(1).padStart(8)} MB/s`)
+		console.log(
+			`  Spliterator:    ${spliteratorMs.toFixed(1).padStart(8)}ms  →  ${spliteratorMBps.toFixed(1).padStart(8)} MB/s`
+		)
 
 		// Benchmark: searchAll approach
 		const searchAllStart = performance.now()
@@ -140,10 +146,12 @@ async function main(): Promise<void> {
 		parseWithSearchAll(buf, commaDelim)
 
 		const searchAllMs = performance.now() - searchAllStart
-		const searchAllMBps = (buf.byteLength / (1024 * 1024)) / (searchAllMs / 1000)
+		const searchAllMBps = buf.byteLength / (1024 * 1024) / (searchAllMs / 1000)
 		const speedup = spliteratorMs / searchAllMs
 
-		console.log(`  searchAll:      ${searchAllMs.toFixed(1).padStart(8)}ms  →  ${searchAllMBps.toFixed(1).padStart(8)} MB/s  (${speedup.toFixed(2)}x)`)
+		console.log(
+			`  searchAll:      ${searchAllMs.toFixed(1).padStart(8)}ms  →  ${searchAllMBps.toFixed(1).padStart(8)} MB/s  (${speedup.toFixed(2)}x)`
+		)
 	}
 
 	// Summary
@@ -155,11 +163,15 @@ async function main(): Promise<void> {
 		const buf = generateCSV(rows, cols)
 
 		// Quick re-measure for summary
-		const s1 = performance.now(); parseWithSpliterator(buf, commaDelim); const spliteratorMs = performance.now() - s1
-		const s2 = performance.now(); parseWithSearchAll(buf, commaDelim); const searchAllMs = performance.now() - s2
+		const s1 = performance.now()
+		parseWithSpliterator(buf, commaDelim)
+		const spliteratorMs = performance.now() - s1
+		const s2 = performance.now()
+		parseWithSearchAll(buf, commaDelim)
+		const searchAllMs = performance.now() - s2
 
-		const spliteratorMBps = (buf.byteLength / (1024 * 1024)) / (spliteratorMs / 1000)
-		const searchAllMBps = (buf.byteLength / (1024 * 1024)) / (searchAllMs / 1000)
+		const spliteratorMBps = buf.byteLength / (1024 * 1024) / (spliteratorMs / 1000)
+		const searchAllMBps = buf.byteLength / (1024 * 1024) / (searchAllMs / 1000)
 		const speedup = spliteratorMs / searchAllMs
 
 		console.log(

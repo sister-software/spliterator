@@ -63,18 +63,21 @@ pub unsafe extern "C" fn find_all_delimiters(
         } else {
             find_multi_byte(haystack.add(search_start), remaining, pattern, pattern_len)
         };
-        if pos < 0 {
-            *results.add(count * 2) = range_start as i32;
-            *results.add(count * 2 + 1) = haystack_len as i32;
-            count += 1;
-            break;
-        }
+        if pos < 0 { break; }
         let dp = search_start + pos as usize;
         *results.add(count * 2) = range_start as i32;
         *results.add(count * 2 + 1) = dp as i32;
         count += 1;
         search_start = dp + pattern_len;
         range_start = search_start;
+    }
+    // Trailing field after the last delimiter. The JS scanner always emits
+    // [range_start, haystack_len] here, which is an empty range when the haystack ends
+    // exactly on a delimiter — without this the final (empty) field would be dropped.
+    if count < max_results {
+        *results.add(count * 2) = range_start as i32;
+        *results.add(count * 2 + 1) = haystack_len as i32;
+        count += 1;
     }
     count
 }

@@ -192,4 +192,19 @@ describe("WASM SIMD scanner", () => {
 		expect(matches).toEqual(referenceMatches(buf, Delimiters.Comma, Delimiters.DoubleQuote))
 		expect(matches.length).toBeGreaterThan(4096)
 	})
+
+	// A haystack ending exactly on a delimiter has a trailing empty field. The JS scan emits
+	// it (matching String.split); the WASM kernel must too, or the last column silently
+	// disappears for wide rows ending in a separator.
+	test("searchAll emits the trailing empty field when the haystack ends on a delimiter", () => {
+		const comma = new CharacterSequence(Delimiters.Comma)
+		const buf = commaHaystack(4100, [10, 2000, 4099]) // final byte is the delimiter
+
+		expect(buf[buf.length - 1]).toBe(Delimiters.Comma)
+
+		const ranges = comma.searchAll(buf)
+
+		expect(ranges).toEqual(referenceRanges(buf, comma))
+		expect(ranges[ranges.length - 1]).toEqual([4100, 4100])
+	})
 })
