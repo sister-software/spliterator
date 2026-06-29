@@ -25,6 +25,10 @@ cat > ../lib/wasm_base64.ts << TSEOF
  * The module exports:
  *   - memory: WebAssembly.Memory (1 page = 64KB initial, 256 pages max = 16MB)
  *   - find_delimiter(haystack_offset, haystack_len, pattern_offset, pattern_len) → i32
+ *     Returns the byte offset of the first match, or -1.
+ *   - find_all_delimiters(haystack_offset, haystack_len, pattern_offset, pattern_len,
+ *                         results_offset, max_results) → usize
+ *     Writes (start, end) i32 pairs to results_offset, returns count.
  */
 export const WASM_BASE64 = "${BASE64}"
 TSEOF

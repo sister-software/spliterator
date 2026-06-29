@@ -32,8 +32,9 @@ export async function loadWasmModule(): Promise<WasmDelimiterScanner | null> {
 		const exports = instance.exports
 		const memory = exports.memory as WasmMemory
 		const findDelimiter = exports.find_delimiter as WasmFindDelimiter
+		const findAllDelimiters = exports.find_all_delimiters as WasmFindAllDelimiters
 
-		return { memory, findDelimiter }
+		return { memory, findDelimiter, findAllDelimiters }
 	} catch {
 		return null
 	}
@@ -44,6 +45,15 @@ type WasmFindDelimiter = (
 	haystackLen: number,
 	patternOffset: number,
 	patternLen: number
+) => number
+
+type WasmFindAllDelimiters = (
+	haystackOffset: number,
+	haystackLen: number,
+	patternOffset: number,
+	patternLen: number,
+	resultsOffset: number,
+	maxResults: number
 ) => number
 
 /**
@@ -58,6 +68,7 @@ export interface WasmMemory {
 export interface WasmDelimiterScanner {
 	memory: WasmMemory
 	findDelimiter: WasmFindDelimiter
+	findAllDelimiters: WasmFindAllDelimiters
 }
 
 /**
@@ -67,3 +78,11 @@ export interface WasmDelimiterScanner {
  * The JS BMH path is faster for tiny chunks.
  */
 export const WASM_THRESHOLD = 4096
+
+/**
+ * Maximum number of delimiter results a single WASM call can return.
+ *
+ * Each result is 2 × i32 (8 bytes). For CSV column splitting, 4096 columns
+ * per row is far more than any realistic use case.
+ */
+export const WASM_MAX_RESULTS = 4096

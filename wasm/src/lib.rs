@@ -1,7 +1,7 @@
 //! WASM SIMD delimiter scanner for spliterator.
 //!
-//! Exports `find_delimiter` using i8x16.eq + i8x16.bitmask to accelerate
-//! multi-byte delimiter scanning within WASM linear memory.
+//! Exports `find_delimiter` and `find_all_delimiters` using i8x16.eq +
+//! i8x16.bitmask to accelerate delimiter scanning within WASM linear memory.
 //!
 //! Build:
 //!   RUSTFLAGS="-C target-feature=+simd128" cargo build --target wasm32-unknown-unknown --release
@@ -18,12 +18,6 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 /// Find the first occurrence of `pattern` within `haystack` in WASM linear memory.
-///
-/// Both haystack and pattern reside in WASM linear memory at the given offsets.
-/// The JS host copies bytes into memory before calling this function.
-///
-/// Returns the byte offset of the first match relative to `haystack_offset`,
-/// or -1 if not found.
 #[no_mangle]
 pub unsafe extern "C" fn find_delimiter(
     haystack_offset: usize,
@@ -45,6 +39,67 @@ pub unsafe extern "C" fn find_delimiter(
     find_multi_byte(haystack_ptr, haystack_len, pattern_ptr, pattern_len)
 }
 
+/// Find all occurrences of `pattern` within `haystack` and write
+/// `(start, end)` i32 pairs into the results buffer at `results_offset`.
+///
+/// Returns the number of ranges written (0 if none found).
+///
+/// Each range occupies 8 bytes (2 × i32). `max_results` caps the output.
+/// The first range always starts at 0; the last range always ends at
+/// `haystack_len` (the trailing segment after the final delimiter).
+#[no_mangle]
+pub unsafe extern "C" fn find_all_delimiters(
+    haystack_offset: usize,
+    haystack_len: usize,
+    pattern_offset: usize,
+    pattern_len: usize,
+    results_offset: usize,
+    max_results: usize,
+) -> usize {
+    if pattern_len == 0 || haystack_len == 0 || pattern_len > haystack_len || max_results == 0 {
+        return 0;
+    }
+
+    let haystack = haystack_offset as *const u8;
+    let pattern = pattern_offset as *const u8;
+    let results = results_offset as *mut i32;
+
+    let mut count: usize = 0;
+    let mut search_start: usize = 0;
+    let mut range_start: usize = 0;
+
+    while search_start + pattern_len <= haystack_len && count < max_results {
+        let remaining = haystack_len - search_start;
+
+        let pos = if pattern_len == 1 {
+            find_single_byte(haystack.add(search_start), remaining, *pattern)
+        } else {
+            find_multi_byte(haystack.add(search_start), remaining, pattern, pattern_len)
+        };
+
+        if pos < 0 {
+            // No more delimiters — emit the final range
+            *results.add(count * 2) = range_start as i32;
+            *results.add(count * 2 + 1) = haystack_len as i32;
+            count += 1;
+            break;
+        }
+
+        let delimiter_pos = search_start + pos as usize;
+
+        // Emit the range [range_start, delimiter_pos)
+        *results.add(count * 2) = range_start as i32;
+        *results.add(count * 2 + 1) = delimiter_pos as i32;
+        count += 1;
+
+        // Advance past the delimiter
+        search_start = delimiter_pos + pattern_len;
+        range_start = search_start;
+    }
+
+    count
+}
+
 unsafe fn find_single_byte(haystack: *const u8, len: usize, needle: u8) -> i32 {
     let needle_splat = i8x16_splat(needle as i8);
     let mut offset = 0usize;
@@ -61,7 +116,6 @@ unsafe fn find_single_byte(haystack: *const u8, len: usize, needle: u8) -> i32 {
         offset += 16;
     }
 
-    // Scalar tail
     for i in offset..len {
         if *haystack.add(i) == needle {
             return i as i32;
@@ -109,7 +163,6 @@ unsafe fn find_multi_byte(
         offset += 16;
     }
 
-    // Scalar tail
     for i in offset..search_end {
         if *haystack.add(i) == *pattern {
             let mut matches = true;

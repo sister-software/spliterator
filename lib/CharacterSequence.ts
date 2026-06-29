@@ -4,7 +4,15 @@
  * @author Teffen Ellis, et al.
  */
 
-import { loadWasmModule, WASM_THRESHOLD, type WasmDelimiterScanner, type WasmMemory } from "./wasm_module.js"
+import {
+	loadWasmModule,
+	WASM_MAX_RESULTS,
+	WASM_THRESHOLD,
+	type WasmDelimiterScanner,
+	type WasmMemory,
+} from "./wasm_module.js"
+
+import type { ByteRange } from "./shared.js"
 
 /**
  * Type-predicate to determine if a value is an array-like object.
@@ -13,93 +21,37 @@ export function isArrayLike<T>(input: unknown): input is ArrayLike<T> {
 	return Boolean(input && typeof input === "object" && "length" in input)
 }
 
-/**
- * A possible input for a delimiter:
- *
- * - A single character code.
- * - A string of characters.
- * - An array of character codes.
- * - A buffer.
- * - An iterable of character codes.
- */
 export type CharacterSequenceInput = number | string | DataView | ArrayBuffer | Buffer | Iterable<number>
 
-/**
- * Common delimiter values.
- */
 export const Delimiters = {
-	/**
-	 * Null (␀)
-	 */
 	Null: 0,
-
-	/**
-	 * Newline (␊)
-	 */
 	LineFeed: 10,
-
-	/**
-	 * Carriage return (␍)
-	 */
 	CarriageReturn: 13,
-
-	/**
-	 * Comma (–)
-	 */
 	Comma: 44,
-
-	/**
-	 * Tab (␉)
-	 */
 	Tab: 9,
-
-	/**
-	 * Space (␠)
-	 */
 	Space: 32,
-
-	/**
-	 * One (1)
-	 */
 	One: 49,
-
-	/**
-	 * Zero (0)
-	 */
 	Zero: 48,
-
-	/**
-	 * Double quote (")
-	 */
 	DoubleQuote: 34,
-
-	/**
-	 * Record separator (␞)
-	 */
 	RecordSeparator: 30,
-
-	/**
-	 * Pipe (|)
-	 */
 	Pipe: 124,
 } as const satisfies Record<string, number>
 
 export const VisibleDelimiterMap = new Map<number, string>([
-	[Delimiters.LineFeed, "␤"],
-	[Delimiters.CarriageReturn, "␍"],
+	[Delimiters.LineFeed, "\u2424"],
+	[Delimiters.CarriageReturn, "\u240D"],
 	[Delimiters.Comma, "-"],
-	[Delimiters.Tab, "␉"],
-	[Delimiters.Space, "␠"],
+	[Delimiters.Tab, "\u2409"],
+	[Delimiters.Space, "\u2420"],
 	[Delimiters.DoubleQuote, '"'],
-	[Delimiters.RecordSeparator, "␞"],
-	[Delimiters.Null, "␀"],
+	[Delimiters.RecordSeparator, "\u241E"],
+	[Delimiters.Null, "\u2400"],
 ])
 
 export function debugAsVisibleCharacters(delimiter: Uint8Array): string {
 	return Array.from(delimiter)
 		.map((charCode) => {
 			const visible = VisibleDelimiterMap.get(charCode)
-
 			return visible ?? String.fromCharCode(charCode)
 		})
 		.join("")
@@ -110,125 +62,64 @@ const encoder = new TextEncoder()
 export function normalizeCharacterInput(input: CharacterSequenceInput): Uint8Array {
 	switch (typeof input) {
 		case "number":
-			if (!Number.isInteger(input)) {
-				throw new TypeError(`Numeric delimiters must be integers. Received: ${input}`)
-			}
-
+			if (!Number.isInteger(input)) throw new TypeError(`Numeric delimiters must be integers. Received: ${input}`)
 			return Uint8Array.from([input])
 		case "string":
 			return encoder.encode(input)
 		case "object":
-			if (isArrayLike(input)) {
-				return input
-			}
-
-			if (Symbol.iterator in input) {
-				return Uint8Array.from(input)
-			}
-
-			throw new TypeError(`Invalid delimiter type. Received an object, but it is not an array or buffer.`)
-
+			if (isArrayLike(input)) return input
+			if (Symbol.iterator in input) return Uint8Array.from(input)
+			throw new TypeError(`Invalid delimiter type.`)
 		default:
 			throw new TypeError(`Invalid delimiter type. Received: ${input}`)
 	}
 }
 
-/**
- * Ensure WASM memory has capacity for `required` bytes, growing if necessary.
- */
 function ensureWasmCapacity(memory: WasmMemory, required: number): void {
 	if (required <= memory.buffer.byteLength) return
-
 	const pageSize = 64 * 1024
 	const neededPages = Math.ceil((required - memory.buffer.byteLength) / pageSize)
 	memory.grow(neededPages)
 }
 
-/**
- * An encoded sequence of characters, typically bytes representing a delimiter.
- *
- * Unlike a string, this class is optimized for searching and slicing.
- *
- * This also allows for multi-byte delimiters, such as CRLF or unicode characters.
- */
 export class CharacterSequence extends Uint8Array {
-	/**
-	 * A jump table for the Boyer-Moore-Horspool search algorithm.
-	 */
 	#skipIndex: number[]
 
-	/**
-	 * Lazily-loaded WASM SIMD delimiter scanner.
-	 *
-	 * - `undefined`: not yet attempted (will trigger async load on next search).
-	 * - `null`: load failed or WASM unavailable (never try again).
-	 * - `WasmDelimiterScanner`: ready to use.
-	 */
 	static #wasmScanner: WasmDelimiterScanner | null | undefined
-
-	/**
-	 * Cached last haystack reference + layout to avoid re-copying.
-	 */
 	static #wasmHaystack: Uint8Array | null = null
-
-	/**
-	 * Byte offset in WASM memory where the haystack begins (always 0).
-	 */
-	static #wasmHaystackOffset = 0
-
-	/**
-	 * Byte offset in WASM memory where the DELIMITER PATTERN begins.
-	 *
-	 * Set once when the haystack is first copied. Remains stable across
-	 * repeated searches on the same buffer.
-	 */
 	static #wasmPatternOffset = 0
 
-	/**
-	 * Initiate WASM module loading (idempotent — safe to call multiple times).
-	 */
 	static #ensureWasm(): void {
 		if (CharacterSequence.#wasmScanner !== undefined) return
-
 		CharacterSequence.#wasmScanner = null
-
-		loadWasmModule().then((mod) => {
-			CharacterSequence.#wasmScanner = mod
-		})
+		loadWasmModule().then((mod) => { CharacterSequence.#wasmScanner = mod })
 	}
 
 	/**
 	 * Perform a Boyer-Moore-Horspool search for the pattern in the text.
 	 *
 	 * For multi-byte delimiters with large haystacks, delegates to the WASM SIMD
-	 * scanner if available. Falls back to JS BMH otherwise.
+	 * scanner if available.
 	 */
-	public search(haystack: Uint8Array, start: number = 0, end = haystack.length): number {
+	public search(haystack: Uint8Array, start: number = 0, end: number = haystack.length): number {
 		const sequenceLength = this.length
 
-		// Multi-byte + large haystack + WASM available → SIMD path
 		if (sequenceLength > 1 && end - start >= WASM_THRESHOLD) {
 			const wasm = CharacterSequence.#wasmScanner
 
 			if (wasm) {
-				// Only copy if the haystack changed
+				const haystackLen = end - start
+				const totalNeeded = haystackLen + sequenceLength
+
 				if (haystack !== CharacterSequence.#wasmHaystack) {
-					const haystackLen = end - start
-					const totalNeeded = haystackLen + sequenceLength
-
 					ensureWasmCapacity(wasm.memory, totalNeeded)
-
 					const buffer = new Uint8Array(wasm.memory.buffer, 0, totalNeeded)
-
 					buffer.set(haystack.subarray(start, end), 0)
 					buffer.set(this, haystackLen)
-
 					CharacterSequence.#wasmHaystack = haystack
 					CharacterSequence.#wasmPatternOffset = haystackLen
 				}
 
-				// Search from `start` within the copied buffer.
-				// The haystack is at WASM offset 0 and length = #wasmPatternOffset bytes.
 				const result = wasm.findDelimiter(
 					start,
 					CharacterSequence.#wasmPatternOffset - start,
@@ -239,31 +130,87 @@ export class CharacterSequence extends Uint8Array {
 				return result >= 0 ? start + result : -1
 			}
 
-			// WASM not yet loaded — trigger load for next time, fall through to BMH
-			if (CharacterSequence.#wasmScanner === undefined) {
-				CharacterSequence.#ensureWasm()
-			}
+			if (CharacterSequence.#wasmScanner === undefined) CharacterSequence.#ensureWasm()
 		}
 
-		// Clear WASM haystack cache so next *different* buffer triggers a fresh copy
 		CharacterSequence.#wasmHaystack = null
 
-		// --- JS Boyer-Moore-Horspool path ---
 		let startIndex = start
 
 		while (startIndex <= end - sequenceLength) {
 			let lastIndex = sequenceLength - 1
-
-			while (lastIndex >= 0 && this[lastIndex] === haystack[startIndex + lastIndex]) {
-				lastIndex--
-			}
-
+			while (lastIndex >= 0 && this[lastIndex] === haystack[startIndex + lastIndex]) lastIndex--
 			if (lastIndex < 0) return startIndex
-
 			startIndex += this.#skipIndex[haystack[startIndex + sequenceLength - 1]!]!
 		}
 
 		return -1
+	}
+
+	/**
+	 * Find ALL delimiter positions in the haystack using WASM SIMD, returning
+	 * `[start, end]` byte ranges in a single WASM call.
+	 *
+	 * Falls back to JS BMH iteration if WASM is unavailable.
+	 */
+	public searchAll(haystack: Uint8Array, start: number = 0, end: number = haystack.length): ByteRange[] {
+		const sequenceLength = this.length
+		const haystackLen = end - start
+
+		if (sequenceLength >= 1 && haystackLen >= WASM_THRESHOLD) {
+			const wasm = CharacterSequence.#wasmScanner
+
+			if (wasm) {
+				const resultsSize = WASM_MAX_RESULTS * 2 * 4
+				const totalNeeded = haystackLen + sequenceLength + resultsSize
+
+				ensureWasmCapacity(wasm.memory, totalNeeded)
+
+				const buffer = new Uint8Array(wasm.memory.buffer, 0, totalNeeded)
+				buffer.set(haystack.subarray(start, end), 0)
+				buffer.set(this, haystackLen)
+
+				const resultsOffset = haystackLen + sequenceLength
+
+				const count = wasm.findAllDelimiters(
+					0, haystackLen, haystackLen, sequenceLength, resultsOffset, WASM_MAX_RESULTS
+				)
+
+				const resultView = new Int32Array(wasm.memory.buffer, resultsOffset, count * 2)
+				const ranges: ByteRange[] = []
+
+				for (let i = 0; i < count; i++) {
+					ranges.push([start + resultView[i * 2]!, start + resultView[i * 2 + 1]!])
+				}
+
+				return ranges
+			}
+
+			if (CharacterSequence.#wasmScanner === undefined) CharacterSequence.#ensureWasm()
+		}
+
+		// JS BMH fallback
+		const ranges: ByteRange[] = []
+		let searchStart = start
+		let rangeStart = start
+
+		while (searchStart <= end - sequenceLength) {
+			let lastIndex = sequenceLength - 1
+			while (lastIndex >= 0 && this[lastIndex] === haystack[searchStart + lastIndex]) lastIndex--
+
+			if (lastIndex < 0) {
+				ranges.push([rangeStart, searchStart])
+				searchStart += sequenceLength
+				rangeStart = searchStart
+				continue
+			}
+
+			searchStart += this.#skipIndex[haystack[searchStart + sequenceLength - 1]!]!
+		}
+
+		if (rangeStart <= end) ranges.push([rangeStart, end])
+
+		return ranges
 	}
 
 	public decode(encoding: string = "utf-8"): string {
@@ -272,14 +219,8 @@ export class CharacterSequence extends Uint8Array {
 
 	constructor(input: CharacterSequenceInput = Delimiters.LineFeed) {
 		const bytes = normalizeCharacterInput(input)
-
 		super(bytes)
-
-		// oxlint-disable-next-line unicorn/no-new-array
 		this.#skipIndex = new Array(256).fill(this.length)
-
-		for (let i = 0; i < this.length - 1; i++) {
-			this.#skipIndex[this[i]!] = this.length - 1 - i
-		}
+		for (let i = 0; i < this.length - 1; i++) this.#skipIndex[this[i]!] = this.length - 1 - i
 	}
 }
