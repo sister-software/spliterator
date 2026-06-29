@@ -59,6 +59,14 @@ export interface SpliteratorInit {
 	take?: number
 
 	/**
+	 * Whether to handle quoted fields (e.g., CSV). When enabled, delimiters inside
+	 * double-quoted fields are ignored and quoted fields are emitted without quotes.
+	 *
+	 * @default false
+	 */
+	enableQuoteHandling?: boolean
+
+	/**
 	 * Whether to emit debug information.
 	 */
 	debug?: boolean
