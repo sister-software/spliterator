@@ -153,6 +153,30 @@ for (const row of CSVSpliterator.from(largeCsvString)) {
 
 Correctness is identical either way; `whenReady()` only affects which scanner runs.
 
+### Parallel parsing across threads
+
+For one large file with a CPU-bound per-row transform, `AsyncSpliterator.asManyWorkers` splits the file into delimiter-aligned segments and runs a handler module across worker threads — each worker owns its own handle and reads only its segment. Results stream back to the main thread as a single async iterator, for a single-thread writer (a database, a JSONL file).
+
+```ts
+import { AsyncSpliterator } from "spliterator"
+
+// transform.js (runs in each worker; top-level code is per-worker init):
+//   const dec = new TextDecoder(), enc = new TextEncoder()
+//   export function handleRecord(bytes) {
+//     return enc.encode(JSON.stringify(parse(dec.decode(bytes))) + "\n") // Uint8Array → zero-copy
+//   }
+
+for await (const jsonLine of AsyncSpliterator.asManyWorkers<Uint8Array>("huge.csv", {
+	worker: new URL("./transform.js", import.meta.url),
+	delimiter: "\n",
+	concurrency: 8,
+})) {
+	out.write(jsonLine) // single-thread writer on main
+}
+```
+
+Need just the byte ranges to drive your own pool? `AsyncSpliterator.segments(path, { delimiter, concurrency })` returns them.
+
 ### Custom generators
 
 While Spliterator includes premade exports for most use-cases, custom generators can be created via `Spliterator` and `AsyncSpliterator`. This class is a low-level interface that allows you to create your own generators for any kind of delimited content.

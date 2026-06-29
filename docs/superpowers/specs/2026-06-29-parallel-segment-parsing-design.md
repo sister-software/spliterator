@@ -66,15 +66,18 @@ into its own worker pool. Layer 3 is the turnkey orchestrator.
 ## Layer 1 — `node/fs` primitives
 
 ### `CreateChunkIteratorOptions.end?: number`
+
 Inclusive upper byte bound, matching Node's `createReadStream({ end })`. Passed through to the read
 stream so a chunk iterator stops at a segment's end. To read the half-open byte range `[start, end)`,
 callers pass `{ start, end: end - 1 }`. (AGENTS.md already documents this semantic; we make it real.)
 
 ### `readBytes(source: AsyncDataResource, start: number, length: number): Promise<Uint8Array>`
+
 Random-access window read for boundary probing. Opens (or reuses) a handle, reads up to `length`
 bytes from `start`, returns the (EOF-clamped, possibly shorter) slice. `@internal`.
 
 ### fd-leak fix
+
 `ingest.ts` works around a real bug: `autoDispose` only fires on natural completion, not on an early
 `break`/`.return()`, leaking the fd (a GC-time error in Node 24+). The range readers and workers
 must dispose their handles on **early termination and error**, not only on natural EOF. Concretely:
@@ -87,13 +90,14 @@ closes its handle in a `finally`.
 
 ```ts
 interface SegmentOptions {
-  delimiter?: CharacterSequenceInput  // default: LineFeed
-  concurrency: number                 // desired segment count (clamped ≥ 1)
-  probeSize?: number                  // boundary probe window bytes (default 64 KiB)
+	delimiter?: CharacterSequenceInput // default: LineFeed
+	concurrency: number // desired segment count (clamped ≥ 1)
+	probeSize?: number // boundary probe window bytes (default 64 KiB)
 }
 ```
 
 Algorithm:
+
 1. `fileSize = readFileSize(source)`. If `fileSize === 0` → return `[]`.
 2. If `concurrency ≤ 1` → return `[[0, fileSize]]`.
 3. Ideal cut points `cᵢ = round(i · fileSize / concurrency)` for `i ∈ 1..concurrency-1`.
@@ -113,7 +117,11 @@ segment's records reproduces the file's records exactly, with **no record split 
 ### `AsyncSpliterator.asMany(source, options): Promise<AsyncSpliterator[]>`
 
 ```ts
-interface AsManyOptions { delimiter?: CharacterSequenceInput; concurrency: number; probeSize?: number }
+interface AsManyOptions {
+	delimiter?: CharacterSequenceInput
+	concurrency: number
+	probeSize?: number
+}
 ```
 
 `segments(...)` → one `AsyncSpliterator` per segment via
@@ -126,13 +134,13 @@ moderate jobs or I/O-overlap. Returns ≤ `concurrency` instances.
 
 ```ts
 interface AsManyWorkersOptions {
-  worker: string | URL          // module path; exports handleRecord (see contract)
-  delimiter?: CharacterSequenceInput
-  concurrency: number
-  probeSize?: number
-  batchSize?: number            // records per message (default 256)
-  maxInFlight?: number          // unacked batches per worker before it pauses (default 4)
-  workerData?: unknown          // forwarded to every worker (e.g. config)
+	worker: string | URL // module path; exports handleRecord (see contract)
+	delimiter?: CharacterSequenceInput
+	concurrency: number
+	probeSize?: number
+	batchSize?: number // records per message (default 256)
+	maxInFlight?: number // unacked batches per worker before it pauses (default 4)
+	workerData?: unknown // forwarded to every worker (e.g. config)
 }
 ```
 
@@ -141,6 +149,7 @@ interface AsManyWorkersOptions {
   the main thread by a single-thread writer.
 
 ### Two distinct worker pieces
+
 1. **The library's worker runner** — a small module spliterator ships (e.g. `out/lib/segment-worker.js`,
    spawned via `new Worker(runnerUrl, { workerData })`). It opens the handle for its segment
    (`createChunkIterator(path, { start, end: end - 1 })`), iterates records, calls the user handler,
@@ -149,6 +158,7 @@ interface AsManyWorkersOptions {
 2. **The user's handler module** (`options.worker`) — dynamically `import()`ed by the runner.
 
 ### Worker module contract
+
 The `worker` module runs **once per worker** at import (top-level code, incl. top-level `await`, is
 the per-worker init — load models/handles here). It exports:
 
@@ -167,6 +177,7 @@ export function handleRecord(
   derives from `(segmentIndex, index)`.
 
 ### Message protocol (the bottleneck mitigations, baked in)
+
 - **Chunked batching:** workers post every `batchSize` results as one message — never per-record
   (queue pressure), never whole-segment (no streaming, unbounded worker memory).
 - **Zero-copy transfer:** any `Uint8Array` result in a batch is added to the message's transfer
@@ -180,21 +191,22 @@ export function handleRecord(
   **terminates all workers**; `.return()` / early break terminates them too (and closes handles).
 
 ### `workerToIterable`
+
 Per the AGENTS.md gotcha: attach `message`/`error` listeners **eagerly at construction** (not inside
 `[Symbol.asyncIterator]`, which loses messages posted while a prior segment is consumed) and drain
 via a `chunks[] + head` pointer (no `Array.shift()` in the hot path).
 
 ## Bottlenecks & mitigations (accepted)
 
-| Bottleneck | Mitigation in this design |
-|---|---|
+| Bottleneck                            | Mitigation in this design                                                                                                                             |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Single-thread writer = Amdahl ceiling | Push all per-record work into the worker; worker emits final output form (bytes for JSONL, the exact tuple for SQLite) so main's per-record cost ≈ 0. |
-| Cross-thread clone cost | Transfer `Uint8Array` results zero-copy; objects clone only as a convenience. |
-| Message overhead | Chunked batches (`batchSize`), not per-record. |
-| Main queue / memory blowup | Bounded in-flight window (`maxInFlight`) + ack backpressure. |
-| CPU- vs I/O-bound | Documented: threads help only when transform dominates the read; assumes SSD/NVMe (parallel offset reads thrash an HDD). |
-| Per-worker memory | Heavy handler deps load N×; choose `concurrency` for RAM, keep the handler module lean. Documented. |
-| Result ordering | Interleaved; documented as order-agnostic (non-goal otherwise). |
+| Cross-thread clone cost               | Transfer `Uint8Array` results zero-copy; objects clone only as a convenience.                                                                         |
+| Message overhead                      | Chunked batches (`batchSize`), not per-record.                                                                                                        |
+| Main queue / memory blowup            | Bounded in-flight window (`maxInFlight`) + ack backpressure.                                                                                          |
+| CPU- vs I/O-bound                     | Documented: threads help only when transform dominates the read; assumes SSD/NVMe (parallel offset reads thrash an HDD).                              |
+| Per-worker memory                     | Heavy handler deps load N×; choose `concurrency` for RAM, keep the handler module lean. Documented.                                                   |
+| Result ordering                       | Interleaved; documented as order-agnostic (non-goal otherwise).                                                                                       |
 
 ## Testing strategy (TDD)
 
@@ -207,8 +219,8 @@ via a `chunks[] + head` pointer (no `Array.shift()` in the hot path).
   sequential over the whole file, at concurrency 1 / 4 / > record-count.
 - **`asManyWorkers`:** temp fixture file + a fixture worker module. Parity (collected results equal
   the sequential transform), `TypeError` on a non-path source, `Uint8Array` transfer path, batching
-  + backpressure (results stream before any single segment finishes; main queue stays bounded), a
-  throwing handler rejects the iterator and terminates workers, early `.return()` terminates workers.
+  - backpressure (results stream before any single segment finishes; main queue stays bounded), a
+    throwing handler rejects the iterator and terminates workers, early `.return()` terminates workers.
 
 ## Open questions / future
 

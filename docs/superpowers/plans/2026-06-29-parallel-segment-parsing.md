@@ -23,10 +23,12 @@
 ### Task 1: `createChunkIterator` `end` bound
 
 **Files:**
+
 - Modify: `node/fs/index.ts` (`CreateChunkIteratorOptions`, `createChunkIterator`)
 - Test: `test/node-fs.test.ts` (create)
 
 **Interfaces:**
+
 - Produces: `CreateChunkIteratorOptions.end?: number` (inclusive); `createChunkIterator(source, { start, end, highWaterMark })` reads only `[start, end]`.
 
 - [ ] **Step 1: Write the failing test**
@@ -94,22 +96,22 @@ Change the destructuring and the path branch:
 ```
 
 ```ts
-		const readStream = handle.createReadStream({
-			start,
-			end,
-			highWaterMark,
-			autoClose: true,
-		})
+const readStream = handle.createReadStream({
+	start,
+	end,
+	highWaterMark,
+	autoClose: true,
+})
 ```
 
 And the file-handle branch (`source.createReadStream`):
 
 ```ts
-			return source.createReadStream({
-				start,
-				end,
-				highWaterMark,
-			})
+return source.createReadStream({
+	start,
+	end,
+	highWaterMark,
+})
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -130,10 +132,12 @@ git commit -m "feat(node/fs): inclusive end bound on createChunkIterator"
 ### Task 2: `readBytes`
 
 **Files:**
+
 - Modify: `node/fs/index.ts`
 - Test: `test/node-fs.test.ts`
 
 **Interfaces:**
+
 - Produces: `readBytes(source: AsyncDataResource, start: number, length: number): Promise<Uint8Array>` — random-access window read, EOF-clamped (returns fewer than `length` bytes at EOF).
 
 - [ ] **Step 1: Write the failing test**
@@ -208,10 +212,12 @@ git commit -m "feat(node/fs): readBytes window read for boundary probing"
 ### Task 3: AsyncSpliterator fd-leak fix on early termination
 
 **Files:**
+
 - Modify: `lib/AsyncSpliterator.ts` (`#finalize`, `return`, `[Symbol.asyncDispose]`)
 - Test: `test/AsyncSpliterator.dispose.test.ts` (create)
 
 **Interfaces:**
+
 - Consumes: existing `#chunkReader: AsyncIterator<Uint8Array>`.
 - Produces: `return()` / `[Symbol.asyncDispose]()` propagate cancellation to the chunk reader via `#chunkReader.return?.()`, so an early `break` destroys the underlying read stream (closing its fd) instead of leaking it.
 
@@ -277,13 +283,13 @@ In `lib/AsyncSpliterator.ts`, add a private helper and call it from `#finalize` 
 In `#finalize()`, before the `autoDispose` block, add:
 
 ```ts
-		await this.#closeReader()
+await this.#closeReader()
 ```
 
 In `[Symbol.asyncDispose]()`, before the `autoDispose` block, add:
 
 ```ts
-		await this.#closeReader()
+await this.#closeReader()
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -305,11 +311,13 @@ git commit -m "fix(async): destroy chunk reader on early termination (fd leak)"
 ### Task 4: `computeSegments` boundary detection
 
 **Files:**
+
 - Create: `lib/segments.ts`
 - Modify: `index.ts` (export)
 - Test: `test/segments.test.ts` (create)
 
 **Interfaces:**
+
 - Consumes: `readFileSize`, `readBytes` (dynamic `import("spliterator/node/fs")`); `CharacterSequence`; `ByteRange`.
 - Produces: `computeSegments(source: AsyncDataResource, options: { delimiter?: CharacterSequenceInput; concurrency: number; probeSize?: number }): Promise<ByteRange[]>` — contiguous, delimiter-aligned, ≤ concurrency, covering `[0, fileSize]`; `[]` for an empty file.
 
@@ -491,10 +499,12 @@ git commit -m "feat: computeSegments delimiter-aligned boundary detection"
 ### Task 5: `AsyncSpliterator.segments` + `asMany`
 
 **Files:**
+
 - Modify: `lib/AsyncSpliterator.ts` (replace the `asMany` stub; add `segments`)
 - Test: `test/asMany.test.ts` (create)
 
 **Interfaces:**
+
 - Consumes: `computeSegments`; `createChunkIterator` (dynamic import).
 - Produces:
   - `static segments(source, options: SegmentOptions): Promise<ByteRange[]>` (delegates to `computeSegments`).
@@ -604,23 +614,27 @@ git commit -m "feat(async): segments() + asMany() over delimiter-aligned ranges"
 ### Task 6: `runSegment` — the testable per-segment loop (batching, transfer, backpressure)
 
 **Files:**
+
 - Create: `lib/segment-runtime.ts`
 - Test: `test/segment-runtime.test.ts` (create)
 
 **Interfaces:**
+
 - Produces:
   ```ts
-  interface SegmentBatch { records: unknown[] }            // posted to main
+  interface SegmentBatch {
+  	records: unknown[]
+  } // posted to main
   type Handler = (record: Uint8Array, ctx: { index: number; segmentIndex: number }) => unknown
   interface RunSegmentIO {
-    records: AsyncIterable<Uint8Array>
-    handleRecord: Handler
-    segmentIndex: number
-    batchSize: number
-    maxInFlight: number
-    post: (batch: unknown[], transfer: ArrayBuffer[]) => void  // post a batch (+ transferables)
-    waitForAck: () => Promise<void>                            // resolves when an ack arrives
-    inFlight: () => number                                     // unacked batches outstanding
+  	records: AsyncIterable<Uint8Array>
+  	handleRecord: Handler
+  	segmentIndex: number
+  	batchSize: number
+  	maxInFlight: number
+  	post: (batch: unknown[], transfer: ArrayBuffer[]) => void // post a batch (+ transferables)
+  	waitForAck: () => Promise<void> // resolves when an ack arrives
+  	inFlight: () => number // unacked batches outstanding
   }
   async function runSegment(io: RunSegmentIO): Promise<void>
   ```
@@ -786,17 +800,21 @@ git commit -m "feat: runSegment batching/transfer/backpressure loop"
 ### Task 7: `workerToIterable` — main-side drain
 
 **Files:**
+
 - Create: `lib/segment-workers.ts` (start it here; extended in Task 8)
 - Test: `test/workerToIterable.test.ts` (create)
 
 **Interfaces:**
+
 - Produces: `workerToIterable<R>(worker: MinimalWorker, onBatchConsumed: () => void): AsyncIterableIterator<R>` where
+
   ```ts
   interface MinimalWorker {
-    on(event: "message", cb: (msg: unknown) => void): void
-    on(event: "error", cb: (err: Error) => void): void
+  	on(event: "message", cb: (msg: unknown) => void): void
+  	on(event: "error", cb: (err: Error) => void): void
   }
   ```
+
   Worker messages are `{ type: "batch"; records: R[] } | { type: "done" } | { type: "error"; message: string }`. Listeners attach **eagerly** at call time (not in `[Symbol.asyncIterator]`). Draining uses a `chunks[] + head` pointer (no `Array.shift()`). After all records of a batch are yielded, `onBatchConsumed()` fires (the ack hook). An `error` message or worker `error` rejects the iterator.
 
 - [ ] **Step 1: Write the failing test**
@@ -841,9 +859,11 @@ describe("workerToIterable", () => {
 		const it = workerToIterable<string>(w, () => {})
 		w.emit("message", { type: "error", message: "boom" })
 
-		await expect((async () => {
-			for await (const _ of it) void _
-		})()).rejects.toThrow("boom")
+		await expect(
+			(async () => {
+				for await (const _ of it) void _
+			})()
+		).rejects.toThrow("boom")
 	})
 })
 ```
@@ -949,6 +969,7 @@ git commit -m "feat: workerToIterable eager-listener drain with ack hook"
 ### Task 8: Worker entry + `asManyWorkers` end-to-end
 
 **Files:**
+
 - Create: `lib/segment-worker-entry.ts` (the worker-thread runner)
 - Modify: `lib/segment-workers.ts` (add `runSegmentWorkers`)
 - Modify: `lib/AsyncSpliterator.ts` (add `asManyWorkers`)
@@ -958,19 +979,22 @@ git commit -m "feat: workerToIterable eager-listener drain with ack hook"
 - Test: `test/asManyWorkers.test.ts` (create)
 
 **Interfaces:**
+
 - Consumes: `runSegment`, `workerToIterable`, `computeSegments`, `createChunkIterator`.
 - Produces: `AsyncSpliterator.asManyWorkers<R>(source, options: AsManyWorkersOptions): AsyncIterableIterator<R>` where
+
   ```ts
   interface AsManyWorkersOptions {
-    worker: string | URL
-    delimiter?: CharacterSequenceInput
-    concurrency: number
-    probeSize?: number
-    batchSize?: number
-    maxInFlight?: number
-    workerData?: unknown
+  	worker: string | URL
+  	delimiter?: CharacterSequenceInput
+  	concurrency: number
+  	probeSize?: number
+  	batchSize?: number
+  	maxInFlight?: number
+  	workerData?: unknown
   }
   ```
+
   Throws `TypeError` if `source` is not a path string or URL. Spawns one Worker per segment, merges their `workerToIterable` streams, sends an `ack` after each consumed batch, and terminates all workers on completion / error / early `return()`.
 
 - [ ] **Step 1: Write the failing test + fixtures**
@@ -1022,7 +1046,11 @@ writeFileSync(file, text)
 
 describe("asManyWorkers", () => {
 	test("parity with the sequential transform (results back to main)", async () => {
-		const oracle = text.split("\n").filter(Boolean).map((s) => s.toUpperCase()).sort()
+		const oracle = text
+			.split("\n")
+			.filter(Boolean)
+			.map((s) => s.toUpperCase())
+			.sort()
 
 		const got: string[] = []
 		for await (const r of AsyncSpliterator.asManyWorkers<string>(file, {
@@ -1056,13 +1084,16 @@ describe("asManyWorkers", () => {
 	})
 
 	test("a throwing handler rejects the iterator", async () => {
-		await expect((async () => {
-			for await (const _ of AsyncSpliterator.asManyWorkers(file, {
-				worker: join(handlerDir, "throws.js"),
-				delimiter: "\n",
-				concurrency: 2,
-			})) void _
-		})()).rejects.toThrow(/boom/)
+		await expect(
+			(async () => {
+				for await (const _ of AsyncSpliterator.asManyWorkers(file, {
+					worker: join(handlerDir, "throws.js"),
+					delimiter: "\n",
+					concurrency: 2,
+				}))
+					void _
+			})()
+		).rejects.toThrow(/boom/)
 	})
 })
 ```
@@ -1268,6 +1299,7 @@ git commit -m "feat(async): asManyWorkers — threaded segment parsing to a sing
 ### Task 9: Documentation — replace the fiction with the real API
 
 **Files:**
+
 - Modify: `AGENTS.md` (architecture `asMany`/`asManyWorkers` bullets; the `readBytes`/`end` gotcha line; the two stale `[x]` worker perf-issue items)
 - Modify: `README.md` (add a parallel-parsing section)
 
@@ -1296,7 +1328,7 @@ In "Known Performance Issues", the two `[x]` `asManyWorkers` items (worker-pool 
 
 Add after the "SIMD acceleration" section:
 
-```markdown
+````markdown
 ### Parallel parsing across threads
 
 For one large file with a CPU-bound per-row transform, `AsyncSpliterator.asManyWorkers` splits the file into delimiter-aligned segments and runs a handler module across worker threads — each worker owns its own handle and reads only its segment. Results stream back to the main thread as a single async iterator, for a single-thread writer (a database, a JSONL file).
@@ -1318,9 +1350,11 @@ for await (const jsonLine of AsyncSpliterator.asManyWorkers<Uint8Array>("huge.cs
 	out.write(jsonLine) // single-thread writer on main
 }
 ```
+````
 
 Need just the byte ranges to drive your own pool? `AsyncSpliterator.segments(path, { delimiter, concurrency })` returns them.
-```
+
+````
 
 - [ ] **Step 3: Verify lint**
 
@@ -1332,13 +1366,14 @@ Expected: green (Markdown isn't linted by oxlint/oxfmt, but run it to confirm no
 ```bash
 git add AGENTS.md README.md
 git commit -m "docs: document the real segments/asMany/asManyWorkers API"
-```
+````
 
 ---
 
 ## Self-Review
 
 **Spec coverage:**
+
 - `end` bound → Task 1. `readBytes` → Task 2. fd-leak fix → Task 3. `computeSegments` + invariant + edge cases → Task 4. `segments` + `asMany` → Task 5. Batching/transfer/backpressure protocol → Task 6 (`runSegment`). Eager-listener drain + ack hook → Task 7. Worker entry + `asManyWorkers` + TypeError + transfer + error/termination → Task 8. Docs → Task 9. All spec sections covered.
 - Backpressure: `runSegment` (Task 6) enforces the window via `inFlight()`/`waitForAck()`; the worker entry (Task 8) tracks `posted - acked`; main acks per consumed batch (Task 7/8). Consistent.
 

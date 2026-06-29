@@ -38,9 +38,11 @@ Spliterator is an ESM TypeScript library (`"type": "module"`) for streaming deli
 
 **`AsyncSpliterator`** (`lib/AsyncSpliterator.ts`) — The async counterpart. Reads chunks via an `AsyncChunkIterator`, appends them into a `BufferController` (a growable/compressible buffer), and searches for delimiters within. Implements `AsyncIterableIterator` and `AsyncDisposable`. Exposes `toReadableStream()` and `pipeThrough()` for web stream interop.
 
-- **`AsyncSpliterator.asMany(source, delimiter, concurrency)`** — Divides a file into `concurrency` delimiter-aligned byte segments by probing small windows at each ideal boundary. Returns one `AsyncSpliterator` per non-empty segment. All segments share the same event loop (single-threaded async interleaving). Uses `createChunkIterator(source, { start, end: end - 1 })` — note `end` is inclusive in Node.js `createReadStream` semantics.
+- **`AsyncSpliterator.segments(source, { delimiter, concurrency, probeSize? })`** — Returns delimiter-aligned `[start, end)` byte ranges (`lib/segments.ts`) by probing small windows at each ideal boundary **in parallel** (`Promise.all`) and aligning each cut just past the next delimiter. The boundary primitive for parallel parsing — hand each range to a worker. Invariant: concatenating each segment's records reproduces the file exactly (no record split or duplicated).
 
-- **`AsyncSpliterator.asManyWorkers(source, delimiter, concurrency)`** — Same boundary detection as `asMany`, but spawns one `worker_threads` Worker per segment, giving each its own V8 engine and OS thread. Workers batch all records into a single `Uint8Array[]` message (+ `null` sentinel) before posting — this ensures results arrive in one event-loop turn after any main-thread block. Module-level helpers: `SEGMENT_WORKER_CODE` (inline CJS string, `eval: true`) and `workerToIterable` (attaches listeners eagerly at construction, uses a `chunks[]`+`head` pointer for O(1) draining). Requires a path string or URL — file handles cannot cross thread boundaries.
+- **`AsyncSpliterator.asMany(source, { delimiter, concurrency })`** — `segments(...)` then one `AsyncSpliterator` per range via `createChunkIterator(source, { start, end: end - 1 })` (note `end` is inclusive in Node's `createReadStream`). All share the event loop (no threads).
+
+- **`AsyncSpliterator.asManyWorkers<R>(source, { worker, concurrency, batchSize?, maxInFlight? })`** — One `worker_threads` Worker per segment. The worker entry (`lib/segment-worker-entry.ts`) opens its own handle to its range and runs the `worker` handler module per record (`runSegment` in `lib/segment-runtime.ts`). Results stream back through `workerToIterable` (`lib/segment-workers.ts`) as **one merged async iterator** for a single-thread writer. Chunked batches, zero-copy `Uint8Array` transfer, bounded in-flight ack backpressure. The handler returns a value (cloned), a `Uint8Array` (transferred), or `undefined` (skipped); its module top-level runs once per worker (load models there). Requires a path/URL — file handles cannot cross threads. See `docs/superpowers/specs/2026-06-29-parallel-segment-parsing-design.md`.
 
 **`BufferController`** (`lib/BufferController.ts`) — A growable `Uint8Array` wrapper used by `AsyncSpliterator`. Supports `set()` to append data, `compress()` to discard already-consumed bytes and shift the buffer, and `subarray()` to slice without copying.
 
@@ -99,7 +101,7 @@ The package exposes three entry points:
 
 Tests use **vitest** and live in `test/`. Fixtures are in `test/fixtures/`. The `test/utils.ts` helper loads fixture files and pre-computes `String.prototype.split` results for parity comparisons.
 
-The `asManyWorkers` test (`test/AsyncSpliterator.asManyWorkers.test.ts`) generates its own large fixture (~8 MB, 100 000 JSONL records) at test time in `tmpdir()` via `beforeAll`/`afterAll`. Its spin-lock test blocks the main thread for 3 000 ms (generous to cover worker-thread V8 bootstrap overhead in vitest, which is ~1 s) and asserts the post-block drain takes < 200 ms. Worker threads batch all records into a single message, so the drain is just 4 message events + microtask queue — not proportional to record count.
+The parallel-parsing layers are tested bottom-up so the worker protocol is verified without spawning threads: `runSegment` (`test/segment-runtime.test.ts`) and `workerToIterable` (`test/workerToIterable.test.ts`) are pure/main-thread; `computeSegments` (`test/segments.test.ts`) and `asMany` (`test/asMany.test.ts`) run against temp fixtures and assert the boundary invariant + parity vs sequential parse. Only `test/asManyWorkers.test.ts` spawns real workers — it uses plain-ESM fixture handlers in `test/fixtures/segment-handlers/` (loaded by file path, not compiled) and covers parity, the `Uint8Array` transfer path, the path-required `TypeError`, and a throwing handler rejecting the iterator.
 
 ## Non-obvious Gotchas
 
@@ -145,17 +147,17 @@ Identified bottlenecks, ordered by impact. Check these off as they are addressed
 
   - For a file with N rows, N short-lived `Spliterator` objects are constructed and immediately GC'd. Each brings its own `IndexQueue` (`new Array`). A reusable column parser that resets state rather than constructing a new object would eliminate this GC churn. `SlidingWindow` (already in the codebase) is the intended low-level primitive for this but has its own issue (see above).
 
-- [x] **`asManyWorkers` — worker-thread startup overhead** (`lib/AsyncSpliterator.ts`)
+- [x] **`asMany`/`asManyWorkers` — parallel boundary detection** (`lib/segments.ts`)
 
-  - `new Worker()` pays a full V8 bootstrap cost (~1 s in vitest, ~100–300 ms in a clean process) on every call. A persistent pool of pre-warmed workers that receive segment assignments via `postMessage` would reduce repeated calls to near-zero after the first. Particularly impactful for server workloads processing many files sequentially.
+  - Boundary probes fire in parallel (`Promise.all`), so the pre-scan is a single round-trip rather than O(concurrency) sequential reads.
 
-- [x] **`asMany`/`asManyWorkers` — sequential boundary detection** (`lib/AsyncSpliterator.ts`)
+- [x] **`asManyWorkers` — chunked batch delivery with backpressure** (`lib/segment-runtime.ts`)
 
-  - Boundary probes (`readBytes`) are issued one after another in a loop. Since each probe is an independent random-access read, they can all be fired in parallel with `Promise.all`. This reduces the pre-scan phase from O(concurrency) sequential I/O round-trips to a single parallel round-trip.
+  - Results post in `batchSize` chunks (not whole-segment), with a bounded in-flight ack window — streaming to the consumer with bounded worker/main memory.
 
-- [ ] **`asManyWorkers` — batching vs. streaming latency trade-off**
+- [ ] **`asManyWorkers` — persistent worker pool**
 
-  - Workers currently collect every record before posting a single batch. For large segments this maximises post-block drain efficiency but delays the first record until the entire segment is processed. A chunked delivery option (`batchSize` records per message) would let callers trade latency-to-first-record against message-queue pressure. Useful when output is being streamed to a downstream consumer in real time.
+  - v1 spawns and terminates one Worker per segment per call (startup amortizes over a multi-GB file). A pre-warmed pool reused across calls would cut repeated-call startup and make the many-small-files case (currently `asyncParallelIterator`) viable on threads.
 
 - [x] **WASM SIMD for multi-byte delimiter scanning**
   - Implemented as a `#![no_std]` Rust crate (`wasm/src/lib.rs`) compiled to `wasm32-unknown-unknown` with `+simd128`, embedded as base64 in `lib/wasm_base64.ts` (generated by `wasm/build.sh`) and loaded via `lib/wasm_module.ts`. Exports `find_delimiter` (first match), `find_all_delimiters` (range pairs), and `find_all_matches` (two-pattern delimiter+quote, `i8x16.eq` + `i8x16.bitmask`). `CharacterSequence.search`/`searchAll`/`searchMatches` use it for haystacks ≥ `WASM_THRESHOLD` (512 B); single-byte `search` still prefers native `indexOf`. Measured ~5–6 GB/s for multi-byte scanning vs ~600 MB/s JS BMH, and ~8–17× for `searchAll`.
