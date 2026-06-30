@@ -76,6 +76,41 @@ export function workerToIterable<R>(worker: MinimalWorker, onBatchConsumed: () =
 	return drain()
 }
 
+/**
+ * Merge several async iterables, pulling from **all of them concurrently** and yielding each value as soon as it
+ * arrives (completion order, not source order). This is what lets every segment worker make progress at once: a
+ * sequential `for…yield*` drain would consume one worker to completion while the rest stall at their in-flight window.
+ * An error from any source rejects; remaining sources are returned (cancelled) on completion, error, or early break.
+ */
+export async function* mergeAsyncIterators<R>(sources: Array<AsyncIterable<R>>): AsyncIterableIterator<R> {
+	const advance = (it: AsyncIterator<R>) => it.next().then((result) => ({ it, result }))
+	const pending = new Map<AsyncIterator<R>, Promise<{ it: AsyncIterator<R>; result: IteratorResult<R> }>>()
+
+	for (const source of sources) {
+		const it = source[Symbol.asyncIterator]()
+		pending.set(it, advance(it))
+	}
+
+	try {
+		while (pending.size > 0) {
+			const { it, result } = await Promise.race(pending.values())
+
+			if (result.done) {
+				pending.delete(it)
+			} else {
+				yield result.value
+				pending.set(it, advance(it))
+			}
+		}
+	} finally {
+		// Stop any iterators we didn't drain (early break / error). Swallow rejections from their
+		// in-flight `next()` so they don't surface as unhandled.
+		for (const promise of pending.values()) void promise.catch(() => {})
+
+		await Promise.allSettled(Array.from(pending.keys(), (it) => it.return?.()))
+	}
+}
+
 export interface AsManyWorkersOptions {
 	/** Module path or URL exporting `handleRecord(bytes, ctx)`. Runs once per worker at import. */
 	worker: string | URL
@@ -87,7 +122,7 @@ export interface AsManyWorkersOptions {
 	probeSize?: number
 	/** Results per message. @default 256 */
 	batchSize?: number
-	/** Unacked batches per worker before it pauses. @default 4 */
+	/** Unacked batches per worker before it pauses (bounds memory). @default 8 */
 	maxInFlight?: number
 	/** Forwarded to every worker via `workerData.userData`. */
 	workerData?: unknown
@@ -129,7 +164,7 @@ export async function* runSegmentWorkers<R>(
 					delimiter: options.delimiter ?? null,
 					segmentIndex,
 					batchSize: options.batchSize ?? 256,
-					maxInFlight: options.maxInFlight ?? 4,
+					maxInFlight: options.maxInFlight ?? 8,
 					userData: options.workerData,
 				},
 			})
@@ -139,11 +174,10 @@ export async function* runSegmentWorkers<R>(
 			return workerToIterable<R>(worker, () => worker.postMessage("ack"))
 		})
 
-		// Each worker runs concurrently and fills ahead (bounded by maxInFlight); draining their
-		// iterators in turn still interleaves wall-clock work. Order across segments is not guaranteed.
-		for (const iterable of iterables) {
-			yield* iterable
-		}
+		// Drain all workers concurrently so they run in parallel — a sequential drain would consume one
+		// to completion while the rest stall at their in-flight window. Order across segments is not
+		// guaranteed (results arrive in completion order).
+		yield* mergeAsyncIterators(iterables)
 	} finally {
 		await Promise.all(workers.map((w) => w.terminate()))
 	}
