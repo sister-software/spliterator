@@ -13,7 +13,7 @@ emerged from measurement + a DeepSeek consult, and reverses an earlier file-segm
   per-row work is heavy. Light CSV parse / normalize / JSON-encode is **0.3–0.96×** (a loss) — the
   main thread's per-result overhead (~5–10µs/row) exceeds the parallelized savings.
 - **Probe (mailwoman):** real neural geocode is **~23 ms/address** — ~2000× that overhead. So geocode
-  *is* worth threading; light normalization is not.
+  _is_ worth threading; light normalization is not.
 - **Reframe (DeepSeek + agreed):** split the work. A single-threaded streaming **normalize** (light,
   ergonomic, runs everywhere) composed with an optional threaded **geocode** stage. The geocode stage
   takes an async iterable of records (not file segments), so composition + a main-thread filter
@@ -27,21 +27,21 @@ maps an async iterable through worker threads. That primitive is this spec. (`no
 
 ```ts
 interface ParallelMapOptions {
-  /** Worker module path/URL exporting `handleItem(item, ctx)`. Top-level code = per-worker init. */
-  worker: string | URL
-  /** Number of worker threads in the pool. */
-  concurrency: number
-  /** Items per dispatched batch. @default 64 */
-  batchSize?: number
-  /** Max batches in flight across the whole pool (bounds memory / read-ahead). @default 2·concurrency */
-  maxInFlight?: number
-  /** Forwarded to every worker via `workerData.userData` (must be structured-cloneable). */
-  workerData?: unknown
+	/** Worker module path/URL exporting `handleItem(item, ctx)`. Top-level code = per-worker init. */
+	worker: string | URL
+	/** Number of worker threads in the pool. */
+	concurrency: number
+	/** Items per dispatched batch. @default 64 */
+	batchSize?: number
+	/** Max batches in flight across the whole pool (bounds memory / read-ahead). @default 2·concurrency */
+	maxInFlight?: number
+	/** Forwarded to every worker via `workerData.userData` (must be structured-cloneable). */
+	workerData?: unknown
 }
 
 function parallelMap<T, R>(
-  source: AsyncIterable<T> | Iterable<T>,
-  options: ParallelMapOptions
+	source: AsyncIterable<T> | Iterable<T>,
+	options: ParallelMapOptions
 ): AsyncIterableIterator<R>
 ```
 
