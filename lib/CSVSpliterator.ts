@@ -101,6 +101,11 @@ export interface CSVSpliteratorInit extends SpliteratorInit {
 /**
  * A static class spliterator for comma-separated values.
  *
+ * **Performance:** the SIMD delimiter scan wins when scanning dominates — many rows, a few columns pulled out cheaply,
+ * streaming to bound memory. When per-row work is heavy (a full `JSON.parse`, expensive transforms) it can dominate the
+ * scan and erase the advantage; benchmark against a mature native parser before swapping an existing loop for speed.
+ * See {@link JSONSpliterator} for the measured case where per-row `JSON.parse` makes the streamed path a net loss.
+ *
  * @see {@linkcode CSVSpliterator.from} for synchronous usage.
  * @see {@linkcode CSVSpliterator.fromAsync} for asynchronous usage.
  */
