@@ -22,6 +22,60 @@ export type CSVEmitter<T = unknown> = (columns: Iterable<string>, headerColumns?
 
 const identity: CSVTransformer<string> = (value) => value
 
+const doubleQuoteSequence = new CharacterSequence('"')
+
+/**
+ * Decode a single column, stripping wrapping quotes and unescaping doubled quotes (`""` → `"`) when quote handling is
+ * on. The unescape allocates only when the field was actually quoted.
+ */
+function decodeColumn(bytes: Uint8Array, decoder: TextDecoder, enableQuoteHandling: boolean): string {
+	const value = decoder.decode(bytes)
+
+	if (enableQuoteHandling && value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+		return value.slice(1, -1).replaceAll('""', '"')
+	}
+
+	return value
+}
+
+/**
+ * Split one row's bytes into decoded column strings.
+ *
+ * Without quote handling this is a plain delimiter scan. With it, a column delimiter inside a double-quoted region does
+ * not split, and each field is unquoted/unescaped via {@linkcode decodeColumn}. Empty columns are always preserved — a
+ * 30-column row must stay 30 columns regardless of the caller's row-level `skipEmpty`.
+ */
+function splitRowColumns(
+	row: Uint8Array,
+	columnDelimiter: CharacterSequence,
+	decoder: TextDecoder,
+	enableQuoteHandling: boolean
+): string[] {
+	if (!enableQuoteHandling) {
+		return columnDelimiter.searchAll(row).map(([start, end]) => decoder.decode(row.subarray(start, end)))
+	}
+
+	const columns: string[] = []
+	let sliceStart = 0
+	let insideQuotes = false
+
+	for (const match of columnDelimiter.searchMatches(row, doubleQuoteSequence)) {
+		if (match.patternId === 1) {
+			insideQuotes = !insideQuotes
+			continue
+		}
+
+		if (insideQuotes) continue
+
+		columns.push(decodeColumn(row.subarray(sliceStart, match.offset), decoder, enableQuoteHandling))
+		sliceStart = match.offset + columnDelimiter.length
+	}
+
+	columns.push(decodeColumn(row.subarray(sliceStart), decoder, enableQuoteHandling))
+
+	return columns
+}
+
 export type CSVSpliteratorEmittedRecord<V = string | number | undefined> = {
 	[key: string]: V
 }
@@ -70,6 +124,16 @@ export interface CSVSpliteratorInit extends SpliteratorInit {
 	 * - `object` will emit each row as an object with the header names as keys.
 	 * - `array` will emit each row as an array.
 	 * - `entries` will emit each row as an array of key-value pairs.
+	 *
+	 * Note that {@linkcode CSVSpliteratorInit.header} defaults to `true` in every mode — the first row is consumed as the
+	 * header even in `array` mode. Pass `header: false` for headerless data.
+	 *
+	 * When {@linkcode SpliteratorInit.enableQuoteHandling} is set, quoting is handled end-to-end: rows do not split on
+	 * delimiters inside quotes (embedded newlines stay in their row), columns do not split on quoted column delimiters,
+	 * wrapping quotes are stripped, and doubled quotes (`""`) unescape to `"`.
+	 *
+	 * {@linkcode SpliteratorInit.crlf} defaults to `true` here (unlike everywhere else): RFC 4180 mandates CRLF row
+	 * terminators, so a correct CSV parser must accept them without leaking `\r` into the last column.
 	 */
 	mode?: CSVOutputMode
 
@@ -155,6 +219,10 @@ export abstract class CSVSpliterator {
 			normalizeKeys,
 			mode = "array",
 			columnDelimiter: columnDelimiterInput = this.ColumnDelimiter,
+			enableQuoteHandling = false,
+			// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
+			// never carries a stray `\r` on Windows-lineage sources.
+			crlf = true,
 			take = Infinity,
 			drop = 0,
 			...rowInit
@@ -167,19 +235,17 @@ export abstract class CSVSpliterator {
 
 		const decoder = new TextDecoder()
 		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? this.ColumnDelimiter)
-		// Empty columns are semantically meaningful for delimited records — a 30-column row
-		// must stay 30 columns — so the column splitter unconditionally preserves them
-		// regardless of the caller's top-level `skipEmpty`, which only affects row splitting.
-		const columnSpliteratorInit: SpliteratorInit = { delimiter: columnDelimiter, skipEmpty: false }
 
-		const rows = Spliterator.fromSync(source, rowInit)
+		// Quote handling applies at both levels: rows must not split on newlines inside quotes,
+		// columns must not split on quoted column delimiters.
+		const rows = Spliterator.fromSync(source, { ...rowInit, crlf, enableQuoteHandling })
 
 		if (header) {
 			const result = rows.next()
 
 			if (result.done) return
 
-			const columns = new Spliterator(result.value, columnSpliteratorInit).toDecodedArray(decoder)
+			const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling)
 			const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
 
 			if (Array.isArray(transformersInput)) {
@@ -204,10 +270,11 @@ export abstract class CSVSpliterator {
 
 			if (yieldCount >= yieldLimit) break
 
-			const columnRanges = columnDelimiter.searchAll(row)
-			const columns = columnRanges.map(([s, e]) => decoder.decode(row.subarray(s, e)))
+			const columns = splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling)
 
 			yield emitter ? emitter(columns, transformers) : columns
+
+			yieldCount++
 		}
 	}
 
@@ -266,6 +333,10 @@ export abstract class CSVSpliterator {
 			transformers: transformersInput = [],
 			normalizeKeys = mode !== "array",
 			columnDelimiter: columnDelimiterInput,
+			enableQuoteHandling = false,
+			// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
+			// never carries a stray `\r` on Windows-lineage sources.
+			crlf = true,
 			take = Infinity,
 			drop = 0,
 			...rowInit
@@ -277,18 +348,19 @@ export abstract class CSVSpliterator {
 		const yieldLimit = take + drop
 
 		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? this.ColumnDelimiter)
-		const columnSpliteratorInit: SpliteratorInit = { delimiter: columnDelimiter, skipEmpty: false }
 
 		const decoder = new TextDecoder()
 
-		const rows = await Spliterator.from(source, rowInit)
+		// Quote handling applies at both levels: rows must not split on newlines inside quotes,
+		// columns must not split on quoted column delimiters.
+		const rows = await Spliterator.from(source, { ...rowInit, crlf, enableQuoteHandling })
 
 		if (header) {
 			const result = await rows.next()
 
 			if (result.done) return
 
-			const columns = new Spliterator(result.value, columnSpliteratorInit).toDecodedArray(decoder)
+			const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling)
 			const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
 
 			if (Array.isArray(transformersInput)) {
@@ -313,8 +385,7 @@ export abstract class CSVSpliterator {
 
 			if (yieldCount >= yieldLimit) break
 
-			const columnRanges = columnDelimiter.searchAll(row)
-			const columns = columnRanges.map(([s, e]) => decoder.decode(row.subarray(s, e)))
+			const columns = splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling)
 
 			yield emitter ? emitter(columns, transformers) : columns
 

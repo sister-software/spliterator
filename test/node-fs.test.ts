@@ -20,10 +20,10 @@ afterAll(async () => {
 	await rm(dir, { recursive: true, force: true })
 })
 
-async function collect(it: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
+async function collect(it: AsyncIterable<Uint8Array | string>): Promise<Uint8Array> {
 	const parts: Uint8Array[] = []
 
-	for await (const c of it) parts.push(c)
+	for await (const c of it) parts.push(c as Uint8Array)
 	const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
 	let o = 0
 

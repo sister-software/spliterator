@@ -172,9 +172,12 @@ export function applyReaderPolyfill<T extends FileResourceLike>(file: T): assert
 /**
  * An asynchronous iterable byte stream.
  *
+ * String chunks are tolerated and UTF-8 encoded on arrival — a `fs.createReadStream(path, "utf8")` or Node `Readable`
+ * in string mode would otherwise coerce to garbage bytes via `TypedArray.set`.
+ *
  * Note that as an iterable this will drained of all bytes when iterated over.
  */
-export interface AsyncChunkIterator extends AsyncIterable<Uint8Array> {
+export interface AsyncChunkIterator extends AsyncIterable<Uint8Array | string> {
 	/**
 	 * Disposes of the byte stream, releasing any resources.
 	 *
@@ -189,9 +192,11 @@ export interface AsyncChunkIterator extends AsyncIterable<Uint8Array> {
  * - `string` representing a file path.
  * - {@linkcode URL} object representing a file path.
  * - {@linkcode FileHandleLike} object representing an open file handle.
- * - {@linkcode AsyncChunkIterator} object representing an asynchronous byte stream.
+ * - {@linkcode AsyncChunkIterator} object representing an asynchronous byte stream — anything async-iterable over bytes
+ *   qualifies: a Node `Readable` (child-process stdout, a gunzip pipe), a web `ReadableStream` wrapped via
+ *   `Symbol.asyncIterator`, or a hand-rolled generator.
  */
-export type AsyncDataResource = string | URL | FileHandleLike
+export type AsyncDataResource = string | URL | FileHandleLike | AsyncChunkIterator
 
 /**
  * A resource to a delimited byte stream, i.e., a file buffer, handle, or path.

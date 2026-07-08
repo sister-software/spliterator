@@ -8,6 +8,7 @@ import { AsyncSpliterator, type AsyncSpliteratorInit, type SpliteratorInit } fro
 import {
 	CharacterSequence,
 	debugAsVisibleCharacters,
+	Delimiters,
 	normalizeCharacterInput,
 	type CharacterSequenceInput,
 } from "./CharacterSequence.js"
@@ -159,6 +160,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 
 		this.#skipEmpty = init.skipEmpty ?? true
 		this.#enableQuoteHandling = init.enableQuoteHandling ?? false
+		this.#crlf = init.crlf ?? false
 
 		this.#debug = init.debug ?? false
 		this.#log = this.#debug ? console.debug.bind(console) : () => void 0
@@ -192,6 +194,11 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 */
 	readonly #doubleQuoteSequence: CharacterSequence = new CharacterSequence('"')
 	readonly #enableQuoteHandling: boolean
+
+	/**
+	 * Whether to trim a carriage return immediately preceding each delimiter match.
+	 */
+	readonly #crlf: boolean
 
 	/**
 	 * How many yields to skip.
@@ -300,9 +307,10 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 			// `lastByteRange`, so it falls through to the trailing-delimiter case instead of
 			// resurfacing the entire delimiter run as one (non-empty) row.
 			this.#indices.enqueue([0, sourceByteLength])
-		} else if (!this.#enableQuoteHandling) {
-			// Simple path: emit empty field for trailing delimiter (match String.split).
-			// Quote-aware path handles this inside #fill() via searchMatches.
+		} else {
+			// Emit an empty field for a trailing delimiter (match String.split). `#fill` always
+			// leaves the tail after the last consumed delimiter to this method, in both the plain
+			// and quote-aware paths — a source ending exactly on a delimiter has an empty tail.
 			const trailingDelimPos = sourceByteLength - this.#needle.length
 
 			if (trailingDelimPos >= 0 && this.#needle.search(this.#source, trailingDelimPos) !== -1) {
@@ -311,6 +319,18 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 		}
 
 		this.#done = true
+	}
+
+	/**
+	 * Trim a carriage return immediately preceding a delimiter match, when {@linkcode SpliteratorInit.crlf} is set.
+	 * Affects only the emitted range's end — `#readPosition` advancement always uses the raw match offset.
+	 */
+	#trimEnd(start: number, end: number): number {
+		if (this.#crlf && end > start && this.#source[end - 1] === Delimiters.CarriageReturn) {
+			return end - 1
+		}
+
+		return end
 	}
 
 	/**
@@ -325,13 +345,17 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 
 				if (delimiterIndex === -1) return
 
-				this.#indices.enqueue([this.#readPosition, delimiterIndex])
+				this.#indices.enqueue([this.#readPosition, this.#trimEnd(this.#readPosition, delimiterIndex)])
 				this.#readPosition = delimiterIndex + this.#needle.length
 			}
 
 			return
 		}
 
+		// Quote-aware path: a delimiter inside a double-quoted region does not split, and the
+		// emitted slices keep their quotes verbatim — stripping and `""` unescaping belong to the
+		// consumer (CSVSpliterator does both). The tail after the last consumed delimiter is left
+		// to `#drain`, same as the plain path.
 		while (this.#readPosition < sourceByteLength && this.#indices.byteLength < this.#highWaterMark) {
 			const matches = this.#needle.searchMatches(
 				this.#source,
@@ -344,48 +368,25 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 
 			let sliceStart = this.#readPosition
 			let insideQuotes = false
-			let quoteStart = -1
 
 			for (const match of matches) {
 				if (match.patternId === 1) {
-					// Quote found
-					if (!insideQuotes) {
-						// Emit normal field before the opening quote
-						if (match.offset > sliceStart) {
-							this.#indices.enqueue([sliceStart, match.offset])
-						}
-						insideQuotes = true
-						quoteStart = match.offset
-					} else {
-						// Closing quote: emit quoted field, advance past quote
-						this.#indices.enqueue([quoteStart + 1, match.offset])
-						insideQuotes = false
-						sliceStart = match.offset + 1
-					}
-				} else {
-					// Delimiter found; one inside quotes is part of the field, so skip it.
-					if (insideQuotes) continue
-
-					// Emit content before this delimiter (empty if delimiter follows closing quote)
-					if (sliceStart < match.offset) {
-						this.#indices.enqueue([sliceStart, match.offset])
-					}
-					sliceStart = match.offset + this.#needle.length
+					insideQuotes = !insideQuotes
+					continue
 				}
+
+				// A delimiter inside quotes is part of the slice, so skip it.
+				if (insideQuotes) continue
+
+				this.#indices.enqueue([sliceStart, this.#trimEnd(sliceStart, match.offset)])
+				sliceStart = match.offset + this.#needle.length
 			}
 
-			const lastMatch = matches[matches.length - 1]!
-			this.#readPosition = lastMatch.offset + (lastMatch.patternId === 0 ? this.#needle.length : 1)
+			// No delimiter was consumed (e.g. an unclosed quote swallows the rest of the source) —
+			// leave the tail to `#drain` rather than rescanning the same matches forever.
+			if (sliceStart === this.#readPosition) return
 
-			// Emit trailing content after the last match
-			// Case 1: Content after last delimiter (final field, no trailing delimiter)
-			if (sliceStart < this.#readPosition) {
-				this.#indices.enqueue([sliceStart, sourceByteLength])
-				this.#readPosition = sourceByteLength
-				// Case 2: Trailing delimiter (emit empty field to match String.split)
-			} else if (sliceStart === sourceByteLength && this.#readPosition === sourceByteLength) {
-				this.#indices.enqueue([sourceByteLength, sourceByteLength])
-			}
+			this.#readPosition = sliceStart
 		}
 	}
 

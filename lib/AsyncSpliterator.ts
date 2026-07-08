@@ -7,13 +7,14 @@
 import { ReadableStream, type ReadableWritablePair, type StreamPipeOptions } from "stream/web"
 
 import { BufferController } from "./BufferController.js"
-import { CharacterSequence, type CharacterSequenceInput } from "./CharacterSequence.js"
+import { CharacterSequence, type CharacterSequenceInput, Delimiters } from "./CharacterSequence.js"
 import { IndexQueue } from "./IndexQueue.js"
 import { type AsManyWorkersOptions, runSegmentWorkers } from "./segment-workers.js"
 import { computeSegments, type SegmentOptions } from "./segments.js"
 import type { AsyncChunkIterator, AsyncDataResource, ByteRange } from "./shared.js"
 
 const noop = () => void 0
+const sharedEncoder = new TextEncoder()
 
 /**
  * Initialization options for creating a spliterator.
@@ -61,12 +62,29 @@ export interface SpliteratorInit {
 	take?: number
 
 	/**
-	 * Whether to handle quoted fields (e.g., CSV). When enabled, delimiters inside double-quoted fields are ignored and
-	 * quoted fields are emitted without quotes.
+	 * Whether to treat double-quoted regions as opaque: a delimiter inside `"…"` does not split, and the emitted slices
+	 * keep their quotes verbatim. Quote _stripping_ and `""` unescaping are the consumer's concern —
+	 * {@linkcode CSVSpliterator} does both when this flag is set.
+	 *
+	 * The asynchronous engine requires a single-byte delimiter for this mode (every {@linkcode Delimiters} entry
+	 * qualifies) — a multi-byte delimiter straddling a chunk boundary cannot be rescanned without re-toggling quote
+	 * state.
 	 *
 	 * @default false
 	 */
 	enableQuoteHandling?: boolean
+
+	/**
+	 * Whether to treat a carriage return immediately preceding a delimiter as part of the delimiter — i.e. CRLF
+	 * normalization when splitting on `\n`, matching `node:readline`'s `crlfDelay: Infinity`. Only a `\r` directly before
+	 * an actual delimiter match is trimmed; a trailing `\r` at end-of-input is preserved.
+	 *
+	 * {@linkcode CSVSpliterator} defaults this to `true` for row splitting (RFC 4180 mandates CRLF row terminators);
+	 * everywhere else the default is `false`.
+	 *
+	 * @default false
+	 */
+	crlf?: boolean
 
 	/**
 	 * Whether to emit debug information.
@@ -212,6 +230,14 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 		this.#yieldStopCount = Math.max(init.take ?? Infinity, 0) + this.#yieldDropCount
 
 		this.#skipEmpty = init.skipEmpty ?? true
+		this.#crlf = init.crlf ?? false
+		this.#enableQuoteHandling = init.enableQuoteHandling ?? false
+
+		if (this.#enableQuoteHandling && this.#needle.length !== 1) {
+			throw new RangeError(
+				"enableQuoteHandling requires a single-byte delimiter in the asynchronous engine — a multi-byte delimiter straddling a chunk boundary cannot be rescanned without re-toggling quote state."
+			)
+		}
 
 		this.#controller = new BufferController({
 			initialBufferSize: this.#highWaterMark,
@@ -238,12 +264,12 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	/**
 	 * The chunk reader for the file.
 	 */
-	readonly #chunkReader: AsyncIterator<Uint8Array>
+	readonly #chunkReader: AsyncIterator<Uint8Array | string>
 
 	/**
 	 * The last chunk of data read from the source.
 	 */
-	#lastReadResult: IteratorResult<Uint8Array> | undefined
+	#lastReadResult: IteratorResult<Uint8Array | string> | undefined
 
 	/**
 	 * A queue of index tuples marking the start and end of delimiter positions.
@@ -281,6 +307,40 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	readonly #skipEmpty: boolean
 
 	/**
+	 * Whether to trim a carriage return immediately preceding each delimiter match.
+	 */
+	readonly #crlf: boolean
+
+	/**
+	 * Whether delimiters inside double-quoted regions are ignored.
+	 */
+	readonly #enableQuoteHandling: boolean
+
+	/**
+	 * The byte sequence for a double quote.
+	 */
+	readonly #doubleQuoteSequence = new CharacterSequence('"')
+
+	/**
+	 * Whether the scan cursor currently sits inside a double-quoted region. Only meaningful with
+	 * {@linkcode SpliteratorInit.enableQuoteHandling} — the state must survive both `#fill` rounds and buffer compression,
+	 * since a quoted region can span many chunks.
+	 */
+	#insideQuotes = false
+
+	/**
+	 * Raw buffer position up to which matches have been processed. Distinct from the enqueued range ends — those may be
+	 * CRLF-trimmed, and quote toggles may sit beyond the last emitted field. Rebased on buffer compression.
+	 */
+	#searchCursor = 0
+
+	/**
+	 * Raw buffer position where the current (not yet terminated) slice begins — i.e. one past the last consumed
+	 * delimiter. This is the compression boundary and the start of the EOF tail. Rebased on buffer compression.
+	 */
+	#pendingSliceStart = 0
+
+	/**
 	 * The high water mark for the buffer.
 	 *
 	 * This defines the size of each read operation, as well as the total size of indices to keep in memory.
@@ -303,11 +363,6 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	// #readPosition: number
 
 	/**
-	 * The last byte range seen while draining the buffer.
-	 */
-	#lastByteRangeSeen: ByteRange | undefined
-
-	/**
 	 * Whether to output debug information.
 	 */
 	#debug: boolean
@@ -324,29 +379,78 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	#log: (...args: any[]) => void
 
 	/**
+	 * Trim a carriage return immediately preceding a delimiter match, when {@linkcode SpliteratorInit.crlf} is set.
+	 * Affects only the emitted range's end — cursor advancement always uses the raw match offset.
+	 */
+	#trimEnd(start: number, end: number): number {
+		if (this.#crlf && end > start && this.#controller.bytes[end - 1] === Delimiters.CarriageReturn) {
+			return end - 1
+		}
+
+		return end
+	}
+
+	/**
 	 * Find and enqueue delimiter positions.
 	 *
 	 * The search is bounded by `bytesWritten` so we never scan into uninitialized buffer memory and never enqueue ranges
 	 * whose `end` exceeds the valid byte length.
+	 *
+	 * Progress is tracked by `#searchCursor`/`#pendingSliceStart` rather than derived from enqueued range ends — those
+	 * ends may be CRLF-trimmed, and (in quote mode) quote toggles may sit beyond the last emitted field.
 	 */
 	#search() {
-		const lastByteRange = this.#indices.peekLast()
-		let searchCursor = lastByteRange ? lastByteRange[1] + this.#needle.length : 0
 		const searchEnd = this.#controller.bytesWritten
 
-		while (searchCursor <= searchEnd) {
-			const delimiterIndex = this.#needle.search(this.#controller.bytes, searchCursor, searchEnd)
+		if (!this.#enableQuoteHandling) {
+			while (this.#searchCursor <= searchEnd) {
+				const delimiterIndex = this.#needle.search(this.#controller.bytes, this.#searchCursor, searchEnd)
 
-			if (delimiterIndex === -1) {
-				this.#log(`No viable byte range found in buffer. Breaking.`, { searchCursor })
-				break
+				if (delimiterIndex === -1) {
+					this.#log(`No viable byte range found in buffer. Breaking.`, { searchCursor: this.#searchCursor })
+					break
+				}
+
+				const byteRange: ByteRange = [this.#pendingSliceStart, this.#trimEnd(this.#pendingSliceStart, delimiterIndex)]
+
+				this.#log("Found byte range", byteRange)
+				this.#indices.enqueue(byteRange)
+
+				this.#searchCursor = delimiterIndex + this.#needle.length
+				this.#pendingSliceStart = this.#searchCursor
 			}
 
-			this.#log("Found byte range", [searchCursor, delimiterIndex])
-			this.#indices.enqueue([searchCursor, delimiterIndex])
-
-			searchCursor = delimiterIndex + this.#needle.length
+			return
 		}
+
+		// Quote-aware path: a delimiter inside a double-quoted region does not split. The quote
+		// state persists across fills and buffer compressions, since a quoted region may span
+		// many chunks. The delimiter is single-byte (enforced in the constructor), so a match can
+		// never straddle a chunk boundary and the cursor can safely advance to `searchEnd`.
+		const matches = this.#needle.searchMatches(
+			this.#controller.bytes,
+			this.#doubleQuoteSequence,
+			this.#searchCursor,
+			searchEnd
+		)
+
+		for (const match of matches) {
+			if (match.patternId === 1) {
+				this.#insideQuotes = !this.#insideQuotes
+				continue
+			}
+
+			if (this.#insideQuotes) continue
+
+			const byteRange: ByteRange = [this.#pendingSliceStart, this.#trimEnd(this.#pendingSliceStart, match.offset)]
+
+			this.#log("Found byte range", byteRange)
+			this.#indices.enqueue(byteRange)
+
+			this.#pendingSliceStart = match.offset + this.#needle.length
+		}
+
+		this.#searchCursor = searchEnd
 	}
 
 	/**
@@ -357,8 +461,13 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 
 		if (this.#lastReadResult.done) return
 
+		// A string chunk (a `Readable` with an encoding set, a hand-rolled generator of strings)
+		// would coerce to garbage via `TypedArray.set` — encode it instead of silently mis-reading.
+		const chunk = this.#lastReadResult.value
+		const bytes = typeof chunk === "string" ? sharedEncoder.encode(chunk) : chunk
+
 		// Append the chunk to the buffer.
-		this.#controller.set(this.#lastReadResult.value, this.#controller.bytesWritten)
+		this.#controller.set(bytes, this.#controller.bytesWritten)
 	}
 
 	/**
@@ -367,11 +476,13 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	async #fill(): Promise<void> {
 		if (this.#lastReadResult?.done) {
 			this.#log("Reached end of file. Preparing to finalize.")
-			// Enqueue a final slice covering the bytes between the last yielded delimiter and the
+			// Enqueue a final slice covering the bytes between the last consumed delimiter and the
 			// end of the stream. The slice may be empty (when the stream ends exactly on a
 			// delimiter, or when the file is empty); we still enqueue it so that callers with
 			// `skipEmpty: false` see the trailing entry produced by `String.prototype.split`.
-			const tailStart = this.#lastByteRangeSeen ? this.#lastByteRangeSeen[1] + this.#needle.length : 0
+			// `#pendingSliceStart` — not the last enqueued range's end — is the authority here:
+			// range ends may be CRLF-trimmed.
+			const tailStart = this.#pendingSliceStart
 			const tailEnd = this.#controller.bytesWritten
 
 			if (tailStart <= tailEnd) {
@@ -388,16 +499,15 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 
 		// We're effectively done with that window of the buffer.
 		// So we can compress it to save memory.
-		const nextBufferStart = this.#lastByteRangeSeen ? this.#lastByteRangeSeen[1] + this.#needle.length : 0
+		const nextBufferStart = this.#pendingSliceStart
 
 		this.#log("Compressing buffer", { nextBufferStart })
 		this.#controller.compress(nextBufferStart)
 
-		// After compress, the buffer coordinate space has shifted. The cached `lastByteRangeSeen`
-		// refers to the *previous* coordinate space, so clear it — subsequent ranges enqueued by
-		// `#search` are relative to the freshly-compressed buffer (and `#search` starts at 0 when
-		// the indices queue is empty, which it is here by `next()`'s precondition).
-		this.#lastByteRangeSeen = undefined
+		// After compress, the buffer coordinate space has shifted — rebase the scan cursors.
+		// Quote state (`#insideQuotes`) is positionless and survives as-is.
+		this.#pendingSliceStart = 0
+		this.#searchCursor = Math.max(0, this.#searchCursor - nextBufferStart)
 
 		while ((!this.#lastReadResult || !this.#lastReadResult.done) && this.#indices.byteLength < this.#highWaterMark) {
 			await this.#read()
@@ -463,7 +573,6 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 			}
 
 			const currentByteRange = this.#indices.dequeue()
-			this.#lastByteRangeSeen = currentByteRange
 
 			if (!currentByteRange) {
 				this.#done = true
