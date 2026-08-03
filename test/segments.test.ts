@@ -21,12 +21,16 @@ function fixture(name: string, text: string): string {
 	return p
 }
 
-/** Records of the whole file, parsed sequentially (the oracle). */
+/**
+ * Records of the whole file, parsed sequentially (the oracle).
+ */
 function sequentialRecords(text: string): string[] {
 	return Spliterator.fromSync(new TextEncoder().encode(text), { skipEmpty: false }).toDecodedArray()
 }
 
-/** Records reconstructed by concatenating each segment's parse. */
+/**
+ * Records reconstructed by concatenating each segment's parse.
+ */
 function recordsFromSegments(text: string, segments: Array<[number, number]>): string[] {
 	const bytes = new TextEncoder().encode(text)
 	const out: string[] = []
@@ -48,7 +52,9 @@ describe("computeSegments", () => {
 		expect(segments[0]![0]).toBe(0)
 		expect(segments.at(-1)![1]).toBe(text.length)
 
-		for (let i = 1; i < segments.length; i++) expect(segments[i]![0]).toBe(segments[i - 1]![1])
+		for (let i = 1; i < segments.length; i++) {
+			expect(segments[i]![0]).toBe(segments[i - 1]![1])
+		}
 	})
 
 	test("every internal boundary sits right after a delimiter (no split records)", async () => {

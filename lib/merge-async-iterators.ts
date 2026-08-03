@@ -19,7 +19,7 @@ export async function* mergeAsyncIterators<R>(sources: Array<AsyncIterable<R>>):
 	}
 
 	try {
-		while (pending.size > 0) {
+		while (pending.size) {
 			const { it, result } = await Promise.race(pending.values())
 
 			if (result.done) {
@@ -32,7 +32,9 @@ export async function* mergeAsyncIterators<R>(sources: Array<AsyncIterable<R>>):
 	} finally {
 		// Stop any iterators we didn't drain (early break / error). Swallow rejections from their
 		// in-flight `next()` so they don't surface as unhandled.
-		for (const promise of pending.values()) void promise.catch(() => {})
+		for (const promise of pending.values()) {
+			void promise.catch(() => {})
+		}
 
 		await Promise.allSettled(Array.from(pending.keys(), (it) => it.return?.()))
 	}

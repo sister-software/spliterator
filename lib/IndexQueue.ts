@@ -24,7 +24,9 @@ export class IndexQueue implements IterableIterator<ByteRange> {
 	 */
 	#tuples: number[] = []
 
-	/** Index of the next tuple's `start` in {@link #tuples}; advances by 2 per dequeue. */
+	/**
+	 * Index of the next tuple's `start` in {@link #tuples}; advances by 2 per dequeue.
+	 */
 	#head = 0
 
 	/**

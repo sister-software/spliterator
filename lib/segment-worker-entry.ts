@@ -54,25 +54,30 @@ async function main(): Promise<void> {
 	const chunkIterator = await createChunkIterator(data.source, { start: data.start, end: data.end - 1 })
 	const records = new AsyncSpliterator(chunkIterator, { delimiter: data.delimiter as never, autoDispose: true })
 
-	try {
-		await runSegment({
-			records,
-			handleRecord,
-			segmentIndex: data.segmentIndex,
-			batchSize: data.batchSize,
-			maxInFlight: data.maxInFlight,
-			post: (batch, transfer) => {
-				posted++
-				port.postMessage({ type: "batch", records: batch }, transfer)
-			},
-			waitForAck: () => new Promise<void>((resolve) => (wakeAck = resolve)),
-			inFlight: () => posted - acked,
-		})
+	return runSegment({
+		records,
+		handleRecord,
+		segmentIndex: data.segmentIndex,
+		batchSize: data.batchSize,
+		maxInFlight: data.maxInFlight,
+		post: (batch, transfer) => {
+			posted++
+			port.postMessage({ type: "batch", records: batch }, transfer)
+		},
+		waitForAck: () =>
+			new Promise<void>((resolve) => {
+				wakeAck = resolve
+			}),
+		inFlight: () => posted - acked,
+	})
+		.then(() => {
+			port.postMessage({ type: "done" })
 
-		port.postMessage({ type: "done" })
-	} catch (error) {
-		port.postMessage({ type: "error", message: error instanceof Error ? error.message : String(error) })
-	}
+			return void 0
+		})
+		.catch((error) => {
+			port.postMessage({ type: "error", message: error instanceof Error ? error.message : String(error) })
+		})
 }
 
 void main()

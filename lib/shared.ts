@@ -5,9 +5,11 @@
  */
 
 // eslint-disable-next-line no-restricted-imports
-import { type Stats } from "node:fs"
+import type { Stats } from "node:fs"
 // eslint-disable-next-line no-restricted-imports
 import type { FileHandle } from "node:fs/promises"
+
+import type { PathBuilderLike } from "path-ts"
 
 /**
  * A trimmed-down version of the Node.js `Stats` interface.
@@ -196,7 +198,7 @@ export interface AsyncChunkIterator extends AsyncIterable<Uint8Array | string> {
  *   qualifies: a Node `Readable` (child-process stdout, a gunzip pipe), a web `ReadableStream` wrapped via
  *   `Symbol.asyncIterator`, or a hand-rolled generator.
  */
-export type AsyncDataResource = string | URL | FileHandleLike | AsyncChunkIterator
+export type AsyncDataResource = string | URL | FileHandleLike | AsyncChunkIterator | PathBuilderLike
 
 /**
  * A resource to a delimited byte stream, i.e., a file buffer, handle, or path.
@@ -220,6 +222,7 @@ export type ZippedEntries<Z> = Z extends Zipped<infer T, infer U> ? [T, U] : nev
 export function zippedEntries<T, U>(zipped: Zipped<T, U>): ZippedEntries<Zipped<T, U>> {
 	return zipped.slice(0, 2) as ZippedEntries<Zipped<T, U>>
 }
+
 /**
  * Given two iterables, zip them together into a single iterable which yields pairs of elements.
  *

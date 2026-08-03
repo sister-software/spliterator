@@ -13,9 +13,11 @@ import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "./
  * An output mode for the CSV generator.
  */
 export type CSVOutputMode = "array" | "object" | "entries"
+
 export type CSVTransformer<T = unknown> = (value: string) => T
 
 export type CSVTransformerEntry<T = unknown> = [columnName: string, transformer: CSVTransformer<T>]
+
 export type CSVTransformerRecord = Record<string, CSVTransformer | undefined>
 
 export type CSVEmitter<T = unknown> = (columns: Iterable<string>, headerColumns?: Iterable<CSVTransformerEntry>) => T
@@ -62,6 +64,7 @@ function splitRowColumns(
 	for (const match of columnDelimiter.searchMatches(row, doubleQuoteSequence)) {
 		if (match.patternId === 1) {
 			insideQuotes = !insideQuotes
+
 			continue
 		}
 
@@ -76,9 +79,7 @@ function splitRowColumns(
 	return columns
 }
 
-export type CSVSpliteratorEmittedRecord<V = string | number | undefined> = {
-	[key: string]: V
-}
+export type CSVSpliteratorEmittedRecord<V = string | number | undefined> = Record<string, V>
 
 /**
  * A row emitted by the CSV generator, as a 3-tuple:
@@ -145,10 +146,14 @@ export interface CSVSpliteratorInit extends SpliteratorInit {
 	columnDelimiter?: CharacterSequenceInput
 
 	/**
-	 * Whether to normalize the keys of the header row.
+	 * Whether to normalize the keys of the header row into `snake_case`, and to disambiguate duplicates by suffixing
+	 * `_2`, `_3`, … — making them usable as object keys.
 	 *
-	 * This will convert all header names to lowercase and replace spaces with underscores, making them more suitable for
-	 * use as object keys.
+	 * **A header that is already ALL CAPS is left alone**, on the reasoning that its casing is deliberate. So an
+	 * OpenAddresses header (`LON,LAT,NUMBER,STREET`) normalizes to `LON`/`NUMBER`, NOT `lon`/`number`, and a row is read
+	 * as `row.STREET`. Lower-case your own keys if you want case-folding — this option does not provide it.
+	 *
+	 * @default `mode !== "array"` — object and entries rows need keyable names; array rows have no keys to normalize.
 	 */
 	normalizeKeys?: boolean
 
@@ -215,9 +220,12 @@ export abstract class CSVSpliterator {
 		const {
 			// ---
 			header = true,
-			transformers: transformersInput = [],
-			normalizeKeys,
+			// `mode` is destructured before `normalizeKeys` because the latter's default reads it.
 			mode = "array",
+			transformers: transformersInput = [],
+			// Matches `fromAsync`. These two defaulted differently until 4.0.1, so the same options
+			// object produced `row.some_name` from one entry point and `row["Some Name"]` from the other.
+			normalizeKeys = mode !== "array",
 			columnDelimiter: columnDelimiterInput = this.ColumnDelimiter,
 			enableQuoteHandling = false,
 			// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
@@ -248,6 +256,7 @@ export abstract class CSVSpliterator {
 			const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling)
 			const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
 
+			// oxlint-disable-next-line unicorn/prefer-ternary
 			if (Array.isArray(transformersInput)) {
 				transformers = Array.from(zipSync(headers, transformersInput), ([columnName, transformer]) => [
 					columnName!,
@@ -265,6 +274,7 @@ export abstract class CSVSpliterator {
 		for (const row of rows) {
 			if (yieldCount < drop) {
 				yieldCount++
+
 				continue
 			}
 
@@ -363,6 +373,7 @@ export abstract class CSVSpliterator {
 			const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling)
 			const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
 
+			// oxlint-disable-next-line unicorn/prefer-ternary
 			if (Array.isArray(transformersInput)) {
 				transformers = Array.from(zipSync(headers, transformersInput), ([columnName, transformer]) => [
 					columnName!,
@@ -380,6 +391,7 @@ export abstract class CSVSpliterator {
 		for await (const row of rows) {
 			if (yieldCount < drop) {
 				yieldCount++
+
 				continue
 			}
 

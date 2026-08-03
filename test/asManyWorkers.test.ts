@@ -26,7 +26,7 @@ describe("asManyWorkers", () => {
 			.split("\n")
 			.filter(Boolean)
 			.map((s) => s.toUpperCase())
-			.sort()
+			.toSorted()
 
 		const got: string[] = []
 
@@ -38,7 +38,7 @@ describe("asManyWorkers", () => {
 			got.push(r)
 		}
 
-		expect(got.sort()).toEqual(oracle) // interleaved across segments → compare as sets
+		expect(got.toSorted()).toEqual(oracle) // interleaved across segments → compare as sets
 	})
 
 	test("Uint8Array results survive the transfer path", async () => {
@@ -70,8 +70,9 @@ describe("asManyWorkers", () => {
 					worker: join(handlerDir, "throws.js"),
 					delimiter: "\n",
 					concurrency: 2,
-				}))
+				})) {
 					void _
+				}
 			})()
 		).rejects.toThrow(/boom/)
 	})

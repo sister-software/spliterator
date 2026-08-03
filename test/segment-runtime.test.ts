@@ -8,8 +8,11 @@ import { runSegment } from "spliterator/segment-runtime"
 import { describe, expect, test } from "vitest"
 
 const enc = new TextEncoder()
+
 async function* records(n: number): AsyncIterable<Uint8Array> {
-	for (let i = 0; i < n; i++) yield enc.encode(`r${i}`)
+	for (let i = 0; i < n; i++) {
+		yield enc.encode(`r${i}`)
+	}
 }
 
 describe("runSegment", () => {

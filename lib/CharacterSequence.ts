@@ -4,6 +4,8 @@
  * @author Teffen Ellis, et al.
  */
 
+import type { PathBuilderLike } from "path-ts"
+
 import type { ByteRange } from "./shared.js"
 import {
 	loadWasmModule,
@@ -18,7 +20,14 @@ export function isArrayLike<T>(input: unknown): input is ArrayLike<T> {
 	return Boolean(input && typeof input === "object" && "length" in input)
 }
 
-export type CharacterSequenceInput = number | string | DataView | ArrayBuffer | Buffer | Iterable<number>
+export type CharacterSequenceInput =
+	| number
+	| string
+	| DataView
+	| ArrayBuffer
+	| Buffer
+	| Iterable<number>
+	| PathBuilderLike
 
 export const Delimiters = {
 	Null: 0,
@@ -61,7 +70,15 @@ export function normalizeCharacterInput(input: CharacterSequenceInput): Uint8Arr
 		case "string":
 			return encoder.encode(input)
 		case "object":
-			if (isArrayLike(input)) return input
+			// Typed arrays and buffers are adopted by reference where possible — a multi-megabyte
+			// haystack must not be copied on the way in. `ArrayBuffer` and `DataView` are declared
+			// inputs and previously threw: neither carries `length`, and neither is iterable.
+			if (input instanceof Uint8Array) return input
+			if (ArrayBuffer.isView(input)) return new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
+			if (input instanceof ArrayBuffer) return new Uint8Array(input)
+			// A plain array-like (`number[]`) is NOT a Uint8Array — copy it rather than hand back
+			// something whose `search` would index a boxed array.
+			if (isArrayLike<number>(input)) return Uint8Array.from(input)
 			if (Symbol.iterator in input) return Uint8Array.from(input)
 			throw new TypeError(`Invalid delimiter type.`)
 		default:
@@ -71,11 +88,13 @@ export function normalizeCharacterInput(input: CharacterSequenceInput): Uint8Arr
 
 function ensureWasmCapacity(memory: WasmMemory, required: number): void {
 	if (required <= memory.buffer.byteLength) return
-	const pages = Math.ceil((required - memory.buffer.byteLength) / 65536)
+	const pages = Math.ceil((required - memory.buffer.byteLength) / 65_536)
 	memory.grow(pages)
 }
 
-/** Round `offset` up to the next multiple of 4 — `Int32Array` views require a 4-byte-aligned base. */
+/**
+ * Round `offset` up to the next multiple of 4 — `Int32Array` views require a 4-byte-aligned base.
+ */
 function alignTo4(offset: number): number {
 	return Math.ceil(offset / 4) * 4
 }
@@ -92,7 +111,9 @@ export class CharacterSequence extends Uint8Array {
 		if (CharacterSequence.#wasmReadyPromise === undefined) {
 			// Reflect "load in progress" synchronously so search()'s fast path stops
 			// re-triggering loads on every call while the module compiles.
-			if (CharacterSequence.#wasmScanner === undefined) CharacterSequence.#wasmScanner = null
+			if (CharacterSequence.#wasmScanner === undefined) {
+				CharacterSequence.#wasmScanner = null
+			}
 
 			CharacterSequence.#wasmReadyPromise = loadWasmModule().then((mod) => {
 				CharacterSequence.#wasmScanner = mod
@@ -119,7 +140,7 @@ export class CharacterSequence extends Uint8Array {
 		return CharacterSequence.#loadWasm().then((mod) => mod !== null)
 	}
 
-	public search(haystack: Uint8Array, start: number = 0, end: number = haystack.length): number {
+	public search(haystack: Uint8Array, start = 0, end: number = haystack.length): number {
 		const sequenceLength = this.length
 
 		// Single-byte delimiters (newline, comma, tab — the common case) are far faster via
@@ -156,7 +177,9 @@ export class CharacterSequence extends Uint8Array {
 				return result >= 0 ? start + result : -1
 			}
 
-			if (CharacterSequence.#wasmScanner === undefined) CharacterSequence.#ensureWasm()
+			if (CharacterSequence.#wasmScanner === undefined) {
+				CharacterSequence.#ensureWasm()
+			}
 		}
 
 		CharacterSequence.#wasmHaystack = null
@@ -165,7 +188,9 @@ export class CharacterSequence extends Uint8Array {
 		while (startIndex <= end - sequenceLength) {
 			let lastIndex = sequenceLength - 1
 
-			while (lastIndex >= 0 && this[lastIndex] === haystack[startIndex + lastIndex]) lastIndex--
+			while (lastIndex >= 0 && this[lastIndex] === haystack[startIndex + lastIndex]) {
+				lastIndex--
+			}
 
 			if (lastIndex < 0) return startIndex
 			startIndex += this.#skipIndex[haystack[startIndex + sequenceLength - 1]!]!
@@ -174,7 +199,7 @@ export class CharacterSequence extends Uint8Array {
 		return -1
 	}
 
-	public searchAll(haystack: Uint8Array, start: number = 0, end: number = haystack.length): ByteRange[] {
+	public searchAll(haystack: Uint8Array, start = 0, end = haystack.length): ByteRange[] {
 		const sequenceLength = this.length
 		const haystackLen = end - start
 
@@ -200,38 +225,50 @@ export class CharacterSequence extends Uint8Array {
 					resultsOffset,
 					WASM_MAX_RESULTS
 				)
+
 				const rv = new Int32Array(wasm.memory.buffer, resultsOffset, count * 2)
 				const ranges: ByteRange[] = []
 
-				for (let i = 0; i < count; i++) ranges.push([start + rv[i * 2]!, start + rv[i * 2 + 1]!])
+				for (let i = 0; i < count; i++) {
+					ranges.push([start + rv[i * 2]!, start + rv[i * 2 + 1]!])
+				}
 
 				// A full results buffer means the scan may have hit the cap and dropped
 				// trailing delimiters; fall back to the uncapped JS scan rather than truncate.
 				if (count < WASM_MAX_RESULTS) return ranges
 			}
 
-			if (CharacterSequence.#wasmScanner === undefined) CharacterSequence.#ensureWasm()
+			if (CharacterSequence.#wasmScanner === undefined) {
+				CharacterSequence.#ensureWasm()
+			}
 		}
 
 		const ranges: ByteRange[] = []
+
 		let searchStart = start,
 			rangeStart = start
 
 		while (searchStart <= end - sequenceLength) {
 			let lastIndex = sequenceLength - 1
 
-			while (lastIndex >= 0 && this[lastIndex] === haystack[searchStart + lastIndex]) lastIndex--
+			while (lastIndex >= 0 && this[lastIndex] === haystack[searchStart + lastIndex]) {
+				lastIndex--
+			}
 
 			if (lastIndex < 0) {
 				ranges.push([rangeStart, searchStart])
 				searchStart += sequenceLength
 				rangeStart = searchStart
+
 				continue
 			}
+
 			searchStart += this.#skipIndex[haystack[searchStart + sequenceLength - 1]!]!
 		}
 
-		if (rangeStart <= end) ranges.push([rangeStart, end])
+		if (rangeStart <= end) {
+			ranges.push([rangeStart, end])
+		}
 
 		return ranges
 	}
@@ -245,7 +282,7 @@ export class CharacterSequence extends Uint8Array {
 	public searchMatches(
 		haystack: Uint8Array,
 		quotePattern: Uint8Array,
-		start: number = 0,
+		start = 0,
 		end: number = haystack.length
 	): MatchResult[] {
 		const delimiterLen = this.length
@@ -279,52 +316,88 @@ export class CharacterSequence extends Uint8Array {
 				resultsOffset,
 				WASM_MAX_RESULTS
 			)
+
 			const rv = new Int32Array(wasm.memory.buffer, resultsOffset, count * 2)
 			const matches: MatchResult[] = []
 
-			for (let i = 0; i < count; i++) matches.push({ offset: start + rv[i * 2]!, patternId: rv[i * 2 + 1]! })
+			for (let i = 0; i < count; i++) {
+				matches.push({ offset: start + rv[i * 2]!, patternId: rv[i * 2 + 1]! })
+			}
 
 			// A full results buffer means the scan may have hit the cap and dropped
 			// trailing matches; fall back to the uncapped JS scan rather than truncate.
 			if (count < WASM_MAX_RESULTS) return matches
 		}
 
-		if (CharacterSequence.#wasmScanner === undefined) CharacterSequence.#ensureWasm()
+		if (CharacterSequence.#wasmScanner === undefined) {
+			CharacterSequence.#ensureWasm()
+		}
 
 		// JS fallback: scan both patterns independently and merge in offset order. Both
 		// searches honour `end` exclusivity and handle multi-byte patterns (the quote is
 		// wrapped in a CharacterSequence so it isn't limited to a single byte).
+		//
+		// Each pattern's next hit is carried across iterations and re-searched only once the
+		// cursor has passed it. Re-searching both every iteration is quadratic: a `search` that
+		// finds nothing has scanned all the way to `end` to say so, and a source containing no
+		// quote at all pays that whole scan once per delimiter. A `-1` is final for the rest of
+		// the range and must never be re-searched.
 		const matches: MatchResult[] = []
-		const quoteSeq = new CharacterSequence(quotePattern)
+		const quoteSeq = CharacterSequence.asSequence(quotePattern)
 		let searchStart = start
+		let delimiterIndex = this.search(haystack, searchStart, end)
+		let quoteIndex = quoteSeq.search(haystack, searchStart, end)
 
-		while (searchStart <= end) {
-			const delimIdx = this.search(haystack, searchStart, end)
-			const quoteIdx = quoteSeq.search(haystack, searchStart, end)
+		while (delimiterIndex >= 0 || quoteIndex >= 0) {
+			if (delimiterIndex >= 0 && (quoteIndex < 0 || delimiterIndex <= quoteIndex)) {
+				matches.push({ offset: delimiterIndex, patternId: 0 })
+				searchStart = delimiterIndex + delimiterLen
+				delimiterIndex = this.search(haystack, searchStart, end)
 
-			if (delimIdx < 0 && quoteIdx < 0) break
-
-			if (delimIdx >= 0 && (quoteIdx < 0 || delimIdx <= quoteIdx)) {
-				matches.push({ offset: delimIdx, patternId: 0 })
-				searchStart = delimIdx + delimiterLen
+				// Patterns longer than a byte can overlap, so a carried quote hit that the delimiter's
+				// span just swallowed is stale. Single-byte patterns never enter this branch.
+				if (quoteIndex >= 0 && quoteIndex < searchStart) {
+					quoteIndex = quoteSeq.search(haystack, searchStart, end)
+				}
 			} else {
-				matches.push({ offset: quoteIdx, patternId: 1 })
-				searchStart = quoteIdx + quoteLen
+				matches.push({ offset: quoteIndex, patternId: 1 })
+				searchStart = quoteIndex + quoteLen
+				quoteIndex = quoteSeq.search(haystack, searchStart, end)
+
+				if (delimiterIndex >= 0 && delimiterIndex < searchStart) {
+					delimiterIndex = this.search(haystack, searchStart, end)
+				}
 			}
 		}
 
 		return matches
 	}
 
-	public decode(encoding: string = "utf-8"): string {
+	/**
+	 * Adopt a pattern as a sequence, reusing it when it already is one.
+	 *
+	 * Constructing a sequence builds a 256-entry skip table, so wrapping unconditionally puts that allocation on every
+	 * call of a per-row scan. Every in-tree caller of {@linkcode searchMatches} already holds a long-lived sequence for
+	 * its quote pattern.
+	 */
+	public static asSequence(pattern: Uint8Array): CharacterSequence {
+		return pattern instanceof CharacterSequence ? pattern : new CharacterSequence(pattern)
+	}
+
+	public decode(encoding = "utf8"): string {
 		return new TextDecoder(encoding).decode(this)
 	}
 
 	constructor(input: CharacterSequenceInput = Delimiters.LineFeed) {
 		const bytes = normalizeCharacterInput(input)
 		super(bytes)
-		this.#skipIndex = Array.from({ length: 256 }, () => this.length)
+		// `new Array(256).fill(…)` rather than `Array.from({length: 256}, …)`: same result, no
+		// per-entry callback, and this runs for every sequence constructed.
+		// oxlint-disable-next-line unicorn/no-new-array
+		this.#skipIndex = new Array<number>(256).fill(this.length)
 
-		for (let i = 0; i < this.length - 1; i++) this.#skipIndex[this[i]!] = this.length - 1 - i
+		for (let i = 0; i < this.length - 1; i++) {
+			this.#skipIndex[this[i]!] = this.length - 1 - i
+		}
 	}
 }

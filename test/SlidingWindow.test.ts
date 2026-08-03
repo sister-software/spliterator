@@ -9,7 +9,9 @@ import { describe, expect, test } from "vitest"
 
 const encoder = new TextEncoder()
 
-/** Decode the ranges a SlidingWindow yields back into strings for easy comparison. */
+/**
+ * Decode the ranges a SlidingWindow yields back into strings for easy comparison.
+ */
 function windowed(input: string, delimiter?: string): string[] {
 	const buffer = encoder.encode(input)
 	const decoder = new TextDecoder()

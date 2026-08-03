@@ -21,6 +21,7 @@ const data = workerData as WorkerData
 const port = parentPort!
 
 let nextIndex = 0
+
 const handlerReady = import(data.handlerUrl).then(
 	(mod: { handleItem?: ParallelHandler; default?: ParallelHandler }) => mod.handleItem ?? mod.default
 )
@@ -34,7 +35,7 @@ port.on("message", async (msg: unknown) => {
 		const handleItem = await handlerReady
 
 		if (typeof handleItem !== "function") {
-			throw new Error(`Worker module ${data.handlerUrl} has no handleItem export.`)
+			throw new TypeError(`Worker module ${data.handlerUrl} has no handleItem export.`)
 		}
 
 		const results: unknown[] = []
@@ -47,7 +48,9 @@ port.on("message", async (msg: unknown) => {
 
 			results.push(result)
 
-			if (result instanceof Uint8Array) transfer.push(result.buffer as ArrayBuffer)
+			if (result instanceof Uint8Array) {
+				transfer.push(result.buffer as ArrayBuffer)
+			}
 		}
 
 		port.postMessage({ type: "result", results }, transfer)

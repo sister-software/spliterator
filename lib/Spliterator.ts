@@ -4,10 +4,10 @@
  * @author Teffen Ellis, et al.
  */
 
+// oxlint-disable-next-line unicorn/prefer-export-from
 import { AsyncSpliterator, type AsyncSpliteratorInit, type SpliteratorInit } from "./AsyncSpliterator.js"
 import {
 	CharacterSequence,
-	debugAsVisibleCharacters,
 	Delimiters,
 	normalizeCharacterInput,
 	type CharacterSequenceInput,
@@ -364,7 +364,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 				sourceByteLength
 			)
 
-			if (matches.length === 0) return
+			if (!matches.length) return
 
 			let sliceStart = this.#readPosition
 			let insideQuotes = false
@@ -372,6 +372,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 			for (const match of matches) {
 				if (match.patternId === 1) {
 					insideQuotes = !insideQuotes
+
 					continue
 				}
 
@@ -403,7 +404,9 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 		while (true) {
 			if (this.#done || this.#yieldCount >= this.#yieldStopCount) return this.#finalize()
 
-			if (!this.#indices.size) this.#fill()
+			if (!this.#indices.size) {
+				this.#fill()
+			}
 
 			if (!this.#indices.size) {
 				this.#drain()
@@ -422,7 +425,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 
 			const slice = this.#source.subarray(start, end)
 
-			if (slice.length === 0 && this.#skipEmpty) {
+			if (!slice.length && this.#skipEmpty) {
 				continue
 			}
 

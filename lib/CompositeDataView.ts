@@ -238,11 +238,11 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 		/**
 		 * Element to begin at. The offset is inclusive.
 		 */
-		begin: number = 0,
+		begin = 0,
 		/**
 		 * Element to end at. The offset is exclusive. If not provided, the view extends to the end of the buffer.
 		 */
-		end: number = this.#memoizedByteLength
+		end = this.#memoizedByteLength
 	): Chunk {
 		if (begin < 0) {
 			throw new RangeError("Invalid subarray range: begin is negative")
@@ -287,6 +287,7 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 			writeOffset += readEnd - readStart
 
 			if (currentChunk === endChunk.chunk) break
+
 			currentChunkIndex++
 		}
 
@@ -311,13 +312,13 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 		 *
 		 * If this value is negative, it is treated as `byteLength + begin`.
 		 */
-		start: number = 0,
+		start = 0,
 		/**
 		 * Zero-based index before which to end extraction.
 		 *
 		 * If this value is negative, it is treated as `byteLength + end`.
 		 */
-		end: number = this.#memoizedByteLength
+		end = this.#memoizedByteLength
 	): Chunk {
 		if (start < 0) {
 			start = Math.max(0, this.#memoizedByteLength + start)

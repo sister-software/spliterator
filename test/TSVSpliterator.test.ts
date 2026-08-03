@@ -43,6 +43,7 @@ test("TSVSpliterator allows overriding the column delimiter", ({ expect }) => {
 test("Async: TSVSpliterator defaults columnDelimiter to Tab and preserves empties", async ({ expect }) => {
 	const tsv = "a\tb\tc\td\te\n1\t\t\t\t5\n"
 	const bytes = new TextEncoder().encode(tsv)
+
 	const chunkIterator = (async function* () {
 		yield bytes
 	})()

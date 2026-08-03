@@ -7,9 +7,14 @@
 import { mergeAsyncIterators } from "spliterator/segment-workers"
 import { describe, expect, test } from "vitest"
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+const sleep = (ms: number) =>
+	new Promise<void>((resolve) => {
+		setTimeout(resolve, ms)
+	})
 
-/** An async iterable that yields each `[value, delayMs]` after its delay. */
+/**
+ * An async iterable that yields each `[value, delayMs]` after its delay.
+ */
 async function* delayed<T>(items: Array<[T, number]>): AsyncIterableIterator<T> {
 	for (const [value, ms] of items) {
 		await sleep(ms)
@@ -20,7 +25,9 @@ async function* delayed<T>(items: Array<[T, number]>): AsyncIterableIterator<T> 
 async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
 	const out: T[] = []
 
-	for await (const v of source) out.push(v)
+	for await (const v of source) {
+		out.push(v)
+	}
 
 	return out
 }
@@ -48,7 +55,7 @@ describe("mergeAsyncIterators", () => {
 			])
 		)
 
-		expect(got.sort()).toEqual(["a1", "a2", "b1", "b2"])
+		expect(got.toSorted()).toEqual(["a1", "a2", "b1", "b2"])
 	})
 
 	test("propagates an error from any iterator", async () => {

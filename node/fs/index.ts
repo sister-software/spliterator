@@ -5,8 +5,10 @@
  */
 
 import { type CreateWriteStreamOptions, open, stat } from "node:fs/promises"
-import { Writable } from "node:stream"
+import type { Writable } from "node:stream"
 import { WritableStream } from "node:stream/web"
+
+import { PathBuilder } from "path-ts"
 
 import { type AsyncChunkIterator, type AsyncDataResource, isFileHandleLike } from "../../lib/shared.js"
 
@@ -75,7 +77,7 @@ export async function createFileWritableStream(
 		async write(chunk) {
 			const canWrite = nodeWriteStream.write(chunk)
 
-			if (canWrite) return Promise.resolve()
+			if (canWrite) return
 
 			return new Promise((resolve) => {
 				nodeWriteStream.once("drain", resolve)
@@ -161,7 +163,9 @@ export async function readBytes(source: AsyncDataResource, start: number, length
 		return buffer.subarray(0, bytesRead)
 	} finally {
 		// Only close handles we opened.
-		if (!isFileHandleLike(source)) await handle.close()
+		if (!isFileHandleLike(source)) {
+			await handle.close()
+		}
 	}
 }
 
@@ -177,6 +181,10 @@ export async function createChunkIterator(
 ): Promise<AsyncChunkIterator> {
 	if (!source) {
 		throw new TypeError("Cannot create a chunk iterator from an undefined or null source.")
+	}
+
+	if (source instanceof PathBuilder) {
+		source = source.toString()
 	}
 
 	if (typeof source === "string" || source instanceof URL) {

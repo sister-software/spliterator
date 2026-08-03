@@ -24,6 +24,7 @@ describe("long runs of empty fields", () => {
 
 	test("async: skipEmpty drops a huge delimiter run without overflowing", async () => {
 		const buf = new Uint8Array(RUN).fill(10)
+
 		async function* source() {
 			yield buf
 		}

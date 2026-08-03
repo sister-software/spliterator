@@ -13,16 +13,16 @@ import type { CamelCase, SnakeCase } from "type-fest"
 export function smartSnakeCase<T extends string>(name: T): T extends Uppercase<T> ? T : SnakeCase<T> {
 	const normalizedName = name
 		// Remove periods after capital letters, e.g. "U.S.A." -> "USA"
-		.replace(/([A-Z])(\.+)/g, "$1")
+		.replaceAll(/([A-Z])(\.+)/g, "$1")
 		.trim()
 
 	if (normalizedName.toUpperCase() === normalizedName) {
 		return (
 			name
 				// Replace all non-word characters with underscores...
-				.replace(/\W{1,}/g, "_")
+				.replaceAll(/\W{1,}/g, "_")
 				// ...and then replace all sequences of underscores with a single underscore.
-				.replace(/_{2,}/g, "_") as any
+				.replaceAll(/_{2,}/g, "_") as any
 		)
 	}
 

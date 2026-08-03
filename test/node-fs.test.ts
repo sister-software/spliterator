@@ -23,7 +23,10 @@ afterAll(async () => {
 async function collect(it: AsyncIterable<Uint8Array | string>): Promise<Uint8Array> {
 	const parts: Uint8Array[] = []
 
-	for await (const c of it) parts.push(c as Uint8Array)
+	for await (const c of it) {
+		parts.push(c as Uint8Array)
+	}
+
 	const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
 	let o = 0
 

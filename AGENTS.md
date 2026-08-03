@@ -64,7 +64,7 @@ All high-level classes are abstract static-only (instantiation throws `TypeError
 
 **`node/fs/index.ts`** — Node-specific file I/O. Exports `createChunkIterator` (opens a file handle and returns a readable stream as `AsyncChunkIterator`), `createFileWritableStream`, `readFileSize`, and `readBytes`. The `CreateChunkIteratorOptions.end` field is **inclusive** (matches Node.js `createReadStream({ end })`). This module is dynamically imported (`import("spliterator/node/fs")`) within the core layer so the library stays isomorphic — the dynamic import only runs in Node environments.
 
-**`node/cli/`** — A `yargs`-based CLI (`spliterator` binary). Commands live in `node/cli/commands/`. Reads from a file path or STDIN, writes to a file path or STDOUT.
+**`node/cli/`** — The `spliterator` binary, built on Node's built-in `util.parseArgs` (no dependencies). `index.ts` dispatches on the first argument; each command in `node/cli/commands/` owns its `parseArgs` call, its `help` string, and a `run(args)` entry. Shared flags and coercion helpers live in `node/cli/utils.ts`.
 
 ### Key data flow
 

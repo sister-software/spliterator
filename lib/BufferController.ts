@@ -68,7 +68,7 @@ export class BufferController {
 	 * @param end - The ending byte index of which bytes to keep. Defaults to the current buffer length. Values past the
 	 *   buffer length are clamped.
 	 */
-	public compress(start: number = 0, end: number = this.bytes.length): void {
+	public compress(start = 0, end: number = this.bytes.length): void {
 		const clampedEnd = Math.min(end, this.bytes.length)
 		const validEnd = Math.min(this.bytesWritten, clampedEnd)
 
@@ -83,7 +83,7 @@ export class BufferController {
 	 * @param begin The starting byte index from which to clear.
 	 * @param end The ending byte index to clear.
 	 */
-	public clear(begin: number = 0, end: number = this.bytesWritten): void {
+	public clear(begin = 0, end: number = this.bytesWritten): void {
 		this.bytes.fill(0, begin, end)
 		this.bytesWritten = 0
 	}
@@ -97,7 +97,7 @@ export class BufferController {
 	 * @throws If the start index is greater than the end index.
 	 * @throws If the end index is greater than the current byte length.
 	 */
-	public subarray(begin: number = 0, end: number = this.bytesWritten): Uint8Array {
+	public subarray(begin = 0, end: number = this.bytesWritten): Uint8Array {
 		if (begin > end) {
 			throw new RangeError(`Start index ${begin} is greater than end index ${end}.`)
 		}
@@ -120,7 +120,7 @@ export class BufferController {
 	 *
 	 * @returns The number of bytes written.
 	 */
-	public set(array: ArrayLike<number>, offset: number = 0): number {
+	public set(array: ArrayLike<number>, offset = 0): number {
 		const nextLength = offset + array.length
 
 		if (nextLength > this.bytes.length) {

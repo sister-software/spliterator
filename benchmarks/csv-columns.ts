@@ -10,7 +10,9 @@ import { CharacterSequence, CSVSpliterator, Delimiters } from "../index.js"
 import { Spliterator } from "../lib/Spliterator.js"
 import { WASM_THRESHOLD } from "../lib/wasm_module.js"
 
-/** Generate a synthetic CSV buffer with `rows` rows × `cols` columns. */
+/**
+ * Generate a synthetic CSV buffer with `rows` rows × `cols` columns.
+ */
 function generateCSV(rows: number, cols: number): Uint8Array {
 	const encoder = new TextEncoder()
 	const cell = "abcd1234" // ~8 bytes per cell
@@ -20,8 +22,11 @@ function generateCSV(rows: number, cols: number): Uint8Array {
 		for (let c = 0; c < cols; c++) {
 			parts.push(encoder.encode(cell))
 
-			if (c < cols - 1) parts.push(new Uint8Array([Delimiters.Comma]))
+			if (c < cols - 1) {
+				parts.push(new Uint8Array([Delimiters.Comma]))
+			}
 		}
+
 		parts.push(new Uint8Array([Delimiters.LineFeed]))
 	}
 
@@ -37,7 +42,9 @@ function generateCSV(rows: number, cols: number): Uint8Array {
 	return buf
 }
 
-/** Parse rows using the old Spliterator-based approach. */
+/**
+ * Parse rows using the old Spliterator-based approach.
+ */
 function parseWithSpliterator(buf: Uint8Array, commaDelim: CharacterSequence): string[][] {
 	const decoder = new TextDecoder()
 	const rowDelim = new CharacterSequence(Delimiters.LineFeed)
@@ -54,7 +61,9 @@ function parseWithSpliterator(buf: Uint8Array, commaDelim: CharacterSequence): s
 	return rows
 }
 
-/** Parse rows using WASM searchAll for column splitting. */
+/**
+ * Parse rows using WASM searchAll for column splitting.
+ */
 function parseWithSearchAll(buf: Uint8Array, commaDelim: CharacterSequence): string[][] {
 	const decoder = new TextDecoder()
 	const rowDelim = new CharacterSequence(Delimiters.LineFeed)
@@ -71,7 +80,9 @@ function parseWithSearchAll(buf: Uint8Array, commaDelim: CharacterSequence): str
 	return rows
 }
 
-/** Warm up once (JIT + allocation), then time `iterations` runs and return the fastest (least noisy). */
+/**
+ * Warm up once (JIT + allocation), then time `iterations` runs and return the fastest (least noisy).
+ */
 function bestOf(fn: () => void, iterations = 5): number {
 	fn()
 
@@ -92,16 +103,18 @@ async function main(): Promise<void> {
 	// The scanner loads asynchronously; await it so searchAll actually takes the SIMD path
 	// rather than silently benchmarking the JS fallback.
 	console.log("Loading WASM...")
+
 	const commaDelim = new CharacterSequence(Delimiters.Comma)
 	const wasmReady = await CharacterSequence.whenReady()
+
 	console.log(`WASM scanner active: ${wasmReady}\n`)
 
 	// searchAll only uses WASM when a row is at least WASM_THRESHOLD bytes. The cell below is
 	// ~9 bytes wide, so "narrow" configs stay on the JS path and "wide" ones (>= ~460 cols)
 	// cross into SIMD — both are shown so the threshold's effect is visible.
 	const configs = [
-		{ rows: 10000, cols: 10, label: "10K × 10 cols" },
-		{ rows: 10000, cols: 50, label: "10K × 50 cols" },
+		{ rows: 10_000, cols: 10, label: "10K × 10 cols" },
+		{ rows: 10_000, cols: 50, label: "10K × 50 cols" },
 		{ rows: 2000, cols: 600, label: "2K × 600 cols" },
 		{ rows: 1000, cols: 1000, label: "1K × 1000 cols" },
 		{ rows: 500, cols: 2000, label: "500 × 2000 cols" },
@@ -111,6 +124,7 @@ async function main(): Promise<void> {
 
 	for (const { rows, cols, label } of configs) {
 		console.log(`--- ${label} ---`)
+
 		const buf = generateCSV(rows, cols)
 		const sizeMB = (buf.byteLength / (1024 * 1024)).toFixed(2)
 		const rowBytes = Math.round(buf.byteLength / rows)
@@ -119,24 +133,27 @@ async function main(): Promise<void> {
 		console.log(`  Data size: ${sizeMB} MB  |  ~${rowBytes} B/row  →  ${path}`)
 
 		// Parity check (small scale to keep fast)
-		if (rows <= 10000) {
+		if (rows <= 10_000) {
 			const oldResult = parseWithSpliterator(buf, commaDelim)
 			const newResult = parseWithSearchAll(buf, commaDelim)
 
 			if (oldResult.length !== newResult.length) {
 				console.error(`  PARITY FAIL: rows ${oldResult.length} vs ${newResult.length}`)
+
 				process.exit(1)
 			}
 
 			for (let r = 0; r < oldResult.length; r++) {
 				if (oldResult[r]!.length !== newResult[r]!.length) {
 					console.error(`  PARITY FAIL at row ${r}: cols ${oldResult[r]!.length} vs ${newResult[r]!.length}`)
+
 					process.exit(1)
 				}
 
 				for (let c = 0; c < oldResult[r]!.length; c++) {
 					if (oldResult[r]![c] !== newResult[r]![c]) {
 						console.error(`  PARITY FAIL at [${r}][${c}]: "${oldResult[r]![c]}" vs "${newResult[r]![c]}"`)
+
 						process.exit(1)
 					}
 				}
@@ -175,7 +192,8 @@ async function main(): Promise<void> {
 	}
 }
 
-main().catch((err) => {
-	console.error(err)
+main().catch((error) => {
+	console.error(error)
+
 	process.exit(1)
 })

@@ -8,18 +8,24 @@ import { runPool, type PoolWorker } from "spliterator/parallel-map-runtime"
 import { describe, expect, test } from "vitest"
 
 async function* range(n: number): AsyncIterableIterator<number> {
-	for (let i = 0; i < n; i++) yield i
+	for (let i = 0; i < n; i++) {
+		yield i
+	}
 }
 
 async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
 	const out: T[] = []
 
-	for await (const v of source) out.push(v)
+	for await (const v of source) {
+		out.push(v)
+	}
 
 	return out
 }
 
-/** A fake worker that maps a batch via `fn`, optionally recording the max concurrent in-flight. */
+/**
+ * A fake worker that maps a batch via `fn`, optionally recording the max concurrent in-flight.
+ */
 function fakeWorker<T, R>(fn: (item: T) => R, track?: { active: number; max: number }): PoolWorker<T, R> {
 	return {
 		async process(batch) {
@@ -30,10 +36,15 @@ function fakeWorker<T, R>(fn: (item: T) => R, track?: { active: number; max: num
 
 			// A real (macrotask) delay so concurrent processing is observable, not collapsed into one
 			// microtask flush.
-			await new Promise<void>((resolve) => setTimeout(resolve, 5))
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 5)
+			})
+
 			const out = batch.map(fn)
 
-			if (track) track.active--
+			if (track) {
+				track.active--
+			}
 
 			return out
 		},
@@ -45,7 +56,7 @@ describe("runPool", () => {
 		const workers = Array.from({ length: 3 }, () => fakeWorker((x: number) => x * 2))
 		const out = await collect(runPool(workers, range(10), 2))
 
-		expect(out.sort((a, b) => a - b)).toEqual([0, 2, 4, 6, 8, 10, 12, 14, 16, 18])
+		expect(out.toSorted((a, b) => a - b)).toEqual([0, 2, 4, 6, 8, 10, 12, 14, 16, 18])
 	})
 
 	test("empty source completes with no results", async () => {

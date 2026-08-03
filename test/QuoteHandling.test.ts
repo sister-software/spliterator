@@ -28,7 +28,9 @@ import { test } from "vitest"
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
-/** Wrap byte chunks as a plain async iterable to exercise the chunk-iterator path. */
+/**
+ * Wrap byte chunks as a plain async iterable to exercise the chunk-iterator path.
+ */
 async function* chunksOf(...chunks: (Uint8Array | string)[]): AsyncGenerator<any> {
 	for (const chunk of chunks) {
 		yield chunk
@@ -39,6 +41,7 @@ async function* chunksOf(...chunks: (Uint8Array | string)[]): AsyncGenerator<any
 
 test("Spliterator: delimiters inside quotes do not split; quotes are kept", ({ expect }) => {
 	const source = encoder.encode('"a,x",b')
+
 	const slices = Array.from(new Spliterator(source, { delimiter: ",", enableQuoteHandling: true }), (bytes) =>
 		decoder.decode(bytes)
 	)
@@ -48,6 +51,7 @@ test("Spliterator: delimiters inside quotes do not split; quotes are kept", ({ e
 
 test("Spliterator: empty fields survive quote handling with skipEmpty false", ({ expect }) => {
 	const source = encoder.encode('"a",,c,')
+
 	const slices = Array.from(
 		new Spliterator(source, { delimiter: ",", enableQuoteHandling: true, skipEmpty: false }),
 		(bytes) => decoder.decode(bytes)
@@ -58,6 +62,7 @@ test("Spliterator: empty fields survive quote handling with skipEmpty false", ({
 
 test("Spliterator: unclosed quote consumes the tail as one slice", ({ expect }) => {
 	const source = encoder.encode('a,"b,c')
+
 	const slices = Array.from(new Spliterator(source, { delimiter: ",", enableQuoteHandling: true }), (bytes) =>
 		decoder.decode(bytes)
 	)
@@ -118,7 +123,40 @@ test("CSV: quoted header columns", ({ expect }) => {
 	const source = encoder.encode('"h,1",h2\na,b\n')
 	const rows = Array.from(CSVSpliterator.from(source, { mode: "object", enableQuoteHandling: true }))
 
+	// Object mode normalizes keys by default, so the comma the quotes protected becomes an underscore.
+	expect(rows).toEqual([{ h_1: "a", h2: "b" }])
+})
+
+test("CSV: quoted header columns keep their raw text under normalizeKeys: false", ({ expect }) => {
+	const source = encoder.encode('"h,1",h2\na,b\n')
+
+	const rows = Array.from(
+		CSVSpliterator.from(source, { mode: "object", enableQuoteHandling: true, normalizeKeys: false })
+	)
+
 	expect(rows).toEqual([{ "h,1": "a", h2: "b" }])
+})
+
+test("CSV: from and fromAsync agree on default keys", async ({ expect }) => {
+	const source = '"h,1",Some Name\na,b\n'
+	const sync = Array.from(CSVSpliterator.from(encoder.encode(source), { mode: "object", enableQuoteHandling: true }))
+
+	const asyncRows = await Array.fromAsync(
+		CSVSpliterator.fromAsync(chunksOf(encoder.encode(source)), { mode: "object", enableQuoteHandling: true })
+	)
+
+	// The two entry points defaulted `normalizeKeys` differently until 4.0.1: the same options
+	// object produced `row.some_name` from one and `row["Some Name"]` from the other.
+	expect(sync).toEqual(asyncRows)
+	expect(sync).toEqual([{ h_1: "a", some_name: "b" }])
+})
+
+test("CSV: an ALL CAPS header is not case-folded by normalizeKeys", ({ expect }) => {
+	const source = encoder.encode("LON,LAT,STREET\n1,2,Main St\n")
+	const rows = Array.from(CSVSpliterator.from(source, { mode: "object", normalizeKeys: true }))
+
+	// `smartSnakeCase` treats existing all-caps as deliberate. OpenAddresses headers land here.
+	expect(rows).toEqual([{ LON: "1", LAT: "2", STREET: "Main St" }])
 })
 
 test("Async CSV: quoted embedded delimiter and newline", async ({ expect }) => {

@@ -80,7 +80,7 @@ test("Asynchronous content parity with readable streams", async ({ expect, onTes
 		// `WritableStream`'s element type is invariant in the @types/node 25 web-stream typings, so
 		// the contravariant compatibility with `Uint8Array` isn't recognised. The runtime contract
 		// is unchanged — Uint8Array is a valid input to `TextDecoderStream`.
-		.pipeThrough(new TextDecoderStream("utf-8") as unknown as ReadableWritablePair<string, Uint8Array>)
+		.pipeThrough(new TextDecoderStream("utf8") as unknown as ReadableWritablePair<string, Uint8Array>)
 
 	const decodedStreamLines = await Array.fromAsync(decodedReadStream)
 
@@ -113,6 +113,7 @@ test("Newline: Double spaced", async ({ expect, onTestFinished }) => {
 	const decoder = new TextDecoder()
 
 	const fixturePath = fixturesDirectory("phonetic-double-spaced.txt")
+
 	const fixture = await loadFixture(fixturePath, {
 		delimiter: "\n",
 	})
@@ -137,6 +138,7 @@ test("Carriage-Return: Single spaced", async ({ expect, onTestFinished }) => {
 	const decoder = new TextDecoder()
 
 	const fixturePath = fixturesDirectory("phonetic-single-spaced.crlf.txt")
+
 	const fixture = await loadFixture(fixturePath, {
 		delimiter: "\r\n",
 	})
@@ -161,6 +163,7 @@ test("Carriage-Return: Double spaced", async ({ expect, onTestFinished }) => {
 	const decoder = new TextDecoder()
 
 	const fixturePath = fixturesDirectory("phonetic-double-spaced.crlf.txt")
+
 	const fixture = await loadFixture(fixturePath, {
 		delimiter: "\r\n",
 	})

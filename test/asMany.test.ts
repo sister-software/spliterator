@@ -22,7 +22,11 @@ async function flatten(spliterators: AsyncSpliterator[]): Promise<string[]> {
 	const dec = new TextDecoder()
 	const out: string[] = []
 
-	for (const s of spliterators) for await (const row of s) out.push(dec.decode(row))
+	for (const s of spliterators) {
+		for await (const row of s) {
+			out.push(dec.decode(row))
+		}
+	}
 
 	return out
 }
@@ -32,7 +36,9 @@ describe("asMany", () => {
 		test(`parity with sequential parse at concurrency ${concurrency}`, async () => {
 			const oracle: string[] = []
 
-			for await (const line of TextSpliterator.fromAsync(file)) oracle.push(line)
+			for await (const line of TextSpliterator.fromAsync(file)) {
+				oracle.push(line)
+			}
 
 			const spliterators = await AsyncSpliterator.asMany(file, { delimiter: "\n", concurrency })
 			expect(spliterators.length).toBeLessThanOrEqual(concurrency)

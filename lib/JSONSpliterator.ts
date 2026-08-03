@@ -40,7 +40,7 @@ export abstract class JSONSpliterator {
 
 				parsed = JSON.parse(content) as T
 			} catch (parsedError) {
-				const error = SyntaxError(`Failed to parse JSON at row ${rowCursor}`)
+				const error = new SyntaxError(`Failed to parse JSON at row ${rowCursor}`)
 				error.cause = parsedError
 
 				throw error
@@ -70,7 +70,7 @@ export abstract class JSONSpliterator {
 
 				parsed = JSON.parse(content) as T
 			} catch (parsedError) {
-				const error = SyntaxError(`Failed to parse JSON at row ${rowCursor}`)
+				const error = new SyntaxError(`Failed to parse JSON at row ${rowCursor}`)
 				error.cause = parsedError
 
 				throw error

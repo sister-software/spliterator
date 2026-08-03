@@ -39,7 +39,9 @@ describe("createNewlineWriter", () => {
 		{
 			await using out = createNewlineWriter(file)
 
-			for (const row of rows) await out.write(row)
+			for (const row of rows) {
+				await out.write(row)
+			}
 		}
 
 		expect(Array.from(TextSpliterator.from(readFileSync(file)))).toEqual(rows)

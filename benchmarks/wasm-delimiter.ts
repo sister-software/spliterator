@@ -18,7 +18,9 @@ interface BenchmarkResult {
 	throughputMBps: number
 }
 
-/** Generate a haystack of CRLF-delimited lines (~100 bytes each). */
+/**
+ * Generate a haystack of CRLF-delimited lines (~100 bytes each).
+ */
 function generateHaystack(sizeBytes: number): Uint8Array {
 	const encoder = new TextEncoder()
 	const line = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\r\n"
@@ -57,7 +59,7 @@ class BmhSearcher {
 		}
 	}
 
-	search(haystack: Uint8Array, start: number = 0, end: number = haystack.length): number {
+	search(haystack: Uint8Array, start = 0, end: number = haystack.length): number {
 		const n = this.#needle.length
 		let pos = start
 
@@ -77,7 +79,9 @@ class BmhSearcher {
 	}
 }
 
-/** Scan entire haystack for all delimiter positions using BMH. */
+/**
+ * Scan entire haystack for all delimiter positions using BMH.
+ */
 function bmhScanAll(haystack: Uint8Array, searcher: BmhSearcher): number[] {
 	const positions: number[] = []
 	let offset = 0
@@ -94,7 +98,9 @@ function bmhScanAll(haystack: Uint8Array, searcher: BmhSearcher): number[] {
 	return positions
 }
 
-/** Scan entire haystack for all delimiter positions using WASM-backed CharacterSequence. */
+/**
+ * Scan entire haystack for all delimiter positions using WASM-backed CharacterSequence.
+ */
 function wasmScanAll(haystack: Uint8Array, delimiter: Uint8Array): number[] {
 	const seq = new CharacterSequence(delimiter)
 	const positions: number[] = []
@@ -122,10 +128,14 @@ async function main(): Promise<void> {
 	// call with multi-byte + large haystack, which loads the module async.
 	// We call it once, wait, then it's ready for all subsequent calls.
 	console.log("Warming up WASM module...")
+
 	const warmup = new Uint8Array(5000).fill(65) // 'A'
 
 	new CharacterSequence(crlf).search(warmup)
-	await new Promise((resolve) => setTimeout(resolve, 100))
+
+	await new Promise((resolve) => {
+		setTimeout(resolve, 100)
+	})
 
 	// Verify WASM loaded by checking if a second search hits the SIMD path
 	// (no way to check private static field, but parity check below confirms)
@@ -133,18 +143,21 @@ async function main(): Promise<void> {
 
 	// Parity check: both scanners must find the same positions
 	console.log("Running parity check...")
+
 	const testHaystack = generateHaystack(50_000)
 	const bmhPositions = bmhScanAll(testHaystack, bmhSearcher)
 	const wasmPositions = wasmScanAll(testHaystack, crlf)
 
 	if (bmhPositions.length !== wasmPositions.length) {
 		console.error(`PARITY FAIL: BMH=${bmhPositions.length} positions, WASM=${wasmPositions.length}`)
+
 		process.exit(1)
 	}
 
 	for (let i = 0; i < bmhPositions.length; i++) {
 		if (bmhPositions[i] !== wasmPositions[i]) {
 			console.error(`PARITY FAIL at index ${i}: BMH=${bmhPositions[i]}, WASM=${wasmPositions[i]}`)
+
 			process.exit(1)
 		}
 	}
@@ -164,6 +177,7 @@ async function main(): Promise<void> {
 
 	for (const { mb, bytes, iterations } of sizes) {
 		console.log(`\n--- Haystack: ${mb} MB, ${iterations} iteration(s) ---`)
+
 		const haystack = generateHaystack(bytes)
 
 		// Warm-up (1 iteration, not counted)
@@ -236,7 +250,8 @@ async function main(): Promise<void> {
 	}
 }
 
-main().catch((err) => {
-	console.error(err)
+main().catch((error) => {
+	console.error(error)
+
 	process.exit(1)
 })

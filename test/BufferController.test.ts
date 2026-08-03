@@ -20,6 +20,7 @@ test("compress rebases bytesWritten onto the kept window", ({ expect }) => {
 		controller.bytesWritten,
 		"bytesWritten reflects the seven valid bytes still in view, not the underlying allocation"
 	).toBe(7)
+
 	expect(Array.from(controller.bytes.subarray(0, controller.bytesWritten))).toEqual([4, 5, 6, 7, 8, 9, 10])
 })
 

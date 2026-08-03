@@ -97,6 +97,7 @@ test("Empty fields are preserved between consecutive column delimiters", ({ expe
 
 test("Async: Empty fields are preserved between consecutive column delimiters", async ({ expect }) => {
 	const bytes = new TextEncoder().encode(emptyFieldsTsv)
+
 	const chunkIterator = (async function* () {
 		yield bytes
 	})()

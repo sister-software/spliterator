@@ -10,7 +10,9 @@
 
 import { mergeAsyncIterators } from "./merge-async-iterators.js"
 
-/** One pool slot. `process` ships a batch to its worker and resolves with that batch's results. */
+/**
+ * One pool slot. `process` ships a batch to its worker and resolves with that batch's results.
+ */
 export interface PoolWorker<T, R> {
 	process(batch: T[]): Promise<R[]>
 }
@@ -40,13 +42,14 @@ function makeBatcher<T>(source: AsyncIterable<T> | Iterable<T>, batchSize: numbe
 
 				if (done) {
 					exhausted = true
+
 					break
 				}
 
 				batch.push(value)
 			}
 
-			return batch.length > 0 ? batch : null
+			return batch.length ? batch : null
 		})
 
 		// Keep the chain alive regardless of this pull's outcome so the next call still serializes.

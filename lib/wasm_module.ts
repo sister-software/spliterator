@@ -65,11 +65,17 @@ export interface WasmDelimiterScanner {
 	findAllMatches: WasmFindAllMatches
 }
 
-/** Match result from find_all_matches: [offset, pattern_id]. */
+/**
+ * Match result from find_all_matches: [offset, pattern_id].
+ */
 export interface MatchResult {
-	/** Byte offset of the match within the haystack. */
+	/**
+	 * Byte offset of the match within the haystack.
+	 */
 	offset: number
-	/** 0 = pattern 1 (delimiter), 1 = pattern 2 (quote). */
+	/**
+	 * 0 = pattern 1 (delimiter), 1 = pattern 2 (quote).
+	 */
 	patternId: number
 }
 

@@ -463,7 +463,7 @@ export async function computeSegments(source: AsyncDataResource, options: Segmen
 		if (cut !== null && cut > 0 && cut < fileSize) boundaries.add(cut)
 	}
 
-	const sorted = Array.from(boundaries).sort((a, b) => a - b)
+	const sorted = Array.from(boundaries).toSorted((a, b) => a - b)
 	const segments: ByteRange[] = []
 	for (let i = 1; i < sorted.length; i++) {
 		const start = sorted[i - 1]!
@@ -1050,7 +1050,7 @@ describe("asManyWorkers", () => {
 			.split("\n")
 			.filter(Boolean)
 			.map((s) => s.toUpperCase())
-			.sort()
+			.toSorted()
 
 		const got: string[] = []
 		for await (const r of AsyncSpliterator.asManyWorkers<string>(file, {
@@ -1060,7 +1060,7 @@ describe("asManyWorkers", () => {
 		})) {
 			got.push(r)
 		}
-		expect(got.sort()).toEqual(oracle) // interleaved across segments → compare as sets
+		expect(got.toSorted()).toEqual(oracle) // interleaved across segments → compare as sets
 	})
 
 	test("Uint8Array results survive the transfer path", async () => {

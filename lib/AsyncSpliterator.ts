@@ -408,6 +408,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 
 				if (delimiterIndex === -1) {
 					this.#log(`No viable byte range found in buffer. Breaking.`, { searchCursor: this.#searchCursor })
+
 					break
 				}
 
@@ -437,6 +438,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 		for (const match of matches) {
 			if (match.patternId === 1) {
 				this.#insideQuotes = !this.#insideQuotes
+
 				continue
 			}
 
@@ -515,7 +517,9 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 		}
 	}
 
-	/** Signal the underlying chunk reader to stop, destroying an owned read stream (closing its fd). */
+	/**
+	 * Signal the underlying chunk reader to stop, destroying an owned read stream (closing its fd).
+	 */
 	async #closeReader(): Promise<void> {
 		try {
 			await this.#chunkReader.return?.()
@@ -561,14 +565,14 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 		while (true) {
 			if (this.#done || this.#yieldCount >= this.#yieldStopCount) return this.#finalize()
 
-			if (this.#indices.size === 0) {
+			if (!this.#indices.size) {
 				await this.#fill()
 			}
 
 			// The first `#fill` may have read into EOF without entering the EOF branch (the branch only
 			// triggers when fill is called with `done` already set). In that case the trailing tail
 			// hasn't been enqueued yet, so call fill once more to let the EOF branch flush it.
-			if (this.#lastReadResult?.done && this.#indices.size === 0 && !this.#done) {
+			if (this.#lastReadResult?.done && !this.#indices.size && !this.#done) {
 				await this.#fill()
 			}
 
@@ -584,7 +588,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 
 			const slice = this.#controller.subarray(start, end)
 
-			if (slice.length === 0 && this.#skipEmpty) {
+			if (!slice.length && this.#skipEmpty) {
 				continue
 			}
 

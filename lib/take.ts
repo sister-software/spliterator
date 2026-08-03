@@ -29,6 +29,7 @@ export async function* asyncParallelIterator<T, C extends (entry: T) => Promise<
 
 	let iterationResult = await iterator.next()
 
+	// oxlint-disable-next-line no-unmodified-loop-condition
 	while ((!iterationResult.done || results.size) && !abortSignal?.aborted) {
 		for (const [key, result] of results) {
 			yield result
@@ -38,6 +39,7 @@ export async function* asyncParallelIterator<T, C extends (entry: T) => Promise<
 
 		if (runningTasks.size >= batchSize) {
 			await Promise.race(runningTasks.values())
+
 			continue
 		}
 
@@ -53,6 +55,8 @@ export async function* asyncParallelIterator<T, C extends (entry: T) => Promise<
 			runningTasks.delete(entry)
 
 			results.set(entry, result as ReturnType<C>)
+
+			return void 0
 		})
 
 		runningTasks.set(entry, futureResult)
@@ -91,7 +95,7 @@ export async function* takeAsync<T>(collection: AsyncIterable<T>, batchSize: num
 		}
 	}
 
-	if (buffer.length !== 0) {
+	if (buffer.length) {
 		yield buffer
 	}
 }

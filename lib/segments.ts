@@ -8,11 +8,17 @@ import { CharacterSequence, type CharacterSequenceInput } from "./CharacterSeque
 import type { AsyncDataResource, ByteRange } from "./shared.js"
 
 export interface SegmentOptions {
-	/** The record delimiter. @default LineFeed */
+	/**
+	 * The record delimiter. @default LineFeed
+	 */
 	delimiter?: CharacterSequenceInput
-	/** Desired number of segments. Clamped to ≥ 1; the result may be fewer. */
+	/**
+	 * Desired number of segments. Clamped to ≥ 1; the result may be fewer.
+	 */
 	concurrency: number
-	/** Bytes read at each ideal boundary to find the next delimiter. @default 65536 */
+	/**
+	 * Bytes read at each ideal boundary to find the next delimiter. @default 65536
+	 */
 	probeSize?: number
 }
 
@@ -27,7 +33,7 @@ export interface SegmentOptions {
 export async function computeSegments(source: AsyncDataResource, options: SegmentOptions): Promise<ByteRange[]> {
 	const { readFileSize, readBytes } = await import("spliterator/node/fs")
 	const needle = new CharacterSequence(options.delimiter)
-	const probeSize = options.probeSize ?? 65536
+	const probeSize = options.probeSize ?? 65_536
 	const concurrency = Math.max(1, Math.floor(options.concurrency))
 
 	const fileSize = await readFileSize(source)
@@ -54,17 +60,21 @@ export async function computeSegments(source: AsyncDataResource, options: Segmen
 	const boundaries = new Set<number>([0, fileSize])
 
 	for (const cut of alignedCuts) {
-		if (cut !== null && cut > 0 && cut < fileSize) boundaries.add(cut)
+		if (cut !== null && cut > 0 && cut < fileSize) {
+			boundaries.add(cut)
+		}
 	}
 
-	const sorted = Array.from(boundaries).sort((a, b) => a - b)
+	const sorted = Array.from(boundaries).toSorted((a, b) => a - b)
 	const segments: ByteRange[] = []
 
 	for (let i = 1; i < sorted.length; i++) {
 		const start = sorted[i - 1]!
 		const end = sorted[i]!
 
-		if (end > start) segments.push([start, end])
+		if (end > start) {
+			segments.push([start, end])
+		}
 	}
 
 	return segments

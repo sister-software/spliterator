@@ -32,9 +32,11 @@ export async function runSegment(io: RunSegmentIO): Promise<void> {
 	let index = 0
 
 	const flush = async (): Promise<void> => {
-		if (batch.length === 0) return
+		if (!batch.length) return
 
-		while (io.inFlight() >= io.maxInFlight) await io.waitForAck()
+		while (io.inFlight() >= io.maxInFlight) {
+			await io.waitForAck()
+		}
 
 		io.post(batch, transfer)
 		batch = []
@@ -43,15 +45,20 @@ export async function runSegment(io: RunSegmentIO): Promise<void> {
 
 	for await (const record of io.records) {
 		const result = await io.handleRecord(record, { index, segmentIndex: io.segmentIndex })
+
 		index++
 
 		if (result === undefined) continue
 
 		batch.push(result)
 
-		if (result instanceof Uint8Array) transfer.push(result.buffer as ArrayBuffer)
+		if (result instanceof Uint8Array) {
+			transfer.push(result.buffer as ArrayBuffer)
+		}
 
-		if (batch.length >= io.batchSize) await flush()
+		if (batch.length >= io.batchSize) {
+			await flush()
+		}
 	}
 
 	await flush()

@@ -19,14 +19,19 @@ describe("WASM SIMD scanner", () => {
 		// engine would never see it and every test below would silently run on
 		// the JS fallback, defeating the purpose of the suite.
 		const ready = await CharacterSequence.whenReady()
-		expect(ready, "WASM SIMD scanner must be available in this environment").toBe(true)
+
+		if (!ready) {
+			throw new Error("WASM SIMD scanner must be available in this environment")
+		}
 	})
 
 	test("whenReady() resolves true once the SIMD scanner is loaded", async () => {
 		expect(await CharacterSequence.whenReady()).toBe(true)
 	})
 
-	/** Independent oracle mirroring searchAll's JS semantics (incl. trailing empty field). */
+	/**
+	 * Independent oracle mirroring searchAll's JS semantics (incl. trailing empty field).
+	 */
 	function referenceRanges(buf: Uint8Array, delim: Uint8Array): Array<[number, number]> {
 		const ranges: Array<[number, number]> = []
 		let start = 0
@@ -38,6 +43,7 @@ describe("WASM SIMD scanner", () => {
 			for (let j = 0; j < delim.length; j++) {
 				if (buf[i + j] !== delim[j]) {
 					match = false
+
 					break
 				}
 			}
@@ -51,16 +57,22 @@ describe("WASM SIMD scanner", () => {
 			}
 		}
 
-		if (start <= buf.length) ranges.push([start, buf.length])
+		if (start <= buf.length) {
+			ranges.push([start, buf.length])
+		}
 
 		return ranges
 	}
 
-	/** Build a >= threshold haystack of exactly `length` bytes with commas at `positions`. */
+	/**
+	 * Build a >= threshold haystack of exactly `length` bytes with commas at `positions`.
+	 */
 	function commaHaystack(length: number, positions: number[]): Uint8Array {
 		const buf = new Uint8Array(length).fill(Delimiters.Zero)
 
-		for (const p of positions) buf[p] = Delimiters.Comma
+		for (const p of positions) {
+			buf[p] = Delimiters.Comma
+		}
 
 		return buf
 	}
@@ -78,7 +90,9 @@ describe("WASM SIMD scanner", () => {
 		})
 	}
 
-	/** Oracle for searchMatches: each delimiter/quote byte, in order, with its pattern id. */
+	/**
+	 * Oracle for searchMatches: each delimiter/quote byte, in order, with its pattern id.
+	 */
 	function referenceMatches(
 		buf: Uint8Array,
 		delim: number,
@@ -87,8 +101,11 @@ describe("WASM SIMD scanner", () => {
 		const matches: Array<{ offset: number; patternId: number }> = []
 
 		for (let i = 0; i < buf.length; i++) {
-			if (buf[i] === delim) matches.push({ offset: i, patternId: 0 })
-			else if (buf[i] === quote) matches.push({ offset: i, patternId: 1 })
+			if (buf[i] === delim) {
+				matches.push({ offset: i, patternId: 0 })
+			} else if (buf[i] === quote) {
+				matches.push({ offset: i, patternId: 1 })
+			}
 		}
 
 		return matches
@@ -110,7 +127,9 @@ describe("WASM SIMD scanner", () => {
 		})
 	}
 
-	/** Build a >= threshold haystack of `length` bytes with a CRLF at each given start. */
+	/**
+	 * Build a >= threshold haystack of `length` bytes with a CRLF at each given start.
+	 */
 	function crlfHaystack(length: number, crlfStarts: number[]): Uint8Array {
 		const buf = new Uint8Array(length).fill(Delimiters.Zero)
 
@@ -156,7 +175,10 @@ describe("WASM SIMD scanner", () => {
 		for (let r = 0; r < rowCount; r++) {
 			const cells: string[] = []
 
-			for (let c = 0; c < 800; c++) cells.push(`r${r}c${c}`)
+			for (let c = 0; c < 800; c++) {
+				cells.push(`r${r}c${c}`)
+			}
+
 			lines.push(cells.join(","))
 		}
 
@@ -214,18 +236,18 @@ describe("WASM SIMD scanner", () => {
 		expect(comma.searchMatches(buf, quote)).toEqual(referenceMatches(buf, Delimiters.Comma, Delimiters.DoubleQuote))
 	})
 
-	// A haystack ending exactly on a delimiter has a trailing empty field. The JS scan emits
-	// it (matching String.split); the WASM kernel must too, or the last column silently
+	// A haystack ending exactly on a delimiter has a trailing empty field.
+	// The JS scan emits it (matching String.split); the WASM kernel must too, or the last column silently
 	// disappears for wide rows ending in a separator.
 	test("searchAll emits the trailing empty field when the haystack ends on a delimiter", () => {
 		const comma = new CharacterSequence(Delimiters.Comma)
 		const buf = commaHaystack(4100, [10, 2000, 4099]) // final byte is the delimiter
 
-		expect(buf[buf.length - 1]).toBe(Delimiters.Comma)
+		expect(buf.at(-1)).toBe(Delimiters.Comma)
 
 		const ranges = comma.searchAll(buf)
 
 		expect(ranges).toEqual(referenceRanges(buf, comma))
-		expect(ranges[ranges.length - 1]).toEqual([4100, 4100])
+		expect(ranges.at(-1)).toEqual([4100, 4100])
 	})
 })

@@ -12,7 +12,7 @@ const generator = CSVSpliterator.fromAsync(fixturesDirectory("carvel.csv"), {
 	autoDispose: true,
 	header: true,
 	transformers: {
-		PRICE: (value) => parseFloat(value.replace(/[^\d.]/g, "")),
+		PRICE: (value) => Number.parseFloat(value.replaceAll(/[^\d.]/g, "")),
 		size: (value) => value.toUpperCase(),
 	},
 })

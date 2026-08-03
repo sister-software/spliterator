@@ -68,6 +68,7 @@ describe("IndexQueue", () => {
 			[0, 1],
 			[1, 2],
 		])
+
 		expect(q.size).toBe(0)
 	})
 
@@ -79,11 +80,14 @@ describe("IndexQueue", () => {
 		let nextExpected = 0
 
 		// Prime a backlog so head can advance well past any compaction threshold.
-		for (let i = 0; i < 4000; i++) q.enqueue([nextToEnqueue, nextToEnqueue++ + 1])
+		for (let i = 0; i < 4000; i++) {
+			q.enqueue([nextToEnqueue, nextToEnqueue++ + 1])
+		}
 
-		for (let round = 0; round < 20000; round++) {
+		for (let round = 0; round < 20_000; round++) {
 			const got = q.dequeue()
 			expect(got).toEqual([nextExpected, nextExpected + 1])
+
 			nextExpected++
 
 			// Refill faster than draining for a while, then let it drain.
@@ -98,8 +102,10 @@ describe("IndexQueue", () => {
 
 		for (const [start] of q) {
 			expect(start).toBe(last)
+
 			last++
 		}
+
 		expect(q.size).toBe(0)
 		expect(q.byteLength).toBe(0)
 	})

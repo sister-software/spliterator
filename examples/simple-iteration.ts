@@ -24,6 +24,7 @@ const tableMode = false
 
 if (tableMode) {
 	const rows = await Array.fromAsync(spliterator, (line) => debugAsVisibleCharacters(line))
+
 	console.table(rows)
 
 	console.log("---")
@@ -35,6 +36,7 @@ if (tableMode) {
 
 	for await (const line of spliterator) {
 		idx++
+
 		console.log(`${Colorette.bold(idx)}, ${Colorette.yellow(debugAsVisibleCharacters(line))}`)
 	}
 

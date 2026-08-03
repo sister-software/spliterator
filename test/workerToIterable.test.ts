@@ -7,7 +7,9 @@
 import { workerToIterable } from "spliterator/segment-workers"
 import { describe, expect, test } from "vitest"
 
-/** A fake worker we can drive by emitting messages. */
+/**
+ * A fake worker we can drive by emitting messages.
+ */
 function fakeWorker() {
 	const handlers: Record<string, ((arg: never) => void)[]> = { message: [], error: [] }
 
@@ -16,7 +18,9 @@ function fakeWorker() {
 			handlers[event]!.push(cb)
 		},
 		emit(event: "message" | "error", arg: unknown) {
-			for (const cb of handlers[event]!) cb(arg as never)
+			for (const cb of handlers[event]!) {
+				cb(arg as never)
+			}
 		},
 	}
 }
@@ -34,10 +38,12 @@ describe("workerToIterable", () => {
 
 		const got: string[] = []
 
-		for await (const r of it) got.push(r)
+		for await (const r of it) {
+			got.push(r)
+		}
 
 		expect(got).toEqual(["a", "b", "c"])
-		expect(acks.length).toBe(2) // one ack per consumed batch
+		expect(acks).toHaveLength(2) // one ack per consumed batch
 	})
 
 	test("rejects on an error message", async () => {
@@ -47,7 +53,9 @@ describe("workerToIterable", () => {
 
 		await expect(
 			(async () => {
-				for await (const _ of it) void _
+				for await (const _ of it) {
+					void _
+				}
 			})()
 		).rejects.toThrow("boom")
 	})

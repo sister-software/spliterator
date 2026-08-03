@@ -65,7 +65,7 @@ test("Async EOF without trailing delimiter (regression: libpostal given_names.tx
 	const fixturePath = fixturesDirectory("given-names-78k.txt")
 	const fixture = await loadFixture(fixturePath)
 	expect(fixture.decodedLines.length, "Fixture has many lines").toBeGreaterThan(10_000)
-	expect(fixture.bytes[fixture.bytes.length - 1], "Fixture ends without a trailing newline").not.toBe(0x0a)
+	expect(fixture.bytes.at(-1), "Fixture ends without a trailing newline").not.toBe(0x0a)
 
 	const generator = TextSpliterator.fromAsync(fixturePath, { skipEmpty: false })
 	const decodedLines = await Array.fromAsync(generator)

@@ -4,8 +4,8 @@
  * @author Teffen Ellis, et al.
  */
 
-import { type CharacterSequenceInput } from "./CharacterSequence.js"
-import { type AsyncDataResource } from "./shared.js"
+import type { CharacterSequenceInput } from "./CharacterSequence.js"
+import type { AsyncDataResource } from "./shared.js"
 import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "./Spliterator.js"
 
 export interface TextSpliteratorInit {
@@ -58,7 +58,7 @@ export abstract class TextSpliterator {
 			try {
 				decoded = decoder.decode(row)
 			} catch (parsedError) {
-				const error = SyntaxError(`Failed to decode data at row ${rowCursor}`)
+				const error = new SyntaxError(`Failed to decode data at row ${rowCursor}`)
 				error.cause = parsedError
 
 				throw error
@@ -94,7 +94,7 @@ export abstract class TextSpliterator {
 			try {
 				decoded = decoder.decode(row)
 			} catch (parsedError) {
-				const error = SyntaxError(`Failed to decode data at row ${rowCursor}`)
+				const error = new SyntaxError(`Failed to decode data at row ${rowCursor}`)
 				error.cause = parsedError
 
 				throw error

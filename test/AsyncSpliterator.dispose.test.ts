@@ -7,9 +7,12 @@
 import { AsyncSpliterator } from "spliterator"
 import { describe, expect, test } from "vitest"
 
-/** A fake chunk source whose iterator records whether `return()` was called (cancellation). */
+/**
+ * A fake chunk source whose iterator records whether `return()` was called (cancellation).
+ */
 function spySource(chunks: Uint8Array[]) {
 	const state = { returned: false }
+
 	const source = {
 		[Symbol.asyncIterator]() {
 			let i = 0
@@ -34,9 +37,11 @@ describe("AsyncSpliterator early termination", () => {
 		const { source, state } = spySource([enc.encode("a\nb\nc\nd\n")])
 		const spliterator = new AsyncSpliterator(source as never, { delimiter: "\n" })
 
+		// oxlint-disable-next-line no-unreachable-loop
 		for await (const _ of spliterator) break // consume one, then bail
 
 		await spliterator.return()
+
 		expect(state.returned).toBe(true)
 	})
 })

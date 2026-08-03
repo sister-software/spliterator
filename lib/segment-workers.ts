@@ -11,7 +11,7 @@ import { mergeAsyncIterators } from "./merge-async-iterators.js"
 import { computeSegments } from "./segments.js"
 import type { AsyncDataResource, ByteRange } from "./shared.js"
 
-export { mergeAsyncIterators }
+export { mergeAsyncIterators } from "./merge-async-iterators.js"
 
 export interface MinimalWorker {
 	on(event: "message", cb: (msg: unknown) => void): void
@@ -41,9 +41,11 @@ export function workerToIterable<R>(worker: MinimalWorker, onBatchConsumed: () =
 	worker.on("message", (msg) => {
 		const m = msg as WorkerMessage<R>
 
-		if (m.type === "batch") batches.push(m.records)
-		else if (m.type === "done") done = true
-		else if (m.type === "error") {
+		if (m.type === "batch") {
+			batches.push(m.records)
+		} else if (m.type === "done") {
+			done = true
+		} else if (m.type === "error") {
 			error = new Error(m.message)
 			done = true
 		}
@@ -62,9 +64,12 @@ export function workerToIterable<R>(worker: MinimalWorker, onBatchConsumed: () =
 			if (head < batches.length) {
 				const batch = batches[head++]!
 
-				for (const record of batch) yield record
+				for (const record of batch) {
+					yield record
+				}
 
 				onBatchConsumed()
+
 				continue
 			}
 
@@ -72,6 +77,7 @@ export function workerToIterable<R>(worker: MinimalWorker, onBatchConsumed: () =
 
 			if (done) return
 
+			// oxlint-disable-next-line no-loop-func no-promise-executor-return
 			await new Promise<void>((resolve) => (wake = resolve))
 		}
 	}
@@ -80,19 +86,33 @@ export function workerToIterable<R>(worker: MinimalWorker, onBatchConsumed: () =
 }
 
 export interface AsManyWorkersOptions {
-	/** Module path or URL exporting `handleRecord(bytes, ctx)`. Runs once per worker at import. */
+	/**
+	 * Module path or URL exporting `handleRecord(bytes, ctx)`. Runs once per worker at import.
+	 */
 	worker: string | URL
-	/** The record delimiter. @default LineFeed */
+	/**
+	 * The record delimiter. @default LineFeed
+	 */
 	delimiter?: CharacterSequenceInput
-	/** Desired number of segments/workers. Clamped to ≥ 1; fewer may run. */
+	/**
+	 * Desired number of segments/workers. Clamped to ≥ 1; fewer may run.
+	 */
 	concurrency: number
-	/** Bytes read at each ideal boundary to find the next delimiter. @default 65536 */
+	/**
+	 * Bytes read at each ideal boundary to find the next delimiter. @default 65536
+	 */
 	probeSize?: number
-	/** Results per message. @default 256 */
+	/**
+	 * Results per message. @default 256
+	 */
 	batchSize?: number
-	/** Unacked batches per worker before it pauses (bounds memory). @default 8 */
+	/**
+	 * Unacked batches per worker before it pauses (bounds memory). @default 8
+	 */
 	maxInFlight?: number
-	/** Forwarded to every worker via `workerData.userData`. */
+	/**
+	 * Forwarded to every worker via `workerData.userData`.
+	 */
 	workerData?: unknown
 }
 
@@ -111,7 +131,9 @@ export async function* runSegmentWorkers<R>(
 
 	const handlerUrl =
 		options.worker instanceof URL ? options.worker.href : new URL(options.worker, `file://${process.cwd()}/`).href
+
 	const sourcePath = source instanceof URL ? source.href : source
+
 	const segments: ByteRange[] = await computeSegments(source, {
 		delimiter: options.delimiter,
 		concurrency: options.concurrency,
