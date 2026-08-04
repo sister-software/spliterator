@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-05
 **Status:** Draft (pending user review)
-**Component:** `spliterator` — new `lib/AsyncSequence.ts`; return types of `*.fromAsync`
+**Component:** `spliterator` — new `lib/AsyncSequence.ts`; return types of `*.fromAsync`; naming of
+the parallel primitives
 
 ## Context & goal
 
@@ -122,10 +123,13 @@ AsyncSequence.from(source)                                  → AsyncSequence<T>
 **Quality-of-life extras**, named so they cannot be mistaken for spec surface:
 
 ```
-chunks(size)                          → AsyncSequence<T[]>
+chunks(size)                               → AsyncSequence<T[]>
 parallelMap(fn, { concurrency, signal? })  → AsyncSequence<U>
 toReadableStream()   pipeThrough(transform, options?)
 ```
+
+`parallelMap` here takes a **closure**, so under the naming rule below it runs on the caller's
+thread. The threaded free function is `parallelMapWorkers`.
 
 `chunks` resolves a live name collision. Spec `take(n)` yields the **first n items**; the existing
 `take`/`takeAsync` in `lib/take.ts` yield **batches of n**. Shipping spec helpers next to them would
@@ -160,10 +164,69 @@ leaks a handle. This gets a dedicated test.
 
 `Array.fromAsync(sequence)` keeps working; it is still `AsyncIterable`.
 
+## Naming — the `Workers` convention
+
+Five primitives already exist for going parallel, on two axes, and the naming makes the second axis
+invisible:
+
+| | main thread | worker threads |
+| --- | --- | --- |
+| a collection of items | `asyncParallelIterator` | `parallelMap` |
+| one big file | `AsyncSpliterator.asMany` | `AsyncSpliterator.asManyWorkers` |
+| just the boundaries | `AsyncSpliterator.segments` | (feeds either) |
+
+`asyncParallelIterator` vs `parallelMap` gives the reader nothing; only `asMany`/`asManyWorkers`
+signals the column. A `Workers` suffix, applied consistently, means "this crosses a thread
+boundary":
+
+```
+parallelMap(source, fn, { concurrency })             ← main thread   (was asyncParallelIterator)
+parallelMapWorkers(source, { worker, concurrency })  ← threads       (was parallelMap)
+asMany(source, …)   /   asManyWorkers(source, { worker, … })          (unchanged, already correct)
+```
+
+This encodes a rule that is **already true of every primitive here and simply unstated**:
+
+> **If you can pass a closure, it runs on your thread. If you must pass a module path, it runs on
+> another one.**
+
+Closures cannot cross `postMessage`, so the signature already carries the information — `asManyWorkers`
+requires a path/URL for exactly this reason. Aligning the names turns an accident into a rule a
+caller can hold in their head, and it resolves the collision this design would otherwise introduce
+(`AsyncSequence.prototype.parallelMap` takes a closure; the free threaded function needed a
+different name).
+
+## Choosing a primitive
+
+The guidance exists today but is scattered across one function's JSDoc (`lib/parallel-map.ts:80-92`)
+and `AGENTS.md`, so nobody meets it at decision time. Callers ask "how big is my file?" The question
+that actually predicts the answer is **how much work happens per row**:
+
+| per-row work | what dominates | reach for |
+| --- | --- | --- |
+| none — counting, segmenting, pulling two fields | the scan | `Spliterator` raw ranges; WASM SIMD earns its keep (~5–6 GB/s vs ~600 MB/s JS BMH) |
+| ~1–3 µs — `JSON.parse`, CSV→object, normalize | the parse | plain sequential `fromAsync`. Threads **lose** here (0.3–0.9×); JSONL is ~0.75× of `readline` |
+| ms-scale — inference, geocode, crypto, image ops | your handler | `parallelMapWorkers` / `asManyWorkers` |
+| I/O-bound — `readFile` fan-out, network | latency | `parallelMap` (main thread). Concurrency peaks ~2–3, then **degrades** |
+
+The line worth stating once, loudly: **the scan is almost never the bottleneck unless you aren't
+parsing.** The library currently lets people discover that the expensive way.
+
+Placement: canonical table in `README.md` (a `## Choosing a primitive` section ahead of the existing
+`### Parallel parsing across threads` at line 156), mirrored in `AGENTS.md`, with a `@see` from each
+parallel primitive's JSDoc so it is reachable from editor hover. The two copies are prose, not code;
+drift is acceptable against the reachability win.
+
 ## Breaking changes
 
-1. **`asyncParallelIterator` becomes internal.** It is absorbed into
-   `AsyncSequence.prototype.parallelMap` and dropped from the public export. `mailwoman`'s
+1. **`asyncParallelIterator` → `parallelMap`** (main-thread), and the existing threaded
+   **`parallelMap` → `parallelMapWorkers`**. Note this is a *silent* break for anyone importing
+   `parallelMap` today: the name survives with a different execution model. Release notes must call
+   it out explicitly; the old threaded name is not kept as a deprecated alias, because an alias that
+   resolves to main-thread execution is worse than a missing export.
+
+2. **`asyncParallelIterator`'s free-function form is dropped** in favour of
+   `AsyncSequence.prototype.parallelMap` plus the renamed free function. `mailwoman`'s
    `gazetteer-pipeline/admin/ingest-wof.ts:19,244` is the known consumer and migrates in the same
    change:
 
@@ -171,10 +234,10 @@ leaks a handle. This gets a dedicated test.
    const readResults = AsyncSequence.from(filePaths).parallelMap((fp) => readFile(fp, "utf8"), { concurrency })
    ```
 
-2. **`takeAsync` is deleted**; `take(collection, batchSize)` is renamed `chunks`. The name `take` is
+3. **`takeAsync` is deleted**; `take(collection, batchSize)` is renamed `chunks`. The name `take` is
    freed for the spec meaning.
 
-3. `*.fromAsync` return types change from `AsyncGenerator<T>` to `AsyncSequence<T>`. Source-compatible
+4. `*.fromAsync` return types change from `AsyncGenerator<T>` to `AsyncSequence<T>`. Source-compatible
    for `for await` and `Array.fromAsync` consumers; a type-level break for anyone naming the type.
 
 Major version bump.
@@ -213,6 +276,10 @@ index when it moves into `parallelMap`.
 - **`chunks`** boundary cases: exact multiple, remainder, empty source.
 - **`parallelMap`**: concurrency ceiling respected; **duplicate items each produce a result** (the
   regression test for the Map-keying defect); abort signal; rejection propagates.
+
+`test/parallelMap.test.ts` → `test/parallelMapWorkers.test.ts`, renamed with its subject but otherwise unchanged — the threaded
+implementation moves name only, not behaviour, so the existing suite is the proof that
+`parallelMapWorkers` is the same code.
 
 `test/asMany.test.ts` and the existing spliterator suites are unchanged and act as the
 no-regression baseline for `fromAsync`'s new return type.
