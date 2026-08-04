@@ -58,7 +58,37 @@ Spliterator is an ESM TypeScript library (`"type": "module"`) for streaming deli
 - **`JSONSpliterator`** — Wraps `TextSpliterator`-style logic, additionally calls `JSON.parse` on each line.
 - **`CSVSpliterator`** — Two-level splitting: first splits rows (newline), then splits each row into columns (comma). Supports `mode: "array" | "object" | "entries"`, header normalization, and per-column transformers.
 
-All high-level classes are abstract static-only (instantiation throws `TypeError`). They expose `from(syncSource)` and `fromAsync(asyncSource)` class methods.
+All high-level classes are abstract static-only (instantiation throws `TypeError`). They expose `from(syncSource)` and `fromAsync(asyncSource)` class methods. `from` returns a plain `Generator` (Node 24+ ships `Iterator.prototype` helpers natively); `fromAsync` returns an **`AsyncSequence`**.
+
+### `AsyncSequence` (`lib/AsyncSequence.ts`)
+
+A lazy, chainable async iterator returned by every `fromAsync`. Core methods (`map`, `filter`, `take`, `drop`, `flatMap`, `reduce`, `toArray`, `forEach`, `some`, `every`, `find`) match the [async iterator helpers proposal](https://github.com/tc39/proposal-async-iterator-helpers) in name, arity, and semantics, including the `counter` argument. Extras that are deliberately not spec surface: `chunks(size)`, `parallelMap(fn, opts)`, `toReadableStream()`, `pipeThrough()`.
+
+- **Fused, not nested.** A chain is an op list plus a source; iteration runs the ops in a plain loop inside one hand-rolled `next()`. One async boundary per item regardless of chain depth — only the op loop grows. Measured on Node 26 over 2M items: bare async generator 10.3M/s, `AsyncSequence` 5.4M/s at three operators and 4.9M/s at six, nested async generators 2.3M/s. Do not "simplify" this into chained `async function*` wrappers; that is a 2.3× regression. Do not extract the pull loop into a separate `async` method either — the extra async frame per item cost 30% when it was tried.
+- **`flatMap`, `chunks`, and `parallelMap` are fusion barriers** — they need inner-iterator state, so each starts a fresh segment.
+- **Callbacks are awaited only when thenable**, so synchronous callbacks cost no microtask hop.
+- **Closure propagates.** Early exit (`take` satisfied, `find`/`some`/`every` hit, `break`, throwing callback) calls `return()` upstream, which reaches `AsyncSpliterator.#finalize()` and releases the file handle. `#finish()` obtains the upstream iterator even if nothing was ever pulled, because the handle may have been opened before the sequence was constructed — this is why `take(0)` still closes.
+- **Single-shot**, matching the proposal's iterators.
+- Wrapping costs ~1.9× a bare async generator. On parsed rows that's 3–8%; on raw `Uint8Array` ranges it's most of the cost, so iterate `AsyncSpliterator` directly for scan-only work.
+
+### Choosing a parallel primitive
+
+Keyed off **per-row work**, not file size:
+
+| Per-row work                              | Dominates   | Use                                                                         |
+| ----------------------------------------- | ----------- | --------------------------------------------------------------------------- |
+| None (count, segment, extract a field)    | The scan    | `Spliterator` raw ranges + SIMD (~5–6 GB/s vs ~600 MB/s JS)                 |
+| ~1–3 µs (`JSON.parse`, CSV→object)        | The parse   | Sequential `fromAsync`. Threads lose (0.3–0.9×); JSONL ~0.75× of `readline` |
+| Milliseconds (inference, geocode, crypto) | The handler | `parallelMapWorkers` / `asManyWorkers`                                      |
+| I/O-bound (file fan-out, network)         | Latency     | `parallelMap`. Peaks ~2–3 concurrency, then degrades                        |
+
+Naming rule: **closure ⇒ caller's thread; module path ⇒ worker thread** (closures can't cross `postMessage`).
+
+|                     | Caller's thread                       | Worker threads                                       |
+| ------------------- | ------------------------------------- | ---------------------------------------------------- |
+| Collection of items | `parallelMap` (`lib/parallel-map.ts`) | `parallelMapWorkers` (`lib/parallel-map-workers.ts`) |
+| One large file      | `AsyncSpliterator.asMany`             | `AsyncSpliterator.asManyWorkers`                     |
+| Boundaries only     | `AsyncSpliterator.segments`           | (feeds either)                                       |
 
 ### Node.js adapter (`node/`)
 
@@ -157,7 +187,7 @@ Identified bottlenecks, ordered by impact. Check these off as they are addressed
 
 - [ ] **`asManyWorkers` — persistent worker pool**
 
-  - v1 spawns and terminates one Worker per segment per call (startup amortizes over a multi-GB file). A pre-warmed pool reused across calls would cut repeated-call startup and make the many-small-files case (currently `asyncParallelIterator`) viable on threads.
+  - v1 spawns and terminates one Worker per segment per call (startup amortizes over a multi-GB file). A pre-warmed pool reused across calls would cut repeated-call startup and make the many-small-files case (currently `parallelMap`) viable on threads.
 
 - [x] **WASM SIMD for multi-byte delimiter scanning**
   - Implemented as a `#![no_std]` Rust crate (`wasm/src/lib.rs`) compiled to `wasm32-unknown-unknown` with `+simd128`, embedded as base64 in `lib/wasm_base64.ts` (generated by `wasm/build.sh`) and loaded via `lib/wasm_module.ts`. Exports `find_delimiter` (first match), `find_all_delimiters` (range pairs), and `find_all_matches` (two-pattern delimiter+quote, `i8x16.eq` + `i8x16.bitmask`). `CharacterSequence.search`/`searchAll`/`searchMatches` use it for haystacks ≥ `WASM_THRESHOLD` (512 B); single-byte `search` still prefers native `indexOf`. Measured ~5–6 GB/s for multi-byte scanning vs ~600 MB/s JS BMH, and ~8–17× for `searchAll`.

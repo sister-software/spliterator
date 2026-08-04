@@ -4,6 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
+import { AsyncSequence } from "./AsyncSequence.js"
 import type { CharacterSequenceInput } from "./CharacterSequence.js"
 import type { AsyncDataResource } from "./shared.js"
 import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "./Spliterator.js"
@@ -80,29 +81,33 @@ export abstract class TextSpliterator {
 	 * @see {@linkcode TextSpliterator.from} for synchronous iteration with decoding.
 	 * @see {@linkcode Spliterator.fromAsync} for asynchronous iteration without decoding.
 	 */
-	static async *fromAsync(
+	static fromAsync(
 		source: AsyncDataResource,
 		{ encoding, fatal, ignoreBOM, ...options }: TextSpliteratorInit & AsyncSpliteratorInit = {}
-	): AsyncGenerator<string> {
-		const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
-		let rowCursor = 0
-		const spliterator = await Spliterator.fromAsync(source, options)
+	): AsyncSequence<string> {
+		async function* decoded(): AsyncGenerator<string> {
+			const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
+			let rowCursor = 0
+			const spliterator = await Spliterator.fromAsync(source, options)
 
-		for await (const row of spliterator) {
-			let decoded: string
+			for await (const row of spliterator) {
+				let text: string
 
-			try {
-				decoded = decoder.decode(row)
-			} catch (parsedError) {
-				const error = new SyntaxError(`Failed to decode data at row ${rowCursor}`)
-				error.cause = parsedError
+				try {
+					text = decoder.decode(row)
+				} catch (parsedError) {
+					const error = new SyntaxError(`Failed to decode data at row ${rowCursor}`)
+					error.cause = parsedError
 
-				throw error
+					throw error
+				}
+
+				yield text
+
+				rowCursor++
 			}
-
-			yield decoded
-
-			rowCursor++
 		}
+
+		return AsyncSequence.from(decoded())
 	}
 }

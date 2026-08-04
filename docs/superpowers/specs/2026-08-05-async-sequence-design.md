@@ -52,7 +52,7 @@ sync helper class and without asking anyone to install a polyfill.
   duplicate them is the maintenance cost this design exists to avoid. The one sync gap is batching
   (`chunks`), and a whole class is too much to pay for one method.
 - **Delegating to native `AsyncIterator` when it exists.** Measurements below show native helpers
-  are *slower* than a fused implementation. Delegation would be a pessimization.
+  are _slower_ than a fused implementation. Delegation would be a pessimization.
 - **Making `AsyncSpliterator` extend `AsyncSequence`.** The engine stays uncoupled from the sugar.
   It is already `AsyncIterable`, so `AsyncSequence.from(spliterator)` works when wanted. Accepted
   cost: `toReadableStream`/`pipeThrough` exist in two files until a later cleanup.
@@ -62,26 +62,43 @@ sync helper class and without asking anyone to install a polyfill.
 
 Node 26, 2M items, `map → filter → map`, `hrtime` around a warmed run.
 
-| Implementation | throughput | vs. bare async generator |
-| --- | ---: | ---: |
-| bare async generator, no operators | 10.3 M/s | 1.0× |
-| **nested async generators** (each helper wraps the last) | **2.4 M/s** | **4.3× slower** |
-| **fused, hand-rolled `next()`** | **5.5 M/s** | **1.9× slower** |
-| the same fused chain with 6 operators instead of 3 | 5.8 M/s | *free* |
+| Implementation                                           |  throughput | vs. bare async generator |
+| -------------------------------------------------------- | ----------: | -----------------------: |
+| bare async generator, no operators                       |    10.3 M/s |                     1.0× |
+| **nested async generators** (each helper wraps the last) | **2.4 M/s** |          **4.3× slower** |
+| **fused, hand-rolled `next()`**                          | **5.5 M/s** |          **1.9× slower** |
+| the same fused chain with 6 operators instead of 3       |     5.8 M/s |                   _free_ |
 
-The last row is the design driver. Under fusion, **chain depth costs nothing** — 6 operators measure
-the same as 3 (5.8 vs 5.5 is noise). Under nesting, every operator adds a microtask hop per item.
+The last row is the design driver. Under fusion, **chain depth is nearly free**. Under nesting, every
+operator adds a microtask hop per item.
+
+**Measured again against the shipped class**, same machine and shape:
+
+| Implementation                       | throughput |
+| ------------------------------------ | ---------: |
+| bare async generator, no operators   |   10.3 M/s |
+| `AsyncSequence`, 3 operators         |    5.4 M/s |
+| `AsyncSequence`, 6 operators         |    4.9 M/s |
+| nested async generators, 3 operators |    2.3 M/s |
+
+The prototype's perfectly-flat depth curve does not survive into the real class — doubling the
+operator count costs ~10%, since the op loop still grows even though the async boundary does not.
+Nesting the same six would roughly double. The 1.9× wrapper tax holds.
+
+One implementation detail is load-bearing: extracting the pull loop into its own `async` method (to
+host the try/catch that closes on a throwing callback) cost **30%** — 3.8 M/s against 5.4 — because
+it adds a second async frame per item. The try/catch has to sit inline in `next()`.
 
 The residual 1.9× is the wrapper object itself, one extra async frame per pulled item. It cannot be
 removed while remaining an async iterator.
 
 Sync, same shape, for calibration:
 
-| | throughput |
-| --- | ---: |
-| bare sync generator, no operators | 70.4 M/s |
-| V8 native `Iterator.prototype` helpers, 3 operators | 20.2 M/s |
-| the same logic hand-inlined | 68.1 M/s |
+|                                                     | throughput |
+| --------------------------------------------------- | ---------: |
+| bare sync generator, no operators                   |   70.4 M/s |
+| V8 native `Iterator.prototype` helpers, 3 operators |   20.2 M/s |
+| the same logic hand-inlined                         |   68.1 M/s |
 
 **V8's native helpers are not fused** — a 3.4× tax against hand-inlining. The proposal specifies
 each helper as a composed iterator object, so native async helpers will carry the same shape (the
@@ -169,11 +186,11 @@ leaks a handle. This gets a dedicated test.
 Five primitives already exist for going parallel, on two axes, and the naming makes the second axis
 invisible:
 
-| | main thread | worker threads |
-| --- | --- | --- |
-| a collection of items | `asyncParallelIterator` | `parallelMap` |
-| one big file | `AsyncSpliterator.asMany` | `AsyncSpliterator.asManyWorkers` |
-| just the boundaries | `AsyncSpliterator.segments` | (feeds either) |
+|                       | main thread                 | worker threads                   |
+| --------------------- | --------------------------- | -------------------------------- |
+| a collection of items | `asyncParallelIterator`     | `parallelMap`                    |
+| one big file          | `AsyncSpliterator.asMany`   | `AsyncSpliterator.asManyWorkers` |
+| just the boundaries   | `AsyncSpliterator.segments` | (feeds either)                   |
 
 `asyncParallelIterator` vs `parallelMap` gives the reader nothing; only `asMany`/`asManyWorkers`
 signals the column. A `Workers` suffix, applied consistently, means "this crosses a thread
@@ -202,12 +219,12 @@ The guidance exists today but is scattered across one function's JSDoc (`lib/par
 and `AGENTS.md`, so nobody meets it at decision time. Callers ask "how big is my file?" The question
 that actually predicts the answer is **how much work happens per row**:
 
-| per-row work | what dominates | reach for |
-| --- | --- | --- |
-| none — counting, segmenting, pulling two fields | the scan | `Spliterator` raw ranges; WASM SIMD earns its keep (~5–6 GB/s vs ~600 MB/s JS BMH) |
-| ~1–3 µs — `JSON.parse`, CSV→object, normalize | the parse | plain sequential `fromAsync`. Threads **lose** here (0.3–0.9×); JSONL is ~0.75× of `readline` |
-| ms-scale — inference, geocode, crypto, image ops | your handler | `parallelMapWorkers` / `asManyWorkers` |
-| I/O-bound — `readFile` fan-out, network | latency | `parallelMap` (main thread). Concurrency peaks ~2–3, then **degrades** |
+| per-row work                                     | what dominates | reach for                                                                                     |
+| ------------------------------------------------ | -------------- | --------------------------------------------------------------------------------------------- |
+| none — counting, segmenting, pulling two fields  | the scan       | `Spliterator` raw ranges; WASM SIMD earns its keep (~5–6 GB/s vs ~600 MB/s JS BMH)            |
+| ~1–3 µs — `JSON.parse`, CSV→object, normalize    | the parse      | plain sequential `fromAsync`. Threads **lose** here (0.3–0.9×); JSONL is ~0.75× of `readline` |
+| ms-scale — inference, geocode, crypto, image ops | your handler   | `parallelMapWorkers` / `asManyWorkers`                                                        |
+| I/O-bound — `readFile` fan-out, network          | latency        | `parallelMap` (main thread). Concurrency peaks ~2–3, then **degrades**                        |
 
 The line worth stating once, loudly: **the scan is almost never the bottleneck unless you aren't
 parsing.** The library currently lets people discover that the expensive way.
@@ -220,7 +237,7 @@ drift is acceptable against the reachability win.
 ## Breaking changes
 
 1. **`asyncParallelIterator` → `parallelMap`** (main-thread), and the existing threaded
-   **`parallelMap` → `parallelMapWorkers`**. Note this is a *silent* break for anyone importing
+   **`parallelMap` → `parallelMapWorkers`**. Note this is a _silent_ break for anyone importing
    `parallelMap` today: the name survives with a different execution model. Release notes must call
    it out explicitly; the old threaded name is not kept as a deprecated alias, because an alias that
    resolves to main-thread execution is worse than a missing export.

@@ -153,6 +153,49 @@ for (const row of CSVSpliterator.from(largeCsvString)) {
 
 Correctness is identical either way; `whenReady()` only affects which scanner runs.
 
+## Choosing a primitive
+
+The question that predicts the answer is not "how big is my file?" — it's **how much work happens per row.**
+
+| Per-row work                                                 | What dominates | Reach for                                                                                           |
+| ------------------------------------------------------------ | -------------- | --------------------------------------------------------------------------------------------------- |
+| None — counting, segmenting, pulling a couple of fields      | The scan       | `Spliterator` raw byte ranges. The SIMD scanner earns its keep here (~5–6 GB/s vs ~600 MB/s for JS) |
+| ~1–3 µs — `JSON.parse`, CSV → object, string normalize       | The parse      | Plain sequential `fromAsync`. Threads **lose** here (0.3–0.9×); JSONL runs ~0.75× of `readline`     |
+| Milliseconds — model inference, geocoding, crypto, image ops | Your handler   | `parallelMapWorkers`, or `AsyncSpliterator.asManyWorkers` for one large file                        |
+| I/O-bound — file fan-out, network                            | Latency        | `parallelMap` (caller's thread). Concurrency peaks around 2–3, then **degrades**                    |
+
+The line worth internalizing: **the scan is almost never your bottleneck unless you aren't parsing.** Measure before adopting a parallel primitive.
+
+The naming encodes one rule:
+
+> **If you can pass a closure, it runs on your thread. If you must pass a module path, it runs on another one.**
+
+Closures can't cross a `postMessage` boundary, so `parallelMap` takes a function and `parallelMapWorkers` takes a path — and `asMany`/`asManyWorkers` divide the same way.
+
+|                       | Caller's thread             | Worker threads                   |
+| --------------------- | --------------------------- | -------------------------------- |
+| A collection of items | `parallelMap`               | `parallelMapWorkers`             |
+| One large file        | `AsyncSpliterator.asMany`   | `AsyncSpliterator.asManyWorkers` |
+| Just the boundaries   | `AsyncSpliterator.segments` | (feeds either)                   |
+
+### Chaining
+
+`fromAsync` returns an `AsyncSequence` — a lazy, chainable async iterator whose core methods (`map`, `filter`, `take`, `drop`, `flatMap`, `reduce`, `toArray`, `forEach`, `some`, `every`, `find`) match the [async iterator helpers proposal][helpers] in name and semantics. No polyfill required.
+
+[helpers]: https://github.com/tc39/proposal-async-iterator-helpers
+
+```ts
+const cakes = await JSONSpliterator.fromAsync<Row>("menu.jsonl", { delimiter: "\n" })
+	.filter((row) => row.category === "Ice Cream Cake")
+	.map((row) => row.item_name)
+	.take(10)
+	.toArray()
+```
+
+Filtering happens while streaming, and `take(10)` closes the file handle instead of reading the rest. The operators fuse into a single pass rather than nesting one async generator per step, so chain depth is nearly free — doubling the operator count costs about 10%, where nesting would roughly double it. `flatMap`, `chunks`, and `parallelMap` are the exceptions, since they need inner-iterator state.
+
+The synchronous `from` returns a plain generator, which already has the same helpers natively on Node 24+.
+
 ### Parallel parsing across threads
 
 For one large file with a CPU-bound per-row transform, `AsyncSpliterator.asManyWorkers` splits the file into delimiter-aligned segments and runs a handler module across worker threads — each worker owns its own handle and reads only its segment. Results stream back to the main thread as a single async iterator, for a single-thread writer (a database, a JSONL file).

@@ -4,6 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
+import { AsyncSequence } from "./AsyncSequence.js"
 import type { CharacterSequenceInput } from "./CharacterSequence.js"
 import type { AsyncDataResource } from "./shared.js"
 import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "./Spliterator.js"
@@ -57,28 +58,32 @@ export abstract class JSONSpliterator {
 	 *
 	 * @yields Each row as an array of columns.
 	 */
-	static async *fromAsync<T = unknown>(source: AsyncDataResource, options: AsyncSpliteratorInit = {}) {
-		const decoder = new TextDecoder()
-		let rowCursor = 0
-		const spliterator = await Spliterator.from(source, options)
+	static fromAsync<T = unknown>(source: AsyncDataResource, options: AsyncSpliteratorInit = {}): AsyncSequence<T> {
+		async function* parsedRows(): AsyncGenerator<T> {
+			const decoder = new TextDecoder()
+			let rowCursor = 0
+			const spliterator = await Spliterator.fromAsync(source, options)
 
-		for await (const row of spliterator) {
-			let parsed: T
+			for await (const row of spliterator) {
+				let parsed: T
 
-			try {
-				const content = decoder.decode(row)
+				try {
+					const content = decoder.decode(row)
 
-				parsed = JSON.parse(content) as T
-			} catch (parsedError) {
-				const error = new SyntaxError(`Failed to parse JSON at row ${rowCursor}`)
-				error.cause = parsedError
+					parsed = JSON.parse(content) as T
+				} catch (parsedError) {
+					const error = new SyntaxError(`Failed to parse JSON at row ${rowCursor}`)
+					error.cause = parsedError
 
-				throw error
+					throw error
+				}
+
+				yield parsed
+
+				rowCursor++
 			}
-
-			yield parsed
-
-			rowCursor++
 		}
+
+		return AsyncSequence.from(parsedRows())
 	}
 }

@@ -4,9 +4,10 @@
  * @author Teffen Ellis, et al.
  */
 
+import { AsyncSequence } from "./AsyncSequence.js"
 import { normalizeColumnNames } from "./casing.js"
 import { CharacterSequence, type CharacterSequenceInput, Delimiters } from "./CharacterSequence.js"
-import { type AsyncChunkIterator, type AsyncDataResource } from "./shared.js"
+import type { AsyncChunkIterator, AsyncDataResource } from "./shared.js"
 import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "./Spliterator.js"
 import { zipSync } from "./zip.js"
 
@@ -295,7 +296,7 @@ export abstract class CSVSpliterator {
 	static fromAsync<T extends CSVSpliteratorEmittedRecord = CSVSpliteratorEmittedRecord>(
 		source: AsyncDataResource | AsyncChunkIterator,
 		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode: "object" }
-	): AsyncGenerator<T>
+	): AsyncSequence<T>
 
 	/**
 	 * @yields Each row as a 3-tuple [key, value, idx].
@@ -303,14 +304,14 @@ export abstract class CSVSpliterator {
 	static fromAsync<T extends RowTuple[] = RowTuple[]>(
 		source: AsyncDataResource | AsyncChunkIterator,
 		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode: "entries" }
-	): AsyncGenerator<T>
+	): AsyncSequence<T>
 	/**
 	 * @yields Each row as an array of columns.
 	 */
 	static fromAsync<T extends string[] = string[]>(
 		source: AsyncDataResource | AsyncChunkIterator,
 		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode?: "array" }
-	): AsyncGenerator<T>
+	): AsyncSequence<T>
 	/**
 	 * Given an asychronous data source, splits the data by rows(usually by newline) and then by columns (usually by
 	 * comma).
@@ -323,7 +324,7 @@ export abstract class CSVSpliterator {
 	static fromAsync(
 		source: AsyncDataResource | AsyncChunkIterator,
 		init?: CSVSpliteratorInit & AsyncSpliteratorInit
-	): AsyncGenerator<unknown>
+	): AsyncSequence<unknown>
 	/**
 	 * Given an asychronous data source, splits the data by rows (usually by newline) and then by columns (usually by
 	 * comma).
@@ -333,76 +334,82 @@ export abstract class CSVSpliterator {
 	 *
 	 * @yields Each row, shaped according to the `mode` option.
 	 */
-	static async *fromAsync(
+	static fromAsync(
 		source: AsyncDataResource | AsyncChunkIterator,
 		init: CSVSpliteratorInit & AsyncSpliteratorInit = {}
-	) {
-		const {
-			// ---
-			header = true,
-			mode = "array",
-			transformers: transformersInput = [],
-			normalizeKeys = mode !== "array",
-			columnDelimiter: columnDelimiterInput,
-			enableQuoteHandling = false,
-			// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
-			// never carries a stray `\r` on Windows-lineage sources.
-			crlf = true,
-			take = Infinity,
-			drop = 0,
-			...rowInit
-		} = init
+	): AsyncSequence<unknown> {
+		const defaultColumnDelimiter = this.ColumnDelimiter
 
-		const emitter = CSVSpliteratorEmitters[mode]
-		let transformers: CSVTransformerEntry[] = []
-		let yieldCount = 0
-		const yieldLimit = take + drop
+		async function* rowsOf(): AsyncGenerator<unknown> {
+			const {
+				// ---
+				header = true,
+				mode = "array",
+				transformers: transformersInput = [],
+				normalizeKeys = mode !== "array",
+				columnDelimiter: columnDelimiterInput,
+				enableQuoteHandling = false,
+				// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
+				// never carries a stray `\r` on Windows-lineage sources.
+				crlf = true,
+				take = Infinity,
+				drop = 0,
+				...rowInit
+			} = init
 
-		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? this.ColumnDelimiter)
+			const emitter = CSVSpliteratorEmitters[mode]
+			let transformers: CSVTransformerEntry[] = []
+			let yieldCount = 0
+			const yieldLimit = take + drop
 
-		const decoder = new TextDecoder()
+			const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? defaultColumnDelimiter)
 
-		// Quote handling applies at both levels: rows must not split on newlines inside quotes,
-		// columns must not split on quoted column delimiters.
-		const rows = await Spliterator.from(source, { ...rowInit, crlf, enableQuoteHandling })
+			const decoder = new TextDecoder()
 
-		if (header) {
-			const result = await rows.next()
+			// Quote handling applies at both levels: rows must not split on newlines inside quotes,
+			// columns must not split on quoted column delimiters.
+			const rows = await Spliterator.fromAsync(source, { ...rowInit, crlf, enableQuoteHandling })
 
-			if (result.done) return
+			if (header) {
+				const result = await rows.next()
 
-			const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling)
-			const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
+				if (result.done) return
 
-			// oxlint-disable-next-line unicorn/prefer-ternary
-			if (Array.isArray(transformersInput)) {
-				transformers = Array.from(zipSync(headers, transformersInput), ([columnName, transformer]) => [
-					columnName!,
-					transformer ?? identity,
-				])
-			} else {
-				transformers = headers.map((columnName) => {
-					const transform = (transformersInput as CSVTransformerRecord)[columnName] || identity
+				const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling)
+				const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
 
-					return [columnName, transform]
-				})
+				// oxlint-disable-next-line unicorn/prefer-ternary
+				if (Array.isArray(transformersInput)) {
+					transformers = Array.from(zipSync(headers, transformersInput), ([columnName, transformer]) => [
+						columnName!,
+						transformer ?? identity,
+					])
+				} else {
+					transformers = headers.map((columnName) => {
+						const transform = (transformersInput as CSVTransformerRecord)[columnName] || identity
+
+						return [columnName, transform]
+					})
+				}
 			}
-		}
 
-		for await (const row of rows) {
-			if (yieldCount < drop) {
+			for await (const row of rows) {
+				if (yieldCount < drop) {
+					yieldCount++
+
+					continue
+				}
+
+				if (yieldCount >= yieldLimit) break
+
+				const columns = splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling)
+
+				yield emitter ? emitter(columns, transformers) : columns
+
 				yieldCount++
-
-				continue
 			}
-
-			if (yieldCount >= yieldLimit) break
-
-			const columns = splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling)
-
-			yield emitter ? emitter(columns, transformers) : columns
-
-			yieldCount++
 		}
+
+		return AsyncSequence.from(rowsOf())
 	}
 }
