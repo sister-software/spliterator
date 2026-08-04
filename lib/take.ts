@@ -76,11 +76,44 @@ export async function* asyncParallelIterator<T, C extends (entry: T) => Promise<
 }
 
 /**
+ * Given an iterable, returns an array of arrays of the specified size.
+ *
+ * This is useful for batching asynchronous operations.
+ *
+ * @param collection The collection to batch.
+ * @param batchSize The size of each batch.
+ *
+ * @returns An iterable of arrays of the specified size.
+ * @see {@linkcode takeAsync} for the asynchronous version.
+ */
+export function* take<T>(collection: Iterable<T>, batchSize: number): Iterable<T[]> {
+	const batch: T[] = []
+
+	for (const item of collection) {
+		batch.push(item)
+
+		if (batch.length === batchSize) {
+			yield batch
+
+			batch.length = 0
+		}
+	}
+
+	if (batch.length) {
+		yield batch
+	}
+}
+
+/**
  * Given an async iterable collection, returns an async iterable, yielding batches of items.
  *
  * This is useful for emitting asynchronous items in batches, such as when processing a stream of data.
  *
+ * @param collection The async iterable collection to batch.
+ * @param batchSize The size of each batch.
+ *
  * @yields Each batch of items.
+ * @see {@linkcode take} for the synchronous version.
  */
 export async function* takeAsync<T>(collection: AsyncIterable<T>, batchSize: number): AsyncIterable<T[]> {
 	let buffer: T[] = []

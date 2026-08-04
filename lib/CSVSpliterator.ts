@@ -6,8 +6,9 @@
 
 import { normalizeColumnNames } from "./casing.js"
 import { CharacterSequence, type CharacterSequenceInput, Delimiters } from "./CharacterSequence.js"
-import { type AsyncChunkIterator, type AsyncDataResource, zipSync } from "./shared.js"
+import { type AsyncChunkIterator, type AsyncDataResource } from "./shared.js"
 import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "./Spliterator.js"
+import { zipSync } from "./zip.js"
 
 /**
  * An output mode for the CSV generator.
