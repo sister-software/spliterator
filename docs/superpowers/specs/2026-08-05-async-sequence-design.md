@@ -301,10 +301,19 @@ implementation moves name only, not behaviour, so the existing suite is the proo
 `test/asMany.test.ts` and the existing spliterator suites are unchanged and act as the
 no-regression baseline for `fromAsync`'s new return type.
 
+## Resolved: `parallelMap` yields in completion order
+
+No known consumer requires input order. `ingest-wof.ts` is order-**indifferent**, not
+order-dependent: it inserts by `feature.id` and returns counts, and since the iterator yields only
+the callback's return value, the originating file path is already gone by the time the loop sees it.
+
+Input order would cost head-of-line blocking — completed results held until every earlier item
+finishes, so one slow read stalls all later results and the buffer grows to the concurrency window.
+Completion order also matches `parallelMapWorkers` and the segment-parsing design, which lists output
+ordering as an explicit non-goal. A caller who needs ordering returns `[index, value]` and sorts,
+which keeps the buffering cost visible to whoever is paying it.
+
 ## Open questions
 
-- Should `parallelMap` preserve input order, or keep `asyncParallelIterator`'s completion order?
-  Completion order is what `ingest-wof.ts` relies on today and is cheaper. Leaning: keep completion
-  order, document it loudly, revisit if a caller needs ordering.
 - Does `chunks` also want a sync free-function form for parity with the deleted `take`? Leaning no
   until something asks.
