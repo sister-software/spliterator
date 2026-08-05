@@ -191,6 +191,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	readonly #takeIndices: readonly number[]
 
 	#upstream: AsyncIterator<unknown> | null = null
+	#syncUpstream: Iterator<unknown> | null = null
 	#counters: number[] | null = null
 	#budgets: number[] | null = null
 	#done = false
@@ -217,11 +218,26 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 		return source instanceof AsyncSequence ? source : new AsyncSequence<T>(source)
 	}
 
-	async #openUpstream(): Promise<AsyncIterator<unknown>> {
+	/**
+	 * Resolve the source once, keeping a synchronous iterator as such.
+	 *
+	 * Adapting a sync iterator to the async protocol would allocate a promise per pulled value for an iterator that never
+	 * needs one, which is most of the cost of parsing an in-memory source: 0.733ms against a 0.540ms floor over a 68KB
+	 * file.
+	 */
+	async #openUpstream(): Promise<AsyncIterator<unknown> | Iterator<unknown>> {
 		if (this.#upstream) return this.#upstream
+
+		if (this.#syncUpstream) return this.#syncUpstream
 
 		const source = this.#source
 		const resolved = typeof source === "function" ? await source() : source
+
+		if (!(Symbol.asyncIterator in resolved)) {
+			this.#syncUpstream = resolved[Symbol.iterator]()
+
+			return this.#syncUpstream
+		}
 
 		this.#upstream = toAsyncIterator(resolved)
 
@@ -494,10 +510,12 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 		}
 
 		const upstream = await this.#openUpstream()
+		const isSync = upstream === this.#syncUpstream
 
 		try {
 			outer: for (;;) {
-				const result = await upstream.next()
+				const pulled = upstream.next()
+				const result = isSync ? (pulled as IteratorResult<unknown>) : await pulled
 
 				if (result.done) {
 					this.#done = true
@@ -574,9 +592,12 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 		// paths like `take(0)`. A thunk source that was never invoked has nothing open to release, and invoking it here
 		// would open a file purely to close it.
 		const source = this.#source
-		const upstream = this.#upstream ?? (typeof source === "function" ? null : toAsyncIterator(source))
+
+		const upstream =
+			this.#upstream ?? this.#syncUpstream ?? (typeof source === "function" ? null : toAsyncIterator(source))
 
 		this.#upstream = null
+		this.#syncUpstream = null
 
 		await upstream?.return?.()
 

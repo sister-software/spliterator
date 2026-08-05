@@ -4,6 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
+import { type AdaptiveSourceInit, openDelimitedRows } from "./adaptive-source.js"
 import { AsyncSequence } from "./AsyncSequence.js"
 import { normalizeColumnNames } from "./casing.js"
 import { CharacterSequence, type CharacterSequenceInput, Delimiters } from "./CharacterSequence.js"
@@ -336,7 +337,7 @@ export abstract class CSVSpliterator {
 	 */
 	static fromAsync(
 		source: AsyncDataResource | AsyncChunkIterator,
-		init: CSVSpliteratorInit & AsyncSpliteratorInit = {}
+		init: CSVSpliteratorInit & AdaptiveSourceInit = {}
 	): AsyncSequence<unknown> {
 		const defaultColumnDelimiter = this.ColumnDelimiter
 
@@ -364,13 +365,16 @@ export abstract class CSVSpliterator {
 		// pull and the ops only run against what it returns.
 		let transformers: CSVTransformerEntry[] = []
 
-		const openRows = async (): Promise<AsyncIterable<Uint8Array>> => {
+		const openRows = async (): Promise<AsyncIterable<Uint8Array> | Iterable<Uint8Array>> => {
 			// Quote handling applies at both levels: rows must not split on newlines inside quotes,
 			// columns must not split on quoted column delimiters.
-			const rows = await Spliterator.fromAsync(source, { ...rowInit, crlf, enableQuoteHandling })
+			const rows = await openDelimitedRows(source, { ...rowInit, crlf, enableQuoteHandling })
 
 			if (header) {
-				const result = await rows.next()
+				// Both engines return `this` from their iterator method, so consuming the header row here advances the very
+				// cursor the row ops will go on to read — returning `rows` afterwards resumes at row two, not row one.
+				const iterator = Symbol.asyncIterator in rows ? rows[Symbol.asyncIterator]() : rows[Symbol.iterator]()
+				const result = await iterator.next()
 
 				if (result.done) return rows
 

@@ -4,6 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
+export * from "./lib/adaptive-source.js"
 export * from "./lib/AsyncSequence.js"
 export * from "./lib/BufferController.js"
 export * from "./lib/casing.js"

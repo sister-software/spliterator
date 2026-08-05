@@ -196,6 +196,19 @@ Filtering happens while streaming, and `take(10)` closes the file handle instead
 
 The synchronous `from` returns a plain generator, which already has the same helpers natively on Node 24+.
 
+### Small sources are read whole
+
+Opening a file handle and standing up a read stream costs about 100µs, which is most of the work for a small file. So `fromAsync` reads sources of 128 KiB or less into memory and parses them synchronously — measured ~1.85× faster at 635 B and ~1.4× at 125 KiB. Output is identical either way.
+
+The threshold is deliberately small. Above ~256 KiB the advantage stops being measurable, while the memory cost keeps growing — a 1 GiB file costs ~105 MB resident streamed against ~1.1 GB read whole. Raising it buys nothing and spends memory linearly.
+
+```ts
+// Force streaming, whatever the size — when a bounded footprint is the point.
+JSONSpliterator.fromAsync("data.jsonl", { delimiter: "\n", bulkThreshold: 0 })
+```
+
+Sources with no knowable length (a pipe, a `ReadableStream`) get an end-of-input test instead: if the first chunk read is also the last, the whole input is already in memory and is parsed directly. Otherwise it streams as normal.
+
 ### Parallel parsing across threads
 
 For one large file with a CPU-bound per-row transform, `AsyncSpliterator.asManyWorkers` splits the file into delimiter-aligned segments and runs a handler module across worker threads — each worker owns its own handle and reads only its segment. Results stream back to the main thread as a single async iterator, for a single-thread writer (a database, a JSONL file).

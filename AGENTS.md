@@ -72,6 +72,17 @@ A lazy, chainable async iterator returned by every `fromAsync`. Core methods (`m
 - **Single-shot**, matching the proposal's iterators.
 - Wrapping costs ~1.9× a bare async generator. On parsed rows that's 3–8%; on raw `Uint8Array` ranges it's most of the cost, so iterate `AsyncSpliterator` directly for scan-only work.
 
+### Adaptive bulk parsing (`lib/adaptive-source.ts`)
+
+Every `fromAsync` opens its source through `openDelimitedRows`, which reads sources at or below `bulkThreshold` (default **128 KiB**) whole and parses them with the **synchronous** engine, streaming everything else. Returns a sync iterable in the first case and an async one in the second; `AsyncSequence` accepts either.
+
+- **The win is fixed setup cost, not throughput.** Opening a handle and standing up a read stream is ~100µs, which dominates a small file and vanishes in a large one. Measured end-to-end, min of 200, two independent sweeps: ~1.85× at 635B, ~1.45× at 6.5KB, ~1.4× at 125KiB, and **nothing reliable at 253KiB or above** — the two sweeps disagreed on the sign there. That is why the default is 128 KiB and not larger; raising it trades memory linearly for a difference that no longer measures.
+- **A raw synchronous parse looks far better than this path can deliver** (~1.6× even at 1GiB). The rest is eaten by the per-row cost of `AsyncSequence`, which both paths pay. Don't re-derive the raw number and conclude the threshold should be raised.
+- **The bulk path awaits `CharacterSequence.whenReady()`.** The sync engine normally misses the WASM scanner because it finishes before the module loads; reaching it through an async path is the one place that can be fixed, worth ~26% on a large source.
+- **Unsized sources use an end-of-input test, not a size test.** Pull one chunk; if the stream is already exhausted the whole input is in hand. Otherwise the pulled chunks are put back in front via a re-headed iterable — `test/adaptive-source.test.ts` covers 1/7/64/1024-byte chunkings because losing a chunk here would be silent.
+- **`bulkThreshold: 0` forces streaming.** Use it when a bounded footprint is the point.
+- Both engines must agree exactly; the parity tests assert the same fixture through both.
+
 ### Choosing a parallel primitive
 
 Keyed off **per-row work**, not file size:

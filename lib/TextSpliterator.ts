@@ -4,6 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
+import { type AdaptiveSourceInit, openDelimitedRows } from "./adaptive-source.js"
 import { AsyncSequence } from "./AsyncSequence.js"
 import type { CharacterSequenceInput } from "./CharacterSequence.js"
 import type { AsyncDataResource } from "./shared.js"
@@ -83,13 +84,13 @@ export abstract class TextSpliterator {
 	 */
 	static fromAsync(
 		source: AsyncDataResource,
-		{ encoding, fatal, ignoreBOM, ...options }: TextSpliteratorInit & AsyncSpliteratorInit = {}
+		{ encoding, fatal, ignoreBOM, ...options }: TextSpliteratorInit & AdaptiveSourceInit = {}
 	): AsyncSequence<string> {
 		const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
 
 		// Decoding is an op on the sequence, not a generator wrapped inside one. A wrapping generator adds an async frame
 		// per row on top of the sequence's own, which measured 297ms against 279ms over 500k rows.
-		return AsyncSequence.from<Uint8Array>(() => Spliterator.fromAsync(source, options)).map((row, rowCursor) => {
+		return AsyncSequence.from<Uint8Array>(() => openDelimitedRows(source, options)).map((row, rowCursor) => {
 			try {
 				return decoder.decode(row)
 			} catch (parsedError) {

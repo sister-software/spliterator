@@ -4,6 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
+import { type AdaptiveSourceInit, openDelimitedRows } from "./adaptive-source.js"
 import { AsyncSequence } from "./AsyncSequence.js"
 import type { CharacterSequenceInput } from "./CharacterSequence.js"
 import type { AsyncDataResource } from "./shared.js"
@@ -67,13 +68,13 @@ export abstract class JSONSpliterator {
 	 *
 	 * @yields Each row as an array of columns.
 	 */
-	static fromAsync<T = unknown>(source: AsyncDataResource, options: AsyncSpliteratorInit = {}): AsyncSequence<T> {
+	static fromAsync<T = unknown>(source: AsyncDataResource, options: AdaptiveSourceInit = {}): AsyncSequence<T> {
 		const decoder = new TextDecoder()
 
 		// Parsing is an op on the sequence, not a generator wrapped inside one. An allocating row body makes the extra
 		// async frame a wrapping generator adds disproportionately expensive: 1460ms against 1278ms over 500k rows, where
 		// the same layer costs a third as much when the body only decodes.
-		return AsyncSequence.from<Uint8Array>(() => Spliterator.fromAsync(source, options)).map((row, rowCursor) => {
+		return AsyncSequence.from<Uint8Array>(() => openDelimitedRows(source, options)).map((row, rowCursor) => {
 			try {
 				return JSON.parse(decoder.decode(row)) as T
 			} catch (parsedError) {
