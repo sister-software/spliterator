@@ -11,8 +11,9 @@ import type { AsyncDataResource } from "./shared.js"
 import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "./Spliterator.js"
 
 /**
- * Stream a delimited byte source and `JSON.parse` each row — one parsed value per line, for JSONL / NDJSON. Set the row
- * delimiter via `options.delimiter` (there is no implicit default); `skipEmpty` drops blank rows.
+ * Stream a delimited byte source and `JSON.parse` each row — one parsed value per line, for JSONL / NDJSON. The row
+ * delimiter defaults to a line feed; override it via `options.delimiter`. `skipEmpty` (on by default) drops blank
+ * rows.
  *
  * **Performance caveat — this path is `JSON.parse`-bound, not scan-bound.** Measured over 500k rows (88MB, ~177B per
  * row, Node 26): the delimiter scan is ~140ms and decoding ~46ms, while `JSON.parse` and the per-row async machinery

@@ -22,6 +22,8 @@ const sharedEncoder = new TextEncoder()
 export interface SpliteratorInit {
 	/**
 	 * The character to delimit by. Typically a newline or comma.
+	 *
+	 * @default Delimiters.LineFeed
 	 */
 	delimiter?: CharacterSequenceInput
 
@@ -35,9 +37,9 @@ export interface SpliteratorInit {
 	position?: number
 
 	/**
-	 * Whether to emit repeated delimiters as empty buffers.
+	 * Whether to drop empty slices, so a run of repeated delimiters yields nothing between them.
 	 *
-	 * Setting this to `false` matches the behavior of `String.prototype.split`.
+	 * Setting this to `false` emits those empties and matches the behavior of `String.prototype.split`.
 	 *
 	 * @default true
 	 */

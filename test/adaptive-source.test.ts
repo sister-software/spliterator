@@ -211,3 +211,18 @@ describe("openDelimitedRows", () => {
 		expect(Symbol.asyncIterator in rows).toBe(true)
 	})
 })
+
+describe("documented defaults", () => {
+	test("the row delimiter defaults to a line feed", async () => {
+		const rows = await TextSpliterator.fromAsync(chunkedSource(new TextEncoder().encode("a,b\nc,d"), 1024)).toArray()
+
+		expect(rows).toEqual(["a,b", "c,d"])
+	})
+
+	test("skipEmpty defaults to dropping empties, and false matches String.prototype.split", async () => {
+		const source = () => chunkedSource(new TextEncoder().encode("a\n\nb"), 1024)
+
+		expect(await TextSpliterator.fromAsync(source()).toArray()).toEqual(["a", "b"])
+		expect(await TextSpliterator.fromAsync(source(), { skipEmpty: false }).toArray()).toEqual("a\n\nb".split("\n"))
+	})
+})
