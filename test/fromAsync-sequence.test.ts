@@ -29,6 +29,15 @@ test("fromAsync returns a chainable sequence synchronously", () => {
 	expect(typeof sequence.filter).toBe("function")
 })
 
+test("fromAsync opens nothing until the sequence is iterated", async () => {
+	const missing = fixturesDirectory("does-not-exist.jsonl").toString()
+
+	// Constructing and chaining must not touch the filesystem — the failure surfaces on the first pull.
+	const sequence = JSONSpliterator.fromAsync(missing, { delimiter: Delimiters.LineFeed }).map((row) => row)
+
+	await expect(sequence.toArray()).rejects.toThrow(/Cannot read from the provided source/)
+})
+
 test("JSONSpliterator: filter and map stream without materializing the file", async () => {
 	const cakes = await JSONSpliterator.fromAsync<CarvelRow>(jsonlPath, {
 		delimiter: Delimiters.LineFeed,

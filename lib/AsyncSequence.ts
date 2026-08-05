@@ -27,6 +27,18 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
 	return value !== null && typeof value === "object" && typeof (value as PromiseLike<unknown>).then === "function"
 }
 
+/**
+ * What a sequence can be built over.
+ *
+ * The thunk form defers construction until the first pull, which is what lets a `fromAsync` whose underlying open is
+ * asynchronous still return a sequence synchronously — the caller chains immediately and no file is opened until
+ * something iterates.
+ */
+export type SequenceSource<T> =
+	| AsyncIterable<T>
+	| Iterable<T>
+	| (() => AsyncIterable<T> | Iterable<T> | PromiseLike<AsyncIterable<T> | Iterable<T>>)
+
 function toAsyncIterator<T>(source: AsyncIterable<T> | Iterable<T>): AsyncIterator<T> {
 	if (Symbol.asyncIterator in source) return source[Symbol.asyncIterator]()
 
@@ -170,7 +182,7 @@ export interface ParallelMapSequenceOptions {
  * Single-shot, like the iterators the proposal specifies: iterating consumes the source.
  */
 export class AsyncSequence<T> implements AsyncIterableIterator<T> {
-	readonly #source: AsyncIterable<unknown> | Iterable<unknown>
+	readonly #source: SequenceSource<unknown>
 	readonly #ops: readonly Op[]
 
 	/**
@@ -183,7 +195,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	#budgets: number[] | null = null
 	#done = false
 
-	constructor(source: AsyncIterable<unknown> | Iterable<unknown>, ops: readonly Op[] = []) {
+	constructor(source: SequenceSource<unknown>, ops: readonly Op[] = []) {
 		this.#source = source
 		this.#ops = ops
 
@@ -201,8 +213,19 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	/**
 	 * Wrap any iterable or async iterable as a chainable sequence.
 	 */
-	static from<T>(source: AsyncIterable<T> | Iterable<T>): AsyncSequence<T> {
+	static from<T>(source: SequenceSource<T>): AsyncSequence<T> {
 		return source instanceof AsyncSequence ? source : new AsyncSequence<T>(source)
+	}
+
+	async #openUpstream(): Promise<AsyncIterator<unknown>> {
+		if (this.#upstream) return this.#upstream
+
+		const source = this.#source
+		const resolved = typeof source === "function" ? await source() : source
+
+		this.#upstream = toAsyncIterator(resolved)
+
+		return this.#upstream
 	}
 
 	#derive<U>(op: Op): AsyncSequence<U> {
@@ -470,9 +493,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 			if (budgets[index]! <= 0) return this.#finish()
 		}
 
-		this.#upstream ??= toAsyncIterator(this.#source)
-
-		const upstream = this.#upstream
+		const upstream = await this.#openUpstream()
 
 		try {
 			outer: for (;;) {
@@ -549,14 +570,15 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 
 		this.#done = true
 
-		// The source may hold a resource opened before this sequence existed — `Spliterator.fromAsync` has the file handle
-		// open by the time it is wrapped — so closing has to reach it even along paths that never pulled a value, such as
-		// `take(0)`.
-		const upstream = this.#upstream ?? toAsyncIterator(this.#source)
+		// An eager source may already hold a resource that no pull ever touched, so closing has to reach it even along
+		// paths like `take(0)`. A thunk source that was never invoked has nothing open to release, and invoking it here
+		// would open a file purely to close it.
+		const source = this.#source
+		const upstream = this.#upstream ?? (typeof source === "function" ? null : toAsyncIterator(source))
 
 		this.#upstream = null
 
-		await upstream.return?.()
+		await upstream?.return?.()
 
 		return { value: undefined, done: true }
 	}

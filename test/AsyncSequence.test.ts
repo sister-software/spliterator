@@ -116,6 +116,82 @@ describe("core semantics", () => {
 	})
 })
 
+describe("deferred sources", () => {
+	test("wraps a thunk returning an async iterable", async () => {
+		expect(await AsyncSequence.from(() => range(3)).toArray()).toEqual([0, 1, 2])
+	})
+
+	test("wraps a thunk returning a promise", async () => {
+		expect(await AsyncSequence.from(async () => range(3)).toArray()).toEqual([0, 1, 2])
+	})
+
+	test("wraps a thunk returning a sync iterable", async () => {
+		expect(await AsyncSequence.from(() => [1, 2, 3]).toArray()).toEqual([1, 2, 3])
+	})
+
+	test("the thunk is not invoked until the first pull", async () => {
+		let opened = 0
+
+		const sequence = AsyncSequence.from(() => {
+			opened++
+
+			return range(3)
+		})
+			.map((value) => value * 2)
+			.filter(Boolean)
+
+		expect(opened).toBe(0)
+
+		await sequence.toArray()
+
+		expect(opened).toBe(1)
+	})
+
+	test("take(0) never invokes the thunk", async () => {
+		let opened = 0
+
+		const result = await AsyncSequence.from(() => {
+			opened++
+
+			return range(1000)
+		})
+			.take(0)
+			.toArray()
+
+		expect(result).toEqual([])
+		expect(opened).toBe(0)
+	})
+
+	test("the thunk is invoked once across a whole iteration", async () => {
+		let opened = 0
+
+		await AsyncSequence.from(() => {
+			opened++
+
+			return range(50)
+		}).toArray()
+
+		expect(opened).toBe(1)
+	})
+
+	test("a rejecting thunk rejects the sequence", async () => {
+		await expect(AsyncSequence.from(() => Promise.reject(new Error("cannot open"))).toArray()).rejects.toThrow(
+			"cannot open"
+		)
+	})
+
+	test("early exit closes an opened deferred source", async () => {
+		const { iterable, state } = spySource(1000)
+
+		const result = await AsyncSequence.from(() => iterable)
+			.take(2)
+			.toArray()
+
+		expect(result).toEqual([0, 1])
+		expect(state.closed).toBe(true)
+	})
+})
+
 describe("fusion is observably equivalent to nesting", () => {
 	async function* nestedMap<T, U>(source: AsyncIterable<T>, fn: (value: T, i: number) => U) {
 		let i = 0

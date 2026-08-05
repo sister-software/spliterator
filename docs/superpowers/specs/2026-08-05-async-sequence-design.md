@@ -219,12 +219,12 @@ The guidance exists today but is scattered across one function's JSDoc (`lib/par
 and `AGENTS.md`, so nobody meets it at decision time. Callers ask "how big is my file?" The question
 that actually predicts the answer is **how much work happens per row**:
 
-| per-row work                                     | what dominates | reach for                                                                                     |
-| ------------------------------------------------ | -------------- | --------------------------------------------------------------------------------------------- |
-| none — counting, segmenting, pulling two fields  | the scan       | `Spliterator` raw ranges; WASM SIMD earns its keep (~5–6 GB/s vs ~600 MB/s JS BMH)            |
-| ~1–3 µs — `JSON.parse`, CSV→object, normalize    | the parse      | plain sequential `fromAsync`. Threads **lose** here (0.3–0.9×); JSONL is ~0.75× of `readline` |
-| ms-scale — inference, geocode, crypto, image ops | your handler   | `parallelMapWorkers` / `asManyWorkers`                                                        |
-| I/O-bound — `readFile` fan-out, network          | latency        | `parallelMap` (main thread). Concurrency peaks ~2–3, then **degrades**                        |
+| per-row work                                     | what dominates | reach for                                                                                    |
+| ------------------------------------------------ | -------------- | -------------------------------------------------------------------------------------------- |
+| none — counting, segmenting, pulling two fields  | the scan       | `Spliterator` raw ranges; WASM SIMD earns its keep (~5–6 GB/s vs ~600 MB/s JS BMH)           |
+| ~1–3 µs — `JSON.parse`, CSV→object, normalize    | the parse      | plain sequential `fromAsync`. Threads **lose** here (0.3–0.9×); JSONL is ~0.5× of `readline` |
+| ms-scale — inference, geocode, crypto, image ops | your handler   | `parallelMapWorkers` / `asManyWorkers`                                                       |
+| I/O-bound — `readFile` fan-out, network          | latency        | `parallelMap` (main thread). Concurrency peaks ~2–3, then **degrades**                       |
 
 The line worth stating once, loudly: **the scan is almost never the bottleneck unless you aren't
 parsing.** The library currently lets people discover that the expensive way.

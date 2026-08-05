@@ -13,13 +13,22 @@ import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "./
  * Stream a delimited byte source and `JSON.parse` each row — one parsed value per line, for JSONL / NDJSON. Set the row
  * delimiter via `options.delimiter` (there is no implicit default); `skipEmpty` drops blank rows.
  *
- * **Performance caveat — this path is `JSON.parse`-bound, not scan-bound.** The underlying SIMD newline scan is
- * genuinely fast (scan-only measures ~1.75× a JS line-splitter on large files), but a full `JSON.parse` per row dwarfs
- * the scan, so end-to-end this typically runs **~0.75× of Node's `readline` + `JSON.parse` — a net loss** — because the
- * per-row decode + parse dominates and `readline`'s line emission is already well-tuned. Use this for API convenience,
- * or when streaming to bound memory; do NOT swap a working `readline` loop to it expecting a speedup on parse-heavy
- * JSONL. The scan advantage only shows when you _don't_ fully parse every row (segmentation, counting, extracting a
- * couple of fields) — use {@link Spliterator} (raw byte ranges) or {@link TextSpliterator} for those. When unsure,
+ * **Performance caveat — this path is `JSON.parse`-bound, not scan-bound.** Measured over 500k rows (88MB, ~177B per
+ * row, Node 26): the delimiter scan is ~140ms and decoding ~46ms, while `JSON.parse` and the per-row async machinery
+ * account for the rest of ~1280ms. Against Node's `readline` + `JSON.parse` at ~630ms, this runs **roughly half the
+ * speed — a net loss.** Use it for API convenience, or when streaming to bound memory; do NOT swap a working `readline`
+ * loop to it expecting a speedup on parse-heavy JSONL.
+ *
+ * The scan advantage only shows when you _don't_ fully parse every row. Filtering on the raw text and parsing only what
+ * survives is the shape that wins — parsing 20% of rows measured ~2.5× faster than parsing all of them:
+ *
+ * ```ts
+ * TextSpliterator.fromAsync(path, { delimiter: "\n" })
+ * 	.filter((line) => line.includes('"category":"Novelty"'))
+ * 	.map((line) => JSON.parse(line))
+ * ```
+ *
+ * For segmentation or counting, use {@link Spliterator} (raw byte ranges) or {@link TextSpliterator}. When unsure,
  * benchmark.
  */
 export abstract class JSONSpliterator {
@@ -59,31 +68,20 @@ export abstract class JSONSpliterator {
 	 * @yields Each row as an array of columns.
 	 */
 	static fromAsync<T = unknown>(source: AsyncDataResource, options: AsyncSpliteratorInit = {}): AsyncSequence<T> {
-		async function* parsedRows(): AsyncGenerator<T> {
-			const decoder = new TextDecoder()
-			let rowCursor = 0
-			const spliterator = await Spliterator.fromAsync(source, options)
+		const decoder = new TextDecoder()
 
-			for await (const row of spliterator) {
-				let parsed: T
+		// Parsing is an op on the sequence, not a generator wrapped inside one. An allocating row body makes the extra
+		// async frame a wrapping generator adds disproportionately expensive: 1460ms against 1278ms over 500k rows, where
+		// the same layer costs a third as much when the body only decodes.
+		return AsyncSequence.from<Uint8Array>(() => Spliterator.fromAsync(source, options)).map((row, rowCursor) => {
+			try {
+				return JSON.parse(decoder.decode(row)) as T
+			} catch (parsedError) {
+				const error = new SyntaxError(`Failed to parse JSON at row ${rowCursor}`)
+				error.cause = parsedError
 
-				try {
-					const content = decoder.decode(row)
-
-					parsed = JSON.parse(content) as T
-				} catch (parsedError) {
-					const error = new SyntaxError(`Failed to parse JSON at row ${rowCursor}`)
-					error.cause = parsedError
-
-					throw error
-				}
-
-				yield parsed
-
-				rowCursor++
+				throw error
 			}
-		}
-
-		return AsyncSequence.from(parsedRows())
+		})
 	}
 }

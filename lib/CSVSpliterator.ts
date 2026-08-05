@@ -340,32 +340,31 @@ export abstract class CSVSpliterator {
 	): AsyncSequence<unknown> {
 		const defaultColumnDelimiter = this.ColumnDelimiter
 
-		async function* rowsOf(): AsyncGenerator<unknown> {
-			const {
-				// ---
-				header = true,
-				mode = "array",
-				transformers: transformersInput = [],
-				normalizeKeys = mode !== "array",
-				columnDelimiter: columnDelimiterInput,
-				enableQuoteHandling = false,
-				// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
-				// never carries a stray `\r` on Windows-lineage sources.
-				crlf = true,
-				take = Infinity,
-				drop = 0,
-				...rowInit
-			} = init
+		const {
+			// ---
+			header = true,
+			mode = "array",
+			transformers: transformersInput = [],
+			normalizeKeys = mode !== "array",
+			columnDelimiter: columnDelimiterInput,
+			enableQuoteHandling = false,
+			// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
+			// never carries a stray `\r` on Windows-lineage sources.
+			crlf = true,
+			take = Infinity,
+			drop = 0,
+			...rowInit
+		} = init
 
-			const emitter = CSVSpliteratorEmitters[mode]
-			let transformers: CSVTransformerEntry[] = []
-			let yieldCount = 0
-			const yieldLimit = take + drop
+		const emitter = CSVSpliteratorEmitters[mode]
+		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? defaultColumnDelimiter)
+		const decoder = new TextDecoder()
 
-			const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? defaultColumnDelimiter)
+		// Populated by the header pass below before the first row op runs, since the source thunk resolves on the first
+		// pull and the ops only run against what it returns.
+		let transformers: CSVTransformerEntry[] = []
 
-			const decoder = new TextDecoder()
-
+		const openRows = async (): Promise<AsyncIterable<Uint8Array>> => {
 			// Quote handling applies at both levels: rows must not split on newlines inside quotes,
 			// columns must not split on quoted column delimiters.
 			const rows = await Spliterator.fromAsync(source, { ...rowInit, crlf, enableQuoteHandling })
@@ -373,7 +372,7 @@ export abstract class CSVSpliterator {
 			if (header) {
 				const result = await rows.next()
 
-				if (result.done) return
+				if (result.done) return rows
 
 				const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling)
 				const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
@@ -393,23 +392,23 @@ export abstract class CSVSpliterator {
 				}
 			}
 
-			for await (const row of rows) {
-				if (yieldCount < drop) {
-					yieldCount++
-
-					continue
-				}
-
-				if (yieldCount >= yieldLimit) break
-
-				const columns = splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling)
-
-				yield emitter ? emitter(columns, transformers) : columns
-
-				yieldCount++
-			}
+			return rows
 		}
 
-		return AsyncSequence.from(rowsOf())
+		let sequence: AsyncSequence<unknown> = AsyncSequence.from<Uint8Array>(openRows).map((row) => {
+			const columns = splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling)
+
+			return emitter ? emitter(columns, transformers) : columns
+		})
+
+		if (drop > 0) {
+			sequence = sequence.drop(drop)
+		}
+
+		if (Number.isFinite(take)) {
+			sequence = sequence.take(take)
+		}
+
+		return sequence
 	}
 }
