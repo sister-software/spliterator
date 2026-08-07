@@ -57,6 +57,9 @@ Spliterator is an ESM TypeScript library (`"type": "module"`) for streaming deli
 - **`TextSpliterator`** — Wraps `Spliterator`/`AsyncSpliterator`, decodes each yielded `Uint8Array` to a string via `TextDecoder`.
 - **`JSONSpliterator`** — Wraps `TextSpliterator`-style logic, additionally calls `JSON.parse` on each line.
 - **`CSVSpliterator`** — Two-level splitting: first splits rows (newline), then splits each row into columns (comma). Supports `mode: "array" | "object" | "entries"`, header normalization, and per-column transformers.
+- **`XLSXSpliterator`** — Reads/writes `.xlsx` workbooks via the **optional peer deps** `read-excel-file` / `write-excel-file` (dynamically imported; a missing module throws an error naming the package). Not a `CSVSpliterator` subclass — XLSX is a ZIP of XML, so there is no byte-delimiter machinery to inherit, and **both directions materialize the whole workbook** (no bounded-memory promise; prefer CSV when that matters). `fromAsync` mirrors CSV's option surface plus `sheet`, but cells arrive **typed** (`string | number | boolean | Date | null`); `from()` always throws (vendor is Promise-only). `write(rows)` accepts any (async) iterable of arrays or records (record keys become the header) and returns a lazy `toFile`/`toBuffer`/`toStream` handle. See `docs/superpowers/specs/2026-08-07-xlsx-support-design.md`.
+
+The `mode` emitters and transformer-binding shared by `CSVSpliterator` and `XLSXSpliterator` live in `lib/row-emitters.ts`, generalized over the cell type (CSV binds `string` with `""` for missing columns; XLSX binds typed cells with `null`).
 
 All high-level classes are abstract static-only (instantiation throws `TypeError`). They expose `from(syncSource)` and `fromAsync(asyncSource)` class methods. `from` returns a plain `Generator` (Node 24+ ships `Iterator.prototype` helpers natively); `fromAsync` returns an **`AsyncSequence`**.
 

@@ -8,24 +8,33 @@ import { type AdaptiveSourceInit, openDelimitedRows } from "./adaptive-source.js
 import { AsyncSequence } from "./AsyncSequence.js"
 import { normalizeColumnNames } from "./casing.js"
 import { CharacterSequence, type CharacterSequenceInput, Delimiters } from "./CharacterSequence.js"
+import {
+	bindTransformers,
+	createRowEmitters,
+	type RowEmitter,
+	type RowOutputMode,
+	type RowTransformer,
+	type RowTransformerEntry,
+	type RowTransformerRecord,
+	type RowTuple,
+} from "./row-emitters.js"
 import type { AsyncChunkIterator, AsyncDataResource } from "./shared.js"
 import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "./Spliterator.js"
-import { zipSync } from "./zip.js"
+
+export type { RowTuple } from "./row-emitters.js"
 
 /**
  * An output mode for the CSV generator.
  */
-export type CSVOutputMode = "array" | "object" | "entries"
+export type CSVOutputMode = RowOutputMode
 
-export type CSVTransformer<T = unknown> = (value: string) => T
+export type CSVTransformer<T = unknown> = RowTransformer<string, T>
 
-export type CSVTransformerEntry<T = unknown> = [columnName: string, transformer: CSVTransformer<T>]
+export type CSVTransformerEntry<T = unknown> = RowTransformerEntry<string, T>
 
-export type CSVTransformerRecord = Record<string, CSVTransformer | undefined>
+export type CSVTransformerRecord = RowTransformerRecord<string>
 
-export type CSVEmitter<T = unknown> = (columns: Iterable<string>, headerColumns?: Iterable<CSVTransformerEntry>) => T
-
-const identity: CSVTransformer<string> = (value) => value
+export type CSVEmitter<T = unknown> = RowEmitter<string, T>
 
 const doubleQuoteSequence = new CharacterSequence('"')
 
@@ -84,42 +93,7 @@ function splitRowColumns(
 
 export type CSVSpliteratorEmittedRecord<V = string | number | undefined> = Record<string, V>
 
-/**
- * A row emitted by the CSV generator, as a 3-tuple:
- *
- * - The key of the column.
- * - The value of the column.
- * - The index of the row.
- */
-export type RowTuple<V = string | number> = [key: string, value: V, idx: number]
-
-export const CSVSpliteratorEmitters = {
-	array: null,
-
-	entries(columns: Iterable<string>, headerColumns: Iterable<CSVTransformerEntry> = []): RowTuple<unknown>[] {
-		return Array.from(zipSync(headerColumns, columns), ([transformer, value], idx) => {
-			const key = transformer?.[0]
-			const transform = transformer?.[1] ?? identity
-
-			return [key ?? `column_${idx}`, transform(value ?? ""), idx]
-		})
-	},
-	object(
-		columns: Iterable<string>,
-		headerColumns: Iterable<CSVTransformerEntry> = []
-	): CSVSpliteratorEmittedRecord<unknown> {
-		const record: CSVSpliteratorEmittedRecord<unknown> = {}
-
-		for (const [transformer, value, idx] of zipSync(headerColumns, columns)) {
-			const key = transformer?.[0] ?? `column_${idx}`
-			const transform = transformer?.[1] ?? identity
-
-			record[key] = transform(value ?? "")
-		}
-
-		return record
-	},
-} as const satisfies Record<CSVOutputMode, CSVEmitter | null>
+export const CSVSpliteratorEmitters: Record<CSVOutputMode, CSVEmitter | null> = createRowEmitters<string>("")
 
 export interface CSVSpliteratorInit extends SpliteratorInit {
 	/**
@@ -259,19 +233,7 @@ export abstract class CSVSpliterator {
 			const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling)
 			const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
 
-			// oxlint-disable-next-line unicorn/prefer-ternary
-			if (Array.isArray(transformersInput)) {
-				transformers = Array.from(zipSync(headers, transformersInput), ([columnName, transformer]) => [
-					columnName!,
-					transformer ?? identity,
-				])
-			} else {
-				transformers = headers.map((columnName) => {
-					const transform = (transformersInput as CSVTransformerRecord)[columnName] || identity
-
-					return [columnName, transform]
-				})
-			}
+			transformers = bindTransformers(headers, transformersInput)
 		}
 
 		for (const row of rows) {
@@ -381,19 +343,7 @@ export abstract class CSVSpliterator {
 				const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling)
 				const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
 
-				// oxlint-disable-next-line unicorn/prefer-ternary
-				if (Array.isArray(transformersInput)) {
-					transformers = Array.from(zipSync(headers, transformersInput), ([columnName, transformer]) => [
-						columnName!,
-						transformer ?? identity,
-					])
-				} else {
-					transformers = headers.map((columnName) => {
-						const transform = (transformersInput as CSVTransformerRecord)[columnName] || identity
-
-						return [columnName, transform]
-					})
-				}
+				transformers = bindTransformers(headers, transformersInput)
 			}
 
 			return rows

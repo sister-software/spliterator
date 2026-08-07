@@ -1,7 +1,8 @@
 # XLSX Support — Design
 
 **Date:** 2026-08-07
-**Status:** Approved approach; pending implementation
+**Status:** Implemented (vendor pinned at `read-excel-file@^9.3.5` — 9.3.6/9.3.7 were inside the
+npm minimal-age gate at implementation time; the caret range picks them up as they age out)
 
 ## Goal
 
@@ -37,7 +38,7 @@ brainstorming) is out of scope.
 
 ## Class shape
 
-`XLSXSpliterator` is a **standalone** abstract static class — it does *not* extend
+`XLSXSpliterator` is a **standalone** abstract static class — it does _not_ extend
 `CSVSpliterator`. None of the byte-splitting machinery applies (the inherited `from` would
 newline-split ZIP bytes), and inherited options (`columnDelimiter`, `enableQuoteHandling`,
 `crlf`, `position`) are meaningless for XLSX. The constructor throws `TypeError`, matching the
