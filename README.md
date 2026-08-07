@@ -92,6 +92,58 @@ for await (const columns of reader) {
 }
 ```
 
+## Excel workbooks (XLSX)
+
+Spliterator can read and write `.xlsx` workbooks through `XLSXSpliterator`. Support is powered by two optional peer dependencies — install the one you need:
+
+```bash
+yarn add read-excel-file  # for XLSXSpliterator.fromAsync
+yarn add write-excel-file # for XLSXSpliterator.write
+```
+
+Reading mirrors `CSVSpliterator`'s options — `mode`, `header`, `normalizeKeys`, `transformers`, `drop`, and `take` — plus a `sheet` option to pick a sheet by 1-based number or name. Unlike CSV columns, XLSX cells arrive **typed**: numbers, booleans, and dates are real values rather than strings, and empty cells are `null`.
+
+```ts
+import { XLSXSpliterator } from "spliterator"
+
+const reader = XLSXSpliterator.fromAsync("people.xlsx", { mode: "object", sheet: "Employees" })
+
+for await (const row of reader) {
+	console.log(row) // { full_name: "Morgan", hired: Date, age: 30 }, etc.
+}
+```
+
+Transformers receive those typed cell values, which makes them a natural place to coerce loosely-exported data — many real-world workbooks store everything as text:
+
+```ts
+const reader = XLSXSpliterator.fromAsync("form499.xlsx", {
+	mode: "object",
+	transformers: {
+		filer_499_id: (value) => Number(value),
+		alabama: (value) => value === "TRUE",
+	},
+})
+```
+
+Writing accepts any iterable or async iterable of rows — arrays of cells, or records whose keys become the header row — so a Spliterator pipeline can terminate in a workbook:
+
+```ts
+const rows = CSVSpliterator.fromAsync("people.csv", { mode: "object" }).map((person) => ({
+	...person,
+	age: Number(person.age),
+}))
+
+await XLSXSpliterator.write(rows, { sheet: "People" }).toFile("people.xlsx")
+```
+
+A few caveats worth knowing:
+
+- **The whole workbook is held in memory, in both directions.** XLSX is a ZIP archive of XML documents — shared strings live in a separate archive entry and the ZIP's central directory sits at the end of the file — so it cannot be parsed or produced as a bounded-memory stream the way delimited text can. Reading yields no rows until the entire sheet is parsed, and writing drains your source completely before producing bytes. Expect memory usage far above the file's size on disk (a 9 MB workbook can inflate to hundreds of MB parsed). For sources large enough that this matters, prefer CSV or JSONL.
+- **There is no synchronous reader.** Decompression and XML parsing are asynchronous in the underlying reader, so `XLSXSpliterator.from()` always throws, pointing you to `fromAsync`.
+- **One sheet at a time.** Reading targets a single sheet per call, and writing produces a single-sheet workbook. Cell styling, formats, and formulas are out of scope.
+
+See `examples/xlsx-to-jsonl.ts` for a complete conversion script with derived transformers.
+
 ## CLI Usage
 
 Spliterator also includes a CLI tool that can be used to stream delimited content from the command line, transform it, filter it, and more.
