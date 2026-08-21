@@ -1,0 +1,151 @@
+# Manual-dispatch publish to npm via Trusted Publishing (OIDC). Single-phase.
+#
+# WHY SINGLE-PHASE, unlike the sibling mailwoman workflow: `main` here carries no branch protection
+# and no rulesets, so this job can bump, tag and push directly. If a ruleset is ever added that
+# requires a PR with a green check, this breaks with GH013 and has to split at the merge boundary
+# the way mailwoman's did.
+#
+# THIS WORKFLOW IS THE ONLY CI IN THE REPO, so the gate lives inside it: lint, compile and the full
+# test suite all run before anything is pushed or published. `yarn test` must be invoked with
+# `--run` — bare vitest enters watch mode and the job would hang until it timed out.
+#
+# ORDER IS PUSH-FIRST, deliberately. A failed publish then leaves a pushed tag with nothing on npm,
+# which is visible and fixable by re-dispatching. The reverse order would leave npm ahead of git,
+# and an npm version is immutable — there is no taking it back.
+#
+# AUTH: npm Trusted Publishing. No NPM_TOKEN anywhere. npmjs.com is configured to accept publishes
+# from this exact workflow file, matched LITERALLY by path — `.github/workflows/publish.yml`.
+# Renaming or moving this file silently breaks publishing: the registry never validates that a
+# configured path names a real file, so a mismatch surfaces as a bare E404 on publish rather than
+# as a configuration error. If a publish 404s and the package exists, check that path first, then
+# check whether the trusted publisher is bound to a GitHub environment this job does not declare.
+name: NPM Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version bump: patch / minor / major / prerelease, or an exact semver like 6.3.0"
+        required: true
+        default: patch
+        type: string
+      dry_run:
+        description: "Dry run — run the full gate and pack the tarball, but push nothing and publish nothing"
+        required: false
+        default: false
+        type: boolean
+
+# `contents: write` pushes the bump commit and tag and creates the release.
+# `id-token: write` is what lets Actions mint the OIDC token npm verifies. Without it the publish
+# falls back to looking for a token and fails.
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # GITHUB-HOSTED ON PURPOSE — do not move this to a self-hosted runner. npm refuses provenance
+    # attestation from one outright: E422 `Unsupported GitHub Actions runner environment:
+    # "self-hosted". Only "github-hosted" runners are supported when publishing with provenance`.
+    # That failed a whole release loop in the sibling mailwoman repo (v7.6.0, 2026-07-23) after the
+    # tag had already been pushed. Nothing in this job needs lab data.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          # package.json engines requires >= 24. Note the repo's .nvmrc says 23.2.0, which does NOT
+          # satisfy that floor — CI follows engines, which is the constraint consumers actually see.
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Enable Corepack (yarn 4)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      # Trusted Publishing needs npm >= 11.5.1 for OIDC. Node 24 ships a new enough npm today, but
+      # pinning the requirement here means a future runner image change fails loudly on this line
+      # rather than as an unexplained auth error three steps later.
+      - name: Ensure npm supports OIDC
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Lint
+        run: yarn lint
+
+      - name: Compile
+        run: yarn compile
+
+      # `--run` is required. Bare vitest watches and never exits.
+      - name: Test
+        run: yarn test --run
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # `npm version` writes package.json, commits, and tags in one step. No `-w`/workspace handling
+      # is needed: this repo publishes exactly one package.
+      - name: Bump version
+        id: bump
+        run: |
+          NEW_VERSION="$(npm version "${{ inputs.version }}" --message 'Release %s')"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Bumped to ${NEW_VERSION}"
+
+      # Packs from the real manifest so the `files` array is exercised before anything is pushed.
+      # A missing build artifact shows up here rather than in a consumer's node_modules.
+      - name: Pack and inspect the tarball
+        run: |
+          npm pack --dry-run
+          test -f out/index.js || { echo "::error::out/index.js missing — compile did not produce the published entry"; exit 1; }
+          test -f out/index.d.ts || { echo "::error::out/index.d.ts missing — no types would ship"; exit 1; }
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "::notice::DRY RUN — would publish ${{ steps.bump.outputs.version }}. Nothing pushed, nothing published."
+          git --no-pager show --stat HEAD
+
+      - name: Push the bump commit and tag
+        if: ${{ !inputs.dry_run }}
+        run: git push --follow-tags origin HEAD:main
+
+      # --provenance signs a sigstore attestation against this workflow's OIDC identity. It needs a
+      # public repo (this one is) AND a CI identity, so it cannot be reproduced by a local publish.
+      - name: Publish to npm
+        if: ${{ !inputs.dry_run }}
+        run: npm publish --provenance --access public
+
+      - name: Create the GitHub release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.bump.outputs.version }}" \
+            --title "${{ steps.bump.outputs.version }}" \
+            --generate-notes
+
+      - name: Verify the published version
+        if: ${{ !inputs.dry_run }}
+        run: |
+          PUBLISHED="$(npm view spliterator version)"
+          EXPECTED="${{ steps.bump.outputs.version }}"
+          EXPECTED="${EXPECTED#v}"
+          echo "npm reports ${PUBLISHED}, expected ${EXPECTED}"
+          test "${PUBLISHED}" = "${EXPECTED}" || { echo "::error::npm still reports ${PUBLISHED}"; exit 1; }

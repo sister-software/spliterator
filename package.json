@@ -32,8 +32,7 @@
 		"out/index.js.map",
 		"out/index.js",
 		"out/lib/**/*",
-		"out/node/**/*",
-		"out/cli/**/*"
+		"out/node/**/*"
 	],
 	"type": "module",
 	"exports": {
