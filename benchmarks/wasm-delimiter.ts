@@ -7,7 +7,7 @@
  */
 
 import { CharacterSequence, Delimiters } from "../index.js"
-import type { WasmDelimiterScanner } from "../lib/wasm_module.js"
+import type { WasmDelimiterScanner } from "../lib/core/wasm_module.js"
 
 interface BenchmarkResult {
 	label: string

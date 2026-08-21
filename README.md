@@ -158,6 +158,24 @@ The CLI also supports reading from standard input:
 cat people.csv | spliterator csv people.jsonl
 ```
 
+Run one command per delimited record with bounded process concurrency. Arguments are passed directly to the child —
+there is no intermediate shell — and `{}` is replaced with the record (or appended when no placeholder is present):
+
+```bash
+find data -type f -print0 | spliterator parallel -0 -j 8 -- sha256sum {}
+```
+
+`--pipe` sends record-aligned blocks to each child instead. This is the efficient shape for commands that already read
+standard input; blocks preserve the source bytes exactly and never split a record:
+
+```bash
+cat large.jsonl | spliterator parallel --pipe --block 16MiB -j 4 -- process-block
+```
+
+Output is grouped per job by default and spills to temporary files, so a noisy child does not consume unbounded memory.
+Use `-k` to preserve input order, `--line-buffer` for live complete lines, `--no-group` for raw output, and
+`--halt soon|now` to stop after a failure.
+
 For information on all available commands, run `spliterator --help`.
 
 ## Advanced Usage

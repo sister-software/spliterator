@@ -7,8 +7,8 @@
  */
 
 import { CharacterSequence, CSVSpliterator, Delimiters } from "../index.js"
-import { Spliterator } from "../lib/Spliterator.js"
-import { WASM_THRESHOLD } from "../lib/wasm_module.js"
+import { Spliterator } from "../lib/core/Spliterator.js"
+import { WASM_THRESHOLD } from "../lib/core/wasm_module.js"
 
 /**
  * Generate a synthetic CSV buffer with `rows` rows × `cols` columns.

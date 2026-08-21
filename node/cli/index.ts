@@ -11,6 +11,7 @@ import { createRequire } from "node:module"
 
 import * as csv from "./commands/csv.js"
 import * as iterate from "./commands/iterate.js"
+import * as parallel from "./commands/parallel.js"
 import { usageError } from "./utils.js"
 
 const rootHelp = [
@@ -18,6 +19,7 @@ const rootHelp = [
 	"",
 	"Commands:",
 	"  csv                           Split a CSV file into JSONL format.",
+	"  parallel                      Run commands concurrently over delimited input.",
 	"",
 	"Sister Software, AGPL-3.0",
 	"https://sister.software",
@@ -30,6 +32,10 @@ try {
 	switch (first) {
 		case "csv":
 			await csv.run(rest)
+			break
+
+		case "parallel":
+			await parallel.run(rest)
 			break
 
 		case "--version":

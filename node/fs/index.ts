@@ -10,7 +10,7 @@ import { WritableStream } from "node:stream/web"
 
 import { PathBuilder } from "path-ts"
 
-import { type AsyncChunkIterator, type AsyncDataResource, isFileHandleLike } from "../../lib/shared.js"
+import { type AsyncChunkIterator, type AsyncDataResource, isFileHandleLike } from "../../lib/internal/shared.js"
 
 /**
  * Create a readable stream from a file system source.

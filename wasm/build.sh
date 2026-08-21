@@ -23,8 +23,8 @@ echo "==> Base64 encoding..."
 # 76 columns by default and macOS base64 does not, so normalize across both with `tr`.
 BASE64=$(base64 < "$WASM_OUT" | tr -d '\n')
 
-echo "==> Writing TypeScript constant to lib/wasm_base64.ts..."
-cat > ../lib/wasm_base64.ts << TSEOF
+echo "==> Writing TypeScript constant to lib/core/wasm_base64.ts..."
+cat > ../lib/core/wasm_base64.ts << TSEOF
 /**
  * @copyright Sister Software
  * @license MIT

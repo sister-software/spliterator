@@ -4,55 +4,60 @@
  * @author Teffen Ellis, et al.
  */
 
-import type { ParseArgsOptionsConfig } from "node:util"
+import type { OptionSpec } from "./spec.js"
 
 /**
  * Options accepted by every Spliterator command.
  */
-export const commonOptions = {
-	split: { type: "string", short: "s", default: "\n" },
-	join: { type: "string", short: "j", default: "\n" },
-	"skip-empty": { type: "boolean", short: "e", default: true },
-	take: { type: "string", short: "t" },
-	drop: { type: "string", short: "p", default: "0" },
-	debug: { type: "boolean", short: "v", default: false },
-	"reader-high-water-mark": { type: "string", short: "w", default: String(4096 * 16) },
-	"writer-high-water-mark": { type: "string", short: "W", default: String(4096 * 16 * 4) },
-	filter: { type: "string", short: "f" },
-	source: { type: "string", short: "i" },
-	destination: { type: "string", short: "o" },
-	help: { type: "boolean", short: "h", default: false },
-} as const satisfies ParseArgsOptionsConfig
-
-export const commonOptionsHelp = [
-	"  -s, --split <delimiter>       Delimiter to split lines on (default: newline)",
-	"  -j, --join <delimiter>        Delimiter to join lines on (default: newline)",
-	"  -e, --skip-empty              Skip empty lines (default: true, disable with --no-skip-empty)",
-	"  -t, --take <count>            Number of lines to take (default: all)",
-	"  -p, --drop <count>            Number of lines to drop (default: 0)",
-	"  -v, --debug                   Debug mode",
-	"  -w, --reader-high-water-mark  High water mark for the read stream (default: 65536)",
-	"  -W, --writer-high-water-mark  High water mark for the write stream (default: 262144)",
-	"  -f, --filter <path>           Path to JS file exporting a default filter function",
-	"  -i, --source <path>           Source file, if not given positionally",
-	"  -o, --destination <path>      Destination file, if not given positionally",
-	"  -h, --help                    Show this help",
-].join("\n")
-
-/**
- * Coerce a numeric option, exiting with a usage error if it isn't a number.
- */
-export function toNumber(name: string, input: string | undefined): number | undefined {
-	if (input === undefined) return undefined
-
-	const value = Number(input)
-
-	if (!Number.isFinite(value)) {
-		usageError(`Option --${name} expects a number, received "${input}".`)
-	}
-
-	return value
-}
+export const commonOptionSpecs = {
+	split: { type: "string", short: "s", hint: "delimiter", default: "\n", description: "Delimiter to split lines on." },
+	join: { type: "string", short: "j", hint: "delimiter", default: "\n", description: "Delimiter to join lines with." },
+	"skip-empty": { type: "boolean", short: "e", default: true, description: "Skip empty lines." },
+	take: {
+		type: "number",
+		short: "t",
+		hint: "count",
+		description: "Number of lines to take.",
+		validate: (value) => Number.isInteger(value) && value >= 0,
+		validationMessage: "Option --take must be a non-negative integer.",
+	},
+	drop: {
+		type: "number",
+		short: "p",
+		hint: "count",
+		default: 0,
+		description: "Number of lines to drop.",
+		validate: (value) => Number.isInteger(value) && value >= 0,
+		validationMessage: "Option --drop must be a non-negative integer.",
+	},
+	debug: { type: "boolean", short: "v", default: false, description: "Enable debug logging." },
+	"reader-high-water-mark": {
+		type: "number",
+		short: "w",
+		hint: "bytes",
+		default: 4096 * 16,
+		description: "Input stream buffer size.",
+		validate: (value) => Number.isInteger(value) && value >= 1,
+		validationMessage: "Option --reader-high-water-mark must be a positive integer.",
+	},
+	"writer-high-water-mark": {
+		type: "number",
+		short: "W",
+		hint: "bytes",
+		default: 4096 * 16 * 4,
+		description: "Output stream buffer size.",
+		validate: (value) => Number.isInteger(value) && value >= 1,
+		validationMessage: "Option --writer-high-water-mark must be a positive integer.",
+	},
+	filter: { type: "string", short: "f", hint: "path", description: "JS module exporting a default filter." },
+	source: { type: "string", short: "i", hint: "path", description: "Source file, if not given positionally." },
+	destination: {
+		type: "string",
+		short: "o",
+		hint: "path",
+		description: "Destination file, if not given positionally.",
+	},
+} as const satisfies Readonly<Record<string, OptionSpec>>
 
 /**
  * Resolve the source and destination paths from positionals, falling back to their flag forms.

@@ -6,41 +6,38 @@
  */
 
 import { resolve as resolvePath } from "node:path"
-import { parseArgs } from "node:util"
 
 import { CharacterSequence, Spliterator } from "spliterator"
 import { createFileWritableStream, createReadStream } from "spliterator/node/fs"
 
+import { type CommandSpec, parseCommand, renderCommandHelp } from "../spec.js"
 import {
-	commonOptions,
-	commonOptionsHelp,
+	commonOptionSpecs,
 	resolveIO,
-	toNumber,
 	type LineTransformer,
 	type LineTransformerModuleExports,
 	type SpliteratorFilter,
 } from "../utils.js"
 
-export const help = [
-	"Iterate over a file, line by line, writing the transformed output to a new file.",
-	"",
-	"Usage: spliterator [source] [destination] [options]",
-	"",
-	"Options:",
-	commonOptionsHelp,
-	"  -T, --transformer <path>      Path to JS file exporting a default transformer function",
-].join("\n")
+export const spec = {
+	name: "",
+	usage: "[source] [destination] [options]",
+	description: "Iterate over a file line by line, writing transformed output to a new file.",
+	options: {
+		...commonOptionSpecs,
+		transformer: {
+			type: "string",
+			short: "T",
+			hint: "path",
+			description: "JS module exporting a default transformer.",
+		},
+	},
+} as const satisfies CommandSpec
+
+export const help = renderCommandHelp(spec)
 
 export async function run(args: string[]): Promise<void> {
-	const { values, positionals } = parseArgs({
-		args,
-		allowPositionals: true,
-		allowNegative: true,
-		options: {
-			...commonOptions,
-			transformer: { type: "string", short: "T" },
-		},
-	})
+	const { values, positionals } = parseCommand(spec, args)
 
 	if (values.help) {
 		console.log(help)
@@ -48,23 +45,23 @@ export async function run(args: string[]): Promise<void> {
 		return
 	}
 
-	const [source, destination] = resolveIO(positionals, values)
-	const take = toNumber("take", values.take)
-	const drop = toNumber("drop", values.drop)
-	const readerHighWaterMark = toNumber("reader-high-water-mark", values["reader-high-water-mark"])!
-	const writerHighWaterMark = toNumber("writer-high-water-mark", values["writer-high-water-mark"])
+	const [source, destination] = resolveIO(positionals, values as { source?: string; destination?: string })
+	const take = values.take as number | undefined
+	const drop = values.drop as number
+	const readerHighWaterMark = values["reader-high-water-mark"] as number
+	const writerHighWaterMark = values["writer-high-water-mark"] as number
 
 	let transformer: LineTransformer = (line: Uint8Array) => line
-	const joinDelimiter = new CharacterSequence(values.join)
+	const joinDelimiter = new CharacterSequence(values.join as string)
 
-	if (values.transformer) {
+	if (typeof values.transformer === "string") {
 		const module: LineTransformerModuleExports = await import(resolvePath(values.transformer))
 		transformer = module.default
 	}
 
 	let filter: SpliteratorFilter = () => true
 
-	if (values.filter) {
+	if (typeof values.filter === "string") {
 		const module = await import(resolvePath(values.filter))
 		filter = module.default
 	}
@@ -79,11 +76,11 @@ export async function run(args: string[]): Promise<void> {
 	const writer = writeStream.getWriter()
 
 	const spliterator = Spliterator.from(readStream, {
-		delimiter: values.split,
-		skipEmpty: values["skip-empty"],
+		delimiter: values.split as string,
+		skipEmpty: Boolean(values["skip-empty"]),
 		take,
 		drop,
-		debug: values.debug,
+		debug: Boolean(values.debug),
 	})
 
 	for await (const line of spliterator) {

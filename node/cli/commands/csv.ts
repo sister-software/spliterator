@@ -6,7 +6,6 @@
  */
 
 import { resolve as resolvePath } from "node:path"
-import { parseArgs } from "node:util"
 
 import {
 	CharacterSequence,
@@ -18,36 +17,39 @@ import {
 } from "spliterator"
 import { createFileWritableStream, createReadStream } from "spliterator/node/fs"
 
-import { commonOptions, commonOptionsHelp, resolveIO, toNumber, usageError, type SpliteratorFilter } from "../utils.js"
+import { type CommandSpec, parseCommand, renderCommandHelp } from "../spec.js"
+import { commonOptionSpecs, resolveIO, type SpliteratorFilter } from "../utils.js"
 
 const MODES = ["object", "array"] as const satisfies CSVOutputMode[]
 
-export const help = [
-	"Split a CSV file into JSONL format.",
-	"",
-	"Usage: spliterator csv [source] [destination] [options]",
-	"",
-	"Options:",
-	commonOptionsHelp,
-	"  -H, --header                  Whether the CSV file has a header (default: true, disable with --no-header)",
-	"  -T, --transformers <path>     Path to JS file exporting transformer functions",
-	"  -c, --column-delimiter <str>  Delimiter to split columns on (default: ,)",
-	`  -m, --mode <mode>             Output mode: ${MODES.join(" | ")} (default: object)`,
-].join("\n")
+export const spec = {
+	name: "csv",
+	usage: "csv [source] [destination] [options]",
+	description: "Split a CSV file into JSONL format.",
+	options: {
+		...commonOptionSpecs,
+		header: { type: "boolean", short: "H", default: true, description: "Treat the first row as a header." },
+		transformers: {
+			type: "string",
+			short: "T",
+			hint: "path",
+			description: "JS module exporting transformer functions.",
+		},
+		"column-delimiter": {
+			type: "string",
+			short: "c",
+			hint: "delimiter",
+			default: ",",
+			description: "Delimiter to split columns on.",
+		},
+		mode: { type: "string", short: "m", hint: "mode", choices: MODES, default: "object", description: "Output mode." },
+	},
+} as const satisfies CommandSpec
+
+export const help = renderCommandHelp(spec)
 
 export async function run(args: string[]): Promise<void> {
-	const { values, positionals } = parseArgs({
-		args,
-		allowPositionals: true,
-		allowNegative: true,
-		options: {
-			...commonOptions,
-			header: { type: "boolean", short: "H", default: true },
-			transformers: { type: "string", short: "T" },
-			"column-delimiter": { type: "string", short: "c", default: "," },
-			mode: { type: "string", short: "m", default: "object" },
-		},
-	})
+	const { values, positionals } = parseCommand(spec, args)
 
 	if (values.help) {
 		console.log(help)
@@ -55,27 +57,22 @@ export async function run(args: string[]): Promise<void> {
 		return
 	}
 
-	const [source, destination] = resolveIO(positionals, values)
+	const [source, destination] = resolveIO(positionals, values as { source?: string; destination?: string })
+	const take = values.take as number | undefined
+	const drop = values.drop as number
+	const readerHighWaterMark = values["reader-high-water-mark"] as number
+	const writerHighWaterMark = values["writer-high-water-mark"] as number
 
-	if (!(MODES as readonly string[]).includes(values.mode)) {
-		usageError(`Option --mode expects one of: ${MODES.join(", ")}.`)
-	}
-
-	const take = toNumber("take", values.take)
-	const drop = toNumber("drop", values.drop)
-	const readerHighWaterMark = toNumber("reader-high-water-mark", values["reader-high-water-mark"])!
-	const writerHighWaterMark = toNumber("writer-high-water-mark", values["writer-high-water-mark"])
-
-	const joinDelimiter = new CharacterSequence(values.join).decode()
+	const joinDelimiter = new CharacterSequence(values.join as string).decode()
 	let transformers: CSVTransformerRecord = {}
 
-	if (values.transformers) {
+	if (typeof values.transformers === "string") {
 		transformers = await import(resolvePath(values.transformers))
 	}
 
 	let filter: SpliteratorFilter = () => true
 
-	if (values.filter) {
+	if (typeof values.filter === "string") {
 		const module = await import(resolvePath(values.filter))
 		filter = module.default
 	}
@@ -92,11 +89,11 @@ export async function run(args: string[]): Promise<void> {
 
 	const spliterator = CSVSpliterator.fromAsync(readStream, {
 		mode: values.mode as CSVOutputMode,
-		delimiter: values.split,
+		delimiter: values.split as string,
 		autoDispose: true,
-		header: values.header,
+		header: Boolean(values.header),
 		transformers,
-		columnDelimiter: values["column-delimiter"],
+		columnDelimiter: values["column-delimiter"] as string,
 		take,
 		drop,
 	} satisfies CSVSpliteratorInit & AsyncSpliteratorInit)
