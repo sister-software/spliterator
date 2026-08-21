@@ -4,6 +4,7 @@
 //!   - find_delimiter: first match of a single pattern
 //!   - find_all_delimiters: all matches of a single pattern → (start,end) pairs
 //!   - find_all_matches: all matches of TWO patterns → (offset, pattern_id) pairs
+//!   - scan_delimited_ranges: resumable single-byte delimiter/quote scan → ranges + state
 //!
 //! Build:
 //!   RUSTFLAGS="-C target-feature=+simd128" cargo build --target wasm32-unknown-unknown --release
@@ -33,7 +34,9 @@ pub unsafe extern "C" fn find_delimiter(
     }
     let h = haystack_offset as *const u8;
     let p = pattern_offset as *const u8;
-    if pattern_len == 1 { return find_single_byte(h, haystack_len, *p); }
+    if pattern_len == 1 {
+        return find_single_byte(h, haystack_len, *p);
+    }
     find_multi_byte(h, haystack_len, p, pattern_len)
 }
 
@@ -48,7 +51,9 @@ pub unsafe extern "C" fn find_all_delimiters(
     results_offset: usize,
     max_results: usize,
 ) -> usize {
-    if pattern_len == 0 || haystack_len == 0 || max_results == 0 { return 0; }
+    if pattern_len == 0 || haystack_len == 0 || max_results == 0 {
+        return 0;
+    }
     let haystack = haystack_offset as *const u8;
     let pattern = pattern_offset as *const u8;
     let results = results_offset as *mut i32;
@@ -63,7 +68,9 @@ pub unsafe extern "C" fn find_all_delimiters(
         } else {
             find_multi_byte(haystack.add(search_start), remaining, pattern, pattern_len)
         };
-        if pos < 0 { break; }
+        if pos < 0 {
+            break;
+        }
         let dp = search_start + pos as usize;
         *results.add(count * 2) = range_start as i32;
         *results.add(count * 2 + 1) = dp as i32;
@@ -105,8 +112,12 @@ pub unsafe extern "C" fn find_all_matches(
     results_offset: usize,
     max_results: usize,
 ) -> usize {
-    if haystack_len == 0 || max_results == 0 { return 0; }
-    if pat1_len == 0 && pat2_len == 0 { return 0; }
+    if haystack_len == 0 || max_results == 0 {
+        return 0;
+    }
+    if pat1_len == 0 && pat2_len == 0 {
+        return 0;
+    }
 
     let haystack = haystack_offset as *const u8;
     let pat1 = pat1_offset as *const u8;
@@ -116,9 +127,12 @@ pub unsafe extern "C" fn find_all_matches(
     // Fast path: both patterns are single-byte → SIMD double-scan
     if pat1_len == 1 && pat2_len == 1 {
         return find_all_matches_double_byte(
-            haystack, haystack_len,
-            *pat1, *pat2,
-            results, max_results
+            haystack,
+            haystack_len,
+            *pat1,
+            *pat2,
+            results,
+            max_results,
         );
     }
 
@@ -148,7 +162,9 @@ pub unsafe extern "C" fn find_all_matches(
         };
 
         // Both absent → done
-        if pos1 < 0 && pos2 < 0 { break; }
+        if pos1 < 0 && pos2 < 0 {
+            break;
+        }
 
         // Pick the earlier match
         let (pos, pattern_id) = if pos1 >= 0 && (pos2 < 0 || pos1 <= pos2) {
@@ -167,6 +183,119 @@ pub unsafe extern "C" fn find_all_matches(
     }
 
     count
+}
+
+// ── scan_delimited_ranges (stateful, bounded) ─────────────────────────
+
+/// Scan a byte window for a single-byte delimiter, optionally ignoring delimiters
+/// inside double-quoted regions. Unlike `find_all_matches`, this primitive emits
+/// completed ranges directly and can stop at a caller-provided capacity without
+/// losing its place.
+///
+/// `quote` is -1 when quote handling is disabled, otherwise it is the quote byte.
+/// The first three i32 values at `results_offset` receive updated state:
+/// `[scan_cursor, pending_slice_start, inside_quotes]`. Range pairs follow.
+///
+/// When the output fills, the delimiter that would produce the next range is left
+/// unconsumed. Passing the returned state to the next call resumes exactly there.
+#[no_mangle]
+pub unsafe extern "C" fn scan_delimited_ranges(
+    haystack_offset: usize,
+    haystack_len: usize,
+    scan_start: usize,
+    pending_slice_start: usize,
+    delimiter: u32,
+    quote: i32,
+    inside_quotes: i32,
+    results_offset: usize,
+    max_ranges: usize,
+) -> usize {
+    let results = results_offset as *mut i32;
+    let mut cursor = scan_start.min(haystack_len);
+    let mut slice_start = pending_slice_start.min(haystack_len);
+    let mut quoted = inside_quotes != 0;
+    let mut count = 0usize;
+    let delimiter_byte = delimiter as u8;
+    let quote_byte = quote as u8;
+    let quote_enabled = quote >= 0;
+    let haystack = haystack_offset as *const u8;
+    let delimiter_splat = i8x16_splat(delimiter_byte as i8);
+    let quote_splat = i8x16_splat(quote_byte as i8);
+
+    while cursor + 16 <= haystack_len {
+        let chunk = v128_load(haystack.add(cursor) as *const v128);
+        let delimiter_mask = i8x16_bitmask(i8x16_eq(chunk, delimiter_splat)) as u32;
+        let quote_mask = if quote_enabled {
+            i8x16_bitmask(i8x16_eq(chunk, quote_splat)) as u32
+        } else {
+            0
+        };
+        let mut matches = delimiter_mask | quote_mask;
+
+        while matches != 0 {
+            let position = matches.trailing_zeros() as usize;
+            let offset = cursor + position;
+            // Pattern 1 (the delimiter) wins when both configured bytes are equal,
+            // matching `find_all_matches` and the JavaScript merge fallback.
+            let is_delimiter = (delimiter_mask >> position) & 1 != 0;
+            let is_quote = quote_enabled && !is_delimiter && ((quote_mask >> position) & 1 != 0);
+
+            if is_quote {
+                quoted = !quoted;
+            } else if !quoted {
+                if count >= max_ranges {
+                    write_range_scan_state(results, offset, slice_start, quoted);
+                    return count;
+                }
+
+                *results.add(3 + count * 2) = slice_start as i32;
+                *results.add(4 + count * 2) = offset as i32;
+                count += 1;
+                slice_start = offset + 1;
+            }
+
+            matches &= matches - 1;
+        }
+
+        cursor += 16;
+    }
+
+    while cursor < haystack_len {
+        let byte = *haystack.add(cursor);
+
+        if byte == delimiter_byte {
+            if !quoted {
+                if count >= max_ranges {
+                    write_range_scan_state(results, cursor, slice_start, quoted);
+                    return count;
+                }
+
+                *results.add(3 + count * 2) = slice_start as i32;
+                *results.add(4 + count * 2) = cursor as i32;
+                count += 1;
+                slice_start = cursor + 1;
+            }
+        } else if quote_enabled && byte == quote_byte {
+            quoted = !quoted;
+        }
+
+        cursor += 1;
+    }
+
+    write_range_scan_state(results, haystack_len, slice_start, quoted);
+    count
+}
+
+#[inline]
+unsafe fn write_range_scan_state(
+    results: *mut i32,
+    cursor: usize,
+    slice_start: usize,
+    inside_quotes: bool,
+) {
+    *results = cursor as i32;
+    *results.add(1) = slice_start as i32;
+    *results.add(2) = if inside_quotes { 1 } else { 0 };
 }
 
 /// SIMD double-scan: both patterns are single-byte.
@@ -237,11 +366,15 @@ unsafe fn find_single_byte(haystack: *const u8, len: usize, needle: u8) -> i32 {
         let chunk = v128_load(haystack.add(offset) as *const v128);
         let eq_mask = i8x16_eq(chunk, needle_splat);
         let bits = i8x16_bitmask(eq_mask) as u32;
-        if bits != 0 { return (offset + bits.trailing_zeros() as usize) as i32; }
+        if bits != 0 {
+            return (offset + bits.trailing_zeros() as usize) as i32;
+        }
         offset += 16;
     }
     for i in offset..len {
-        if *haystack.add(i) == needle { return i as i32; }
+        if *haystack.add(i) == needle {
+            return i as i32;
+        }
     }
     -1
 }
@@ -249,8 +382,10 @@ unsafe fn find_single_byte(haystack: *const u8, len: usize, needle: u8) -> i32 {
 // ── Multi-byte scan ───────────────────────────────────────────
 
 unsafe fn find_multi_byte(
-    haystack: *const u8, haystack_len: usize,
-    pattern: *const u8, pat_len: usize,
+    haystack: *const u8,
+    haystack_len: usize,
+    pattern: *const u8,
+    pat_len: usize,
 ) -> i32 {
     let first_byte = i8x16_splat(*pattern as i8);
     let search_end = haystack_len.saturating_sub(pat_len - 1);
@@ -265,9 +400,14 @@ unsafe fn find_multi_byte(
             if candidate + pat_len <= haystack_len {
                 let mut ok = true;
                 for j in 0..pat_len {
-                    if *haystack.add(candidate + j) != *pattern.add(j) { ok = false; break; }
+                    if *haystack.add(candidate + j) != *pattern.add(j) {
+                        ok = false;
+                        break;
+                    }
                 }
-                if ok { return candidate as i32; }
+                if ok {
+                    return candidate as i32;
+                }
             }
             bits &= bits - 1;
         }
@@ -277,9 +417,14 @@ unsafe fn find_multi_byte(
         if *haystack.add(i) == *pattern {
             let mut ok = true;
             for j in 1..pat_len {
-                if *haystack.add(i + j) != *pattern.add(j) { ok = false; break; }
+                if *haystack.add(i + j) != *pattern.add(j) {
+                    ok = false;
+                    break;
+                }
             }
-            if ok { return i as i32; }
+            if ok {
+                return i as i32;
+            }
         }
     }
     -1

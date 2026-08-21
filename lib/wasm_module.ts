@@ -32,8 +32,9 @@ export async function loadWasmModule(): Promise<WasmDelimiterScanner | null> {
 		const findDelimiter = e.find_delimiter as WasmFindDelimiter
 		const findAllDelimiters = e.find_all_delimiters as WasmFindAllDelimiters
 		const findAllMatches = e.find_all_matches as WasmFindAllMatches
+		const scanDelimitedRanges = e.scan_delimited_ranges as WasmScanDelimitedRanges
 
-		return { memory, findDelimiter, findAllDelimiters, findAllMatches }
+		return { memory, findDelimiter, findAllDelimiters, findAllMatches, scanDelimitedRanges }
 	} catch {
 		return null
 	}
@@ -53,6 +54,19 @@ type WasmFindAllMatches = (
 	mr: number
 ) => number
 
+// oxlint-disable-next-line eslint/max-params
+type WasmScanDelimitedRanges = (
+	ho: number,
+	hl: number,
+	ss: number,
+	pss: number,
+	delimiter: number,
+	quote: number,
+	insideQuotes: number,
+	ro: number,
+	mr: number
+) => number
+
 export interface WasmMemory {
 	readonly buffer: ArrayBuffer
 	grow(pages: number): number
@@ -63,6 +77,7 @@ export interface WasmDelimiterScanner {
 	findDelimiter: WasmFindDelimiter
 	findAllDelimiters: WasmFindAllDelimiters
 	findAllMatches: WasmFindAllMatches
+	scanDelimitedRanges: WasmScanDelimitedRanges
 }
 
 /**
@@ -87,3 +102,17 @@ export interface MatchResult {
  */
 export const WASM_THRESHOLD = 512
 export const WASM_MAX_RESULTS = 4096
+
+/**
+ * State returned by the bounded, resumable range scanner.
+ */
+export interface WasmRangeScanResult {
+	/**
+	 * A shared-memory view of `[start, end]` pairs. Consume it before the next WASM scan.
+	 */
+	ranges: Int32Array
+	count: number
+	scanCursor: number
+	pendingSliceStart: number
+	insideQuotes: boolean
+}

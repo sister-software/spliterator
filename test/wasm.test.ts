@@ -236,6 +236,58 @@ describe("WASM SIMD scanner", () => {
 		expect(comma.searchMatches(buf, quote)).toEqual(referenceMatches(buf, Delimiters.Comma, Delimiters.DoubleQuote))
 	})
 
+	test("bounded range scans resume without truncating dense input", () => {
+		const comma = new CharacterSequence(Delimiters.Comma)
+		const buf = encoder.encode("x,".repeat(300))
+		const ranges: Array<[number, number]> = []
+		let state = { scanCursor: 0, pendingSliceStart: 0, insideQuotes: false }
+
+		while (state.scanCursor < buf.length) {
+			const scan = comma.scanRanges(buf, state, buf.length, undefined, 7)
+
+			expect(scan).not.toBeNull()
+
+			for (let i = 0; i < scan!.count; i++) {
+				ranges.push([scan!.ranges[i * 2]!, scan!.ranges[i * 2 + 1]!])
+			}
+
+			expect(scan!.scanCursor).toBeGreaterThan(state.scanCursor)
+			state = scan!
+		}
+
+		// scanRanges emits completed delimiter-terminated ranges; EOF tail handling belongs to Spliterator.
+		expect(ranges).toEqual(referenceRanges(buf, comma).slice(0, -1))
+		expect(state.pendingSliceStart).toBe(buf.length)
+	})
+
+	test("bounded range scans carry quote state across result batches", () => {
+		const comma = new CharacterSequence(Delimiters.Comma)
+		const quote = new CharacterSequence(Delimiters.DoubleQuote)
+		const text = `${'a,"b,c",'.repeat(80)}tail`
+		const buf = encoder.encode(text)
+		const ranges: Array<[number, number]> = []
+		let state = { scanCursor: 0, pendingSliceStart: 0, insideQuotes: false }
+
+		while (state.scanCursor < buf.length) {
+			const scan = comma.scanRanges(buf, state, buf.length, quote, 3)
+
+			expect(scan).not.toBeNull()
+
+			for (let i = 0; i < scan!.count; i++) {
+				ranges.push([scan!.ranges[i * 2]!, scan!.ranges[i * 2 + 1]!])
+			}
+
+			expect(scan!.scanCursor).toBeGreaterThan(state.scanCursor)
+			state = scan!
+		}
+
+		const values = ranges.map(([start, end]) => new TextDecoder().decode(buf.subarray(start, end)))
+
+		expect(values).toEqual(Array.from({ length: 80 }, () => ["a", '"b,c"']).flat())
+		expect(state.insideQuotes).toBe(false)
+		expect(new TextDecoder().decode(buf.subarray(state.pendingSliceStart))).toBe("tail")
+	})
+
 	// A haystack ending exactly on a delimiter has a trailing empty field.
 	// The JS scan emits it (matching String.split); the WASM kernel must too, or the last column silently
 	// disappears for wide rows ending in a separator.

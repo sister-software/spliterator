@@ -38,6 +38,9 @@ cat > ../lib/wasm_base64.ts << TSEOF
  *   - find_all_delimiters(haystack_offset, haystack_len, pattern_offset, pattern_len,
  *                         results_offset, max_results) → usize
  *     Writes (start, end) i32 pairs to results_offset, returns count.
+ *   - scan_delimited_ranges(haystack_offset, haystack_len, scan_start, pending_slice_start,
+ *                           delimiter, quote, inside_quotes, results_offset, max_ranges) → usize
+ *     Writes resumable scan state followed by bounded (start, end) i32 pairs.
  */
 export const WASM_BASE64 =
 	"${BASE64}"

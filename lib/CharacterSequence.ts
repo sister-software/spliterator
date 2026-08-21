@@ -14,6 +14,7 @@ import {
 	type MatchResult,
 	type WasmDelimiterScanner,
 	type WasmMemory,
+	type WasmRangeScanResult,
 } from "./wasm_module.js"
 
 export function isArrayLike<T>(input: unknown): input is ArrayLike<T> {
@@ -271,6 +272,68 @@ export class CharacterSequence extends Uint8Array {
 		}
 
 		return ranges
+	}
+
+	/**
+	 * Scan completed ranges in one bounded, resumable WASM call.
+	 *
+	 * This is the low-allocation streaming primitive: unlike {@link searchMatches}, it carries quote state and range
+	 * boundaries through the native scan and exposes the packed result view directly. The returned view aliases shared
+	 * WASM memory and must be consumed before another scanner call.
+	 *
+	 * Returns `null` when the SIMD module is unavailable, the delimiter/quote is not one byte, or the buffer is below the
+	 * WASM threshold. Callers must retain their existing JavaScript path as the fallback.
+	 */
+	public scanRanges(
+		haystack: Uint8Array,
+		state: { scanCursor: number; pendingSliceStart: number; insideQuotes: boolean },
+		end: number = haystack.length,
+		quotePattern?: Uint8Array,
+		maxRanges = WASM_MAX_RESULTS
+	): WasmRangeScanResult | null {
+		if (this.length !== 1 || (quotePattern && quotePattern.length !== 1) || end < WASM_THRESHOLD || maxRanges < 1) {
+			return null
+		}
+
+		const wasm = CharacterSequence.#wasmScanner
+
+		if (!wasm) {
+			if (CharacterSequence.#wasmScanner === undefined) {
+				CharacterSequence.#ensureWasm()
+			}
+
+			return null
+		}
+
+		const resultsOffset = alignTo4(end)
+		const resultValueCount = 3 + maxRanges * 2
+		const totalNeeded = resultsOffset + resultValueCount * Int32Array.BYTES_PER_ELEMENT
+
+		ensureWasmCapacity(wasm.memory, totalNeeded)
+		new Uint8Array(wasm.memory.buffer, 0, end).set(haystack.subarray(0, end))
+		CharacterSequence.#wasmHaystack = null
+
+		const count = wasm.scanDelimitedRanges(
+			0,
+			end,
+			state.scanCursor,
+			state.pendingSliceStart,
+			this[0]!,
+			quotePattern?.[0] ?? -1,
+			state.insideQuotes ? 1 : 0,
+			resultsOffset,
+			maxRanges
+		)
+
+		const result = new Int32Array(wasm.memory.buffer, resultsOffset, 3 + count * 2)
+
+		return {
+			ranges: result.subarray(3),
+			count,
+			scanCursor: result[0]!,
+			pendingSliceStart: result[1]!,
+			insideQuotes: result[2] === 1,
+		}
 	}
 
 	/**

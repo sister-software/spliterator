@@ -87,6 +87,26 @@ test("AsyncSpliterator: quote state survives chunk boundaries", async ({ expect 
 	expect(rows).toEqual(['one,"two\nstill-two",three', "four"])
 })
 
+test("AsyncSpliterator: bounded native batches do not truncate dense delimiters", async ({ expect }) => {
+	const delimiterCount = 10_000
+	const source = encoder.encode("x\n".repeat(delimiterCount))
+
+	const spliterator = AsyncSpliterator.from(chunksOf(source), {
+		delimiter: "\n",
+		skipEmpty: false,
+	})
+
+	let rows = 0
+
+	for await (const bytes of spliterator) {
+		expect(decoder.decode(bytes)).toBe(rows < delimiterCount ? "x" : "")
+
+		rows++
+	}
+
+	expect(rows).toBe(delimiterCount + 1)
+})
+
 //#endregion
 
 //#region CSV quote handling

@@ -403,6 +403,43 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	 */
 	#search() {
 		const searchEnd = this.#controller.bytesWritten
+		const quotePattern = this.#enableQuoteHandling ? this.#doubleQuoteSequence : undefined
+
+		// The streaming fast path carries range construction and quote state through one bounded
+		// WASM call. A full result batch resumes at the unconsumed delimiter, so dense inputs are
+		// neither truncated nor rescanned from the beginning.
+		while (this.#searchCursor < searchEnd) {
+			const scan = this.#needle.scanRanges(
+				this.#controller.bytes,
+				{
+					scanCursor: this.#searchCursor,
+					pendingSliceStart: this.#pendingSliceStart,
+					insideQuotes: this.#insideQuotes,
+				},
+				searchEnd,
+				quotePattern
+			)
+
+			if (!scan) break
+
+			for (let i = 0; i < scan.count; i++) {
+				const start = scan.ranges[i * 2]!
+				const end = this.#trimEnd(start, scan.ranges[i * 2 + 1]!)
+				const byteRange: ByteRange = [start, end]
+
+				this.#log("Found byte range", byteRange)
+				this.#indices.enqueue(byteRange)
+			}
+
+			const previousCursor = this.#searchCursor
+			this.#searchCursor = scan.scanCursor
+			this.#pendingSliceStart = scan.pendingSliceStart
+			this.#insideQuotes = scan.insideQuotes
+
+			if (this.#searchCursor >= searchEnd) return
+
+			if (this.#searchCursor <= previousCursor) break
+		}
 
 		if (!this.#enableQuoteHandling) {
 			while (this.#searchCursor <= searchEnd) {
