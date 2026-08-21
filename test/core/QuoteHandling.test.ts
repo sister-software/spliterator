@@ -139,6 +139,92 @@ test("CSV: empty fields preserved under quote handling", ({ expect }) => {
 	expect(rows).toEqual([{ h1: "a", h2: "", h3: "c" }])
 })
 
+//#endregion
+
+//#region Column-split fast path
+
+/**
+ * `splitRowColumns` decodes the row ONCE and splits the string, and takes `String.prototype.split` outright for a row
+ * containing no `"` — skipping both the quote walk and the unquote pass. These pin the invariant that makes that legal:
+ * the two paths must agree on every row where both could run.
+ */
+
+test("CSV fast path: a quote-free row splits identically with and without quote handling", ({ expect }) => {
+	const source = encoder.encode("h1,h2,h3\na,b,c\n,,\nx,,z\n")
+
+	const withQuotes = Array.from(CSVSpliterator.from(source, { mode: "array", enableQuoteHandling: true }))
+	const withoutQuotes = Array.from(CSVSpliterator.from(source, { mode: "array", enableQuoteHandling: false }))
+
+	expect(withQuotes).toEqual(withoutQuotes)
+
+	expect(withQuotes).toEqual([
+		["a", "b", "c"],
+		["", "", ""],
+		["x", "", "z"],
+	])
+})
+
+test("CSV fast path: a quote in ANY column pushes the whole row onto the walk", ({ expect }) => {
+	// The last column carries the quote; the earlier columns must still split exactly as they would have.
+	const source = encoder.encode('h1,h2,h3\na,b,"c,d"\n')
+	const rows = Array.from(CSVSpliterator.from(source, { mode: "array", enableQuoteHandling: true }))
+
+	expect(rows).toEqual([["a", "b", "c,d"]])
+})
+
+test("CSV fast path: an unmatched quote opens a region that runs to EOF, as it did before", ({ expect }) => {
+	// Malformed CSV — RFC 4180 gives no answer for a lone `"` mid-field, and the ROW splitter opens a quoted region on
+	// it just as the column splitter does, so the row never terminates at the newline. Pinned not because the output is
+	// desirable but because it is UNCHANGED: the decode-once column path must not quietly re-interpret malformed input.
+	const source = encoder.encode('h1,h2\n5" pipe,b\n')
+	const rows = Array.from(CSVSpliterator.from(source, { mode: "array", enableQuoteHandling: true }))
+
+	expect(rows).toEqual([['5" pipe,b\n']])
+})
+
+test("CSV fast path: multi-character delimiters split on both paths", ({ expect }) => {
+	const plain = encoder.encode("h1||h2||h3\na||b||c\n")
+	const quoted = encoder.encode('h1||h2||h3\na||"b||x"||c\n')
+
+	expect(
+		Array.from(CSVSpliterator.from(plain, { mode: "array", columnDelimiter: "||", enableQuoteHandling: true }))
+	).toEqual([["a", "b", "c"]])
+
+	expect(
+		Array.from(CSVSpliterator.from(quoted, { mode: "array", columnDelimiter: "||", enableQuoteHandling: true }))
+	).toEqual([["a", "b||x", "c"]])
+})
+
+test("CSV fast path: a non-UTF-8 delimiter falls back to the byte scan", ({ expect }) => {
+	// 0xFF is not valid UTF-8, so it cannot round-trip to a string — the string split would search for U+FFFD and
+	// match the wrong thing. That delimiter must keep the byte path.
+	const delimiter = new Uint8Array([0xff])
+
+	const source = new Uint8Array([
+		...encoder.encode("h1"),
+		0xff,
+		...encoder.encode("h2"),
+		0x0a,
+		...encoder.encode("a"),
+		0xff,
+		...encoder.encode("b"),
+		0x0a,
+	])
+
+	const rows = Array.from(
+		CSVSpliterator.from(source, { mode: "array", columnDelimiter: delimiter, enableQuoteHandling: true })
+	)
+
+	expect(rows).toEqual([["a", "b"]])
+})
+
+test("CSV fast path: multi-byte UTF-8 content is unharmed by decoding before splitting", ({ expect }) => {
+	const source = encoder.encode('h1,h2,h3\nBesançon,"Saint-Étienne, Loire",Zürich\n')
+	const rows = Array.from(CSVSpliterator.from(source, { mode: "array", enableQuoteHandling: true }))
+
+	expect(rows).toEqual([["Besançon", "Saint-Étienne, Loire", "Zürich"]])
+})
+
 test("CSV: quoted header columns", ({ expect }) => {
 	const source = encoder.encode('"h,1",h2\na,b\n')
 	const rows = Array.from(CSVSpliterator.from(source, { mode: "object", enableQuoteHandling: true }))
