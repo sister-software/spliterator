@@ -22,8 +22,11 @@ yarn lint
 # Auto-fix lint issues
 yarn lint:fix
 
-# Release
-yarn release
+# Release — two GitHub Actions dispatches; nothing runs locally. `main` is protected, so the
+# bump lands via an auto-merging PR (mode=prepare), then the merged commit is tagged and
+# published (mode=publish). See .github/workflows/publish.yml.
+gh workflow run publish.yml -f mode=prepare -f version=minor
+gh workflow run publish.yml -f mode=publish
 ```
 
 The package manager is **yarn** (v4). Node >= 20.18.1 is required. Compiled output goes to `out/`.
