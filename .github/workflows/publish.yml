@@ -5,9 +5,17 @@
 # The release therefore splits at the merge boundary:
 #
 #   PHASE 1 — mode=prepare (dispatch with a version): bump package.json on a `release/v<version>`
-#   branch, open the release PR, dispatch the Test workflow against that branch (PRs opened with
-#   GITHUB_TOKEN never trigger `on: pull_request` — GitHub's anti-recursion rule), and enable
-#   auto-merge. The PR merges itself the moment `test` is green; no click required.
+#   branch, open the release PR, and enable auto-merge. The PR merges itself the moment `test` is
+#   green; no click required.
+#
+#   THE PR MUST BE HUMAN-AUTHORED. A PR opened with GITHUB_TOKEN gets its `pull_request` Test run
+#   HELD at `action_required` under the repo's approval policy (github-actions[bot] counts as a
+#   first-time contributor), and a held run is a pending required check — auto-merge waits forever.
+#   The 6.4.1 cut stalled on exactly this until the run was approved by hand. So the branch push and
+#   the PR ride `RELEASE_PR_TOKEN`, a fine-grained PAT (this repo only; contents + pull-requests:
+#   write) that makes the PR belong to a trusted human, whose `pull_request` run fires unheld.
+#   Without the secret the job falls back to GITHUB_TOKEN + an explicit Test dispatch, and warns
+#   that the held run will need approving in the Actions UI.
 #
 #   PHASE 2 — mode=publish (dispatch AFTER the release PR has merged): tag the merged commit, create
 #   the GitHub release, and publish via OIDC. Idempotent by construction — the tag, the release, and
@@ -108,7 +116,9 @@ jobs:
       - name: Open the auto-merging release PR
         if: ${{ !inputs.dry_run }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The PAT when present (see the header), else the workflow token.
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          HAS_RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN != '' }}
           VERSION: ${{ steps.bump.outputs.version }}
         run: |
           set -euo pipefail
@@ -126,15 +136,18 @@ jobs:
             exit 1
           fi
           git commit -m "Release ${VERSION}"
-          git push origin "HEAD:refs/heads/${BRANCH}"
+          # Push with the same identity that opens the PR: the pusher is the triggering actor for
+          # `on: pull_request`, so both operations must ride the same token.
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${BRANCH}"
           PR_URL="$(gh pr create --base main --head "${BRANCH}" \
             --title "Release ${VERSION}" \
             --body "Automated release PR (publish.yml mode=prepare). Auto-merges when the required \`test\` check passes; then dispatch \`publish.yml\` with mode=publish to tag and npm-publish.")"
           echo "release PR: ${PR_URL}"
-          # GITHUB_TOKEN-created PRs do not trigger `on: pull_request`, so the required `test`
-          # check would never report and auto-merge would wait forever. Dispatch it explicitly;
-          # its check run lands on the branch head SHA, which is what the ruleset matches on.
-          gh workflow run test.yml --ref "${BRANCH}"
+          if [ "${HAS_RELEASE_PR_TOKEN}" != "true" ]; then
+            echo "::warning::RELEASE_PR_TOKEN is not set — the PR's pull_request Test run will be held at action_required; approve it in the Actions UI or auto-merge will wait forever."
+            # A dispatched run at least lands a `test` check on the branch head.
+            gh workflow run test.yml --ref "${BRANCH}"
+          fi
           gh pr merge --auto --squash "${PR_URL}"
           {
             echo "## Release PR opened: v${VERSION}"
@@ -232,6 +245,9 @@ jobs:
           else
             gh release create "v${VERSION}" --title "v${VERSION}" --generate-notes
           fi
+          # `delete_branch_on_merge` does not fire for a merge performed by the Actions app, so the
+          # release branch outlives the PR. Remove it here; a missing branch is not an error.
+          git push origin --delete "release/v${VERSION}" 2>/dev/null || echo "release/v${VERSION} already gone"
 
       # --provenance signs a sigstore attestation against this workflow's OIDC identity. It needs a
       # public repo (this one is) AND a CI identity, so it cannot be reproduced by a local publish.
