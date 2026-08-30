@@ -69,3 +69,6 @@ schema/generated
 .claude/settings.local.json
 .pi/
 
+
+## Example data downloads
+examples/data/

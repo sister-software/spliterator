@@ -4,7 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import { AsyncSequence } from "spliterator"
+import { AsyncSequence, parallelFilter } from "spliterator"
 import { describe, expect, test } from "vitest"
 
 async function* range(count: number, start = 0): AsyncGenerator<number> {
@@ -462,6 +462,225 @@ describe("chunks", () => {
 	})
 })
 
+describe("parallelFilter", () => {
+	test("keeps values the predicate accepts, in input order", async () => {
+		const result = await AsyncSequence.from(range(10))
+			.parallelFilter(async (value) => value % 2 === 0, { concurrency: 3 })
+			.toArray()
+
+		expect(result).toEqual([0, 2, 4, 6, 8])
+	})
+
+	test("preserves input order when early predicates settle last", async () => {
+		const result = await AsyncSequence.from(range(8))
+			.parallelFilter(
+				(value) =>
+					new Promise<boolean>((resolve) => {
+						setTimeout(() => resolve(true), 8 - value)
+					}),
+				{ concurrency: 4 }
+			)
+			.toArray()
+
+		expect(result).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+	})
+
+	test("accepts a synchronous predicate", async () => {
+		const result = await AsyncSequence.from(["a", "", "b", ""])
+			.parallelFilter((value) => value.length > 0, { concurrency: 2 })
+			.toArray()
+
+		expect(result).toEqual(["a", "b"])
+	})
+
+	test("keeps falsy values the predicate accepts", async () => {
+		const result = await AsyncSequence.from([0, null, undefined, "", 1])
+			.parallelFilter(async () => true, { concurrency: 2 })
+			.toArray()
+
+		expect(result).toHaveLength(5)
+	})
+
+	test("passes the counter", async () => {
+		const result = await AsyncSequence.from(["x", "y", "z"])
+			.parallelFilter(async (_, counter) => counter !== 1, { concurrency: 3 })
+			.toArray()
+
+		expect(result).toEqual(["x", "z"])
+	})
+
+	test("does not retain passed values on a long stream", async () => {
+		// Only meaningful under --expose-gc; otherwise the assertion is skipped and the long-stream path is still exercised.
+		const gc = globalThis.gc
+		let collected = 0
+
+		const registry = new FinalizationRegistry<number>(() => {
+			collected++
+		})
+
+		async function* payloads() {
+			for (let i = 0; i < 2000; i++) {
+				const payload = { i, bytes: new Uint8Array(64 * 1024) }
+
+				registry.register(payload, i)
+
+				yield payload
+			}
+		}
+
+		let seen = 0
+		let collectedMidStream = 0
+
+		for await (const payload of AsyncSequence.from(payloads()).parallelFilter(async (p) => p.i % 2 === 0, {
+			concurrency: 4,
+		})) {
+			seen++
+
+			if (seen === 750 && gc) {
+				// Finalizers run on a later task, so collect, then yield to the loop twice before reading the count.
+				gc()
+
+				for (let i = 0; i < 2; i++) {
+					await new Promise((resolve) => {
+						setTimeout(resolve, 0)
+					})
+				}
+
+				collectedMidStream = collected
+			}
+		}
+
+		expect(seen).toBe(1000)
+
+		if (gc) {
+			// 1500 payloads had passed through; with the window compacting, nearly all were unreachable.
+			expect(collectedMidStream).toBeGreaterThan(1000)
+		}
+	})
+
+	test("respects the concurrency ceiling", async () => {
+		let inFlight = 0
+		let peak = 0
+
+		await AsyncSequence.from(range(20))
+			.parallelFilter(
+				async () => {
+					inFlight++
+					peak = Math.max(peak, inFlight)
+
+					await new Promise((resolve) => {
+						setTimeout(resolve, 1)
+					})
+
+					inFlight--
+
+					return true
+				},
+				{ concurrency: 4 }
+			)
+			.toArray()
+
+		expect(peak).toBeLessThanOrEqual(4)
+		expect(peak).toBeGreaterThan(1)
+	})
+
+	test("a rejecting predicate rejects the sequence", async () => {
+		await expect(
+			AsyncSequence.from(range(10))
+				.parallelFilter(
+					async (value) => {
+						if (value === 5) throw new Error("boom")
+
+						return true
+					},
+					{ concurrency: 3 }
+				)
+				.toArray()
+		).rejects.toThrow("boom")
+	})
+})
+
+describe("parallelFilter default concurrency", () => {
+	test("omitting options fans out to the filesystem default", async () => {
+		const { fsConcurrency } = await import("spliterator/node/fs")
+		let inFlight = 0
+		let peak = 0
+
+		// Enough items that the pool fills whatever UV_THREADPOOL_SIZE the environment sets.
+		const count = fsConcurrency() * 5
+
+		const result = await AsyncSequence.from(range(count))
+			.parallelFilter(async () => {
+				inFlight++
+				peak = Math.max(peak, inFlight)
+
+				await new Promise((resolve) => {
+					setTimeout(resolve, 1)
+				})
+
+				inFlight--
+
+				return true
+			})
+			.toArray()
+
+		expect(result).toEqual(await Array.fromAsync(range(count)))
+		expect(peak).toBe(fsConcurrency())
+	})
+})
+
+describe("parallelFilter free function", () => {
+	test("mirrors the method", async () => {
+		const result = await parallelFilter(["a", "", "b"], async (value) => value.length > 0, { concurrency: 2 }).toArray()
+
+		expect(result).toEqual(["a", "b"])
+	})
+})
+
+describe("concurrency validation", () => {
+	test("NaN throws at construction rather than yielding nothing", () => {
+		expect(() => AsyncSequence.from(range(3)).parallelMap(async (v) => v, { concurrency: Number.NaN })).toThrow(
+			RangeError
+		)
+
+		expect(() => AsyncSequence.from(range(3)).parallelFilter(async () => true, { concurrency: Number.NaN })).toThrow(
+			RangeError
+		)
+	})
+})
+
+describe("fusion barriers close an unpulled upstream", () => {
+	function closableSource() {
+		let closed = false
+
+		const source: AsyncIterable<number> = {
+			[Symbol.asyncIterator]: () => ({
+				next: async () => ({ value: 1, done: false }),
+				return: async () => {
+					closed = true
+
+					return { value: undefined, done: true }
+				},
+			}),
+		}
+
+		return { source, isClosed: () => closed }
+	}
+
+	test.each([
+		["flatMap", (s: AsyncSequence<number>) => s.flatMap((v) => [v])],
+		["chunks", (s: AsyncSequence<number>) => s.chunks(2)],
+		["parallelMap", (s: AsyncSequence<number>) => s.parallelMap(async (v) => v, { concurrency: 2 })],
+		["parallelFilter", (s: AsyncSequence<number>) => s.parallelFilter(async () => true, { concurrency: 2 })],
+	])("%s followed by take(0) still closes the source", async (_, barrier) => {
+		const { source, isClosed } = closableSource()
+
+		await barrier(AsyncSequence.from(source)).take(0).toArray()
+
+		expect(isClosed()).toBe(true)
+	})
+})
+
 describe("parallelMap", () => {
 	test("maps every value", async () => {
 		const result = await AsyncSequence.from(range(10))
@@ -506,6 +725,49 @@ describe("parallelMap", () => {
 
 		expect(peak).toBeLessThanOrEqual(4)
 		expect(peak).toBeGreaterThan(1)
+	})
+
+	test("a callback rejecting while the source is slow is not an unhandled rejection", async () => {
+		const unhandled: unknown[] = []
+
+		const onUnhandled = (reason: unknown) => {
+			unhandled.push(reason)
+		}
+
+		process.on("unhandledRejection", onUnhandled)
+
+		async function* slow() {
+			for (let i = 0; i < 4; i++) {
+				await new Promise((resolve) => {
+					setTimeout(resolve, 5)
+				})
+
+				yield i
+			}
+		}
+
+		try {
+			await expect(
+				AsyncSequence.from(slow())
+					.parallelMap(
+						async (value) => {
+							if (value === 0) throw new Error("boom0")
+
+							return value
+						},
+						{ concurrency: 4 }
+					)
+					.toArray()
+			).rejects.toThrow("boom0")
+
+			await new Promise((resolve) => {
+				setTimeout(resolve, 0)
+			})
+
+			expect(unhandled).toEqual([])
+		} finally {
+			process.off("unhandledRejection", onUnhandled)
+		}
 	})
 
 	test("a rejecting callback rejects the sequence", async () => {

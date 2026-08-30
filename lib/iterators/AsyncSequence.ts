@@ -6,6 +6,9 @@
 
 import { ReadableStream, type ReadableWritablePair, type StreamPipeOptions } from "node:stream/web"
 
+// Type-only, so the `{@linkcode}` references below resolve; erased at compile, so core stays isomorphic.
+import type { fsConcurrency } from "spliterator/node/fs"
+
 /**
  * A chainable operation in a fused pipeline.
  *
@@ -50,6 +53,26 @@ function toAsyncIterator<T>(source: AsyncIterable<T> | Iterable<T>): AsyncIterat
 	} as AsyncIterator<T>
 }
 
+/**
+ * Wrap a fusion-barrier generator so closing it also closes the sequence it reads from. `return()` on a generator that
+ * was never started skips its body — and its `finally` — so without this, `barrier.take(0)` would leave an eager
+ * upstream (an already-open file handle) unreleased. Once started, the generator's own `finally` closes `inner`;
+ * closing it again is a no-op.
+ */
+function closingWith<U>(generator: AsyncGenerator<U>, inner: AsyncSequence<unknown>): AsyncIterable<U> {
+	return {
+		[Symbol.asyncIterator]: () => ({
+			next: () => generator.next(),
+			return: async () => {
+				await generator.return(undefined)
+				await inner.return()
+
+				return { value: undefined, done: true }
+			},
+		}),
+	}
+}
+
 async function* flattenValues<T, U>(
 	source: AsyncIterable<T>,
 	fn: (value: T, counter: number) => AsyncIterable<U> | Iterable<U> | PromiseLike<AsyncIterable<U> | Iterable<U>>
@@ -86,12 +109,47 @@ async function* batchValues<T>(source: AsyncIterable<T>, size: number): AsyncGen
 	}
 }
 
+/**
+ * The fan-out used when {@linkcode ParallelMapSequenceOptions.concurrency} is omitted. Parallel callbacks on the
+ * caller's thread only pay off for I/O, so the default presumes I/O: in Node it is {@linkcode fsConcurrency} from
+ * `spliterator/node/fs` — libuv's threadpool size, the real ceiling on concurrent filesystem calls — resolved lazily
+ * through the same dynamic import core uses for file sources, and once per module. Where that import fails or the
+ * module is stubbed (browsers, web workers, bundler shims) libuv's own default of 4 stands in.
+ */
+function defaultConcurrency(): Promise<number> {
+	// Optimistic, like `importVendor` in `XLSXSpliterator`: outside Node the module fails to load. `.catch` rather than
+	// a rejection handler so a stub module whose `fsConcurrency` is missing or throws is also covered.
+	defaultConcurrencyPromise ??= import("spliterator/node/fs")
+		.then(({ fsConcurrency }) => fsConcurrency())
+		.catch(() => 4)
+
+	return defaultConcurrencyPromise
+}
+
+let defaultConcurrencyPromise: Promise<number> | undefined
+
+/**
+ * Validate a caller-supplied `concurrency` at construction, like {@linkcode AsyncSequence.take} and
+ * {@linkcode AsyncSequence.chunks} do: `NaN` would otherwise dispatch nothing and yield an empty sequence. Values below
+ * 1 clamp to 1; `Infinity` is unbounded.
+ */
+function normalizeConcurrency(concurrency: number | undefined): number | undefined {
+	if (concurrency === undefined) return undefined
+
+	if (Number.isNaN(concurrency)) {
+		throw new RangeError(`concurrency must be a number, got ${concurrency}`)
+	}
+
+	return Math.max(1, Math.trunc(concurrency))
+}
+
 async function* mapValuesConcurrently<T, U>(
 	source: AsyncIterable<T>,
 	fn: (value: T, counter: number) => U | PromiseLike<U>,
-	limit: number,
+	concurrency: number | undefined,
 	signal?: AbortSignal
 ): AsyncGenerator<U> {
+	const limit = concurrency ?? (await defaultConcurrency())
 	const upstream = source[Symbol.asyncIterator]()
 	// Slots key this map, not items: a source may repeat a value (a list of file paths routinely does), and two `===`
 	// equal keys would collapse into one entry, losing a result and deleting the wrong dispatch.
@@ -115,10 +173,12 @@ async function* mapValuesConcurrently<T, U>(
 				const current = slot++
 				const produced = fn(result.value, current)
 
-				inflight.set(
-					current,
-					Promise.resolve(produced).then((value) => ({ slot: current, value }))
-				)
+				const pending = Promise.resolve(produced).then((value) => ({ slot: current, value }))
+
+				// A callback that rejects while this loop is parked on a slow `upstream.next()` would otherwise be an
+				// unhandled rejection; the race below still rethrows it.
+				pending.then(undefined, noop)
+				inflight.set(current, pending)
 			}
 
 			if (!inflight.size) break
@@ -136,17 +196,80 @@ async function* mapValuesConcurrently<T, U>(
 	}
 }
 
+async function* filterValuesConcurrently<T>(
+	source: AsyncIterable<T>,
+	fn: (value: T, counter: number) => unknown,
+	concurrency: number | undefined,
+	signal?: AbortSignal
+): AsyncGenerator<T> {
+	const limit = concurrency ?? (await defaultConcurrency())
+	const upstream = source[Symbol.asyncIterator]()
+	// A window of dispatched predicates in input order. `head` advances instead of `shift()`, and consumed entries are
+	// spliced off once `head` reaches `limit` — amortized O(1) per item, and the array never holds more than
+	// `2 * limit` entries, so a long stream does not retain every value it has passed.
+	const window: { value: T; verdict: unknown }[] = []
+	let head = 0
+	let counter = 0
+	let exhausted = false
+
+	try {
+		for (;;) {
+			if (signal?.aborted) break
+
+			while (!exhausted && window.length - head < limit) {
+				const result = await upstream.next()
+
+				if (result.done) {
+					exhausted = true
+
+					break
+				}
+
+				const verdict = fn(result.value, counter++)
+
+				// A predicate that rejects before its turn would otherwise be an unhandled rejection; it is still
+				// rethrown below when the window reaches it.
+				if (isThenable(verdict)) {
+					Promise.resolve(verdict).then(undefined, noop)
+				}
+
+				window.push({ value: result.value, verdict })
+			}
+
+			if (head === window.length) break
+
+			const { value, verdict } = window[head++]!
+
+			if (head >= limit) {
+				window.splice(0, head)
+				head = 0
+			}
+
+			if (isThenable(verdict) ? await verdict : verdict) {
+				yield value
+			}
+		}
+	} finally {
+		await upstream.return?.()
+		await Promise.allSettled(window.slice(head).map((entry) => entry.verdict))
+	}
+}
+
+function noop(): void {}
+
 /**
- * Options for {@linkcode AsyncSequence.parallelMap}.
+ * Options for {@linkcode AsyncSequence.parallelMap} and {@linkcode AsyncSequence.parallelFilter}.
  */
 export interface ParallelMapSequenceOptions {
 	/**
-	 * Maximum callbacks in flight at once.
+	 * Maximum callbacks in flight at once. Defaults to the filesystem fan-out the runtime can actually service: libuv's
+	 * threadpool size in Node ({@linkcode fsConcurrency} from `spliterator/node/fs`, 4 unless `UV_THREADPOOL_SIZE` says
+	 * otherwise), and 4 elsewhere.
 	 *
 	 * For I/O-bound work this peaks **low** — often ~2–3 — and then _degrades_ as callers contend for the same disk or
-	 * socket. Sweep it rather than reaching for `availableParallelism()`.
+	 * socket. Sweep it rather than reaching for `availableParallelism()`, which counts CPUs and says nothing about I/O.
 	 */
-	concurrency: number
+	concurrency?: number
 
 	/**
 	 * Abort signal. When aborted, iteration stops after the currently-yielded value; in-flight callbacks are allowed to
@@ -169,8 +292,8 @@ export interface ParallelMapSequenceOptions {
  * paid per item no matter how many operators you stack; only the op loop grows. Measured on Node 26 over 2M items:
  * ~5.4M items/s at three operators and ~4.9M/s at six, against ~2.3M/s for the equivalent nested-generator
  * implementation, where each operator adds a microtask hop. Doubling the operator count costs ~10% here and would cost
- * ~2× there. Only {@linkcode flatMap}, {@linkcode chunks}, and {@linkcode parallelMap} break fusion, because they need
- * inner-iterator state.
+ * ~2× there. Only {@linkcode flatMap}, {@linkcode chunks}, {@linkcode parallelMap}, and {@linkcode parallelFilter}
+ * break fusion, because they need inner-iterator state.
  *
  * Callback results are awaited **only when thenable**, so synchronous callbacks — the common case — cost no microtask
  * hop at all.
@@ -196,6 +319,17 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	#budgets: number[] | null = null
 	#done = false
 
+	/**
+	 * Wrap a source as a sequence of its element type. Prefer {@link AsyncSequence.from}, which also passes an existing
+	 * sequence through unchanged.
+	 */
+	constructor(source: SequenceSource<T>)
+	/**
+	 * Internal: an op list transforms the source's element type, so the source is untyped here.
+	 *
+	 * @internal
+	 */
+	constructor(source: SequenceSource<unknown>, ops: readonly Op[])
 	constructor(source: SequenceSource<unknown>, ops: readonly Op[] = []) {
 		this.#source = source
 		this.#ops = ops
@@ -303,7 +437,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	flatMap<U>(
 		fn: (value: T, counter: number) => AsyncIterable<U> | Iterable<U> | PromiseLike<AsyncIterable<U> | Iterable<U>>
 	): AsyncSequence<U> {
-		return new AsyncSequence<U>(flattenValues(this, fn))
+		return new AsyncSequence<U>(closingWith(flattenValues(this, fn), this))
 	}
 
 	//#endregion
@@ -439,12 +573,12 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 			throw new RangeError(`chunks(${size}): size must be a positive finite number`)
 		}
 
-		return new AsyncSequence<T[]>(batchValues(this, normalized))
+		return new AsyncSequence<T[]>(closingWith(batchValues(this, normalized), this))
 	}
 
 	/**
 	 * Map values through a callback with up to `concurrency` calls in flight, yielding in **completion order** — not
-	 * input order.
+	 * input order. When only membership changes and order must survive, use {@linkcode parallelFilter}.
 	 *
 	 * The callback is a closure, so it runs on the caller's thread. This overlaps _latency_ (file reads, network) and
 	 * does nothing for CPU-bound work; for that, cross a thread boundary with `parallelMapWorkers` or
@@ -454,9 +588,34 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	 */
 	parallelMap<U>(
 		fn: (value: T, counter: number) => U | PromiseLike<U>,
-		{ concurrency, signal }: ParallelMapSequenceOptions
+		{ concurrency, signal }: ParallelMapSequenceOptions = {}
 	): AsyncSequence<U> {
-		return new AsyncSequence<U>(mapValuesConcurrently(this, fn, Math.max(1, Math.trunc(concurrency)), signal))
+		return new AsyncSequence<U>(
+			closingWith(mapValuesConcurrently(this, fn, normalizeConcurrency(concurrency), signal), this)
+		)
+	}
+
+	/**
+	 * Keep values the predicate accepts, with up to `concurrency` predicate calls in flight. The predicate's result is
+	 * truthiness-tested, like {@linkcode filter}.
+	 *
+	 * Unlike {@linkcode parallelMap}, this yields in **input order**: a filter emits the input itself, so nothing is
+	 * gained by emitting early, and a stable order keeps results reproducible (a list of existing paths, for one). The
+	 * price is head-of-line blocking: dispatch runs at most `concurrency` predicates ahead of the oldest unsettled one,
+	 * so a slow predicate stalls the window behind it. That keeps memory bounded, which is the trade this module makes;
+	 * use `parallelMap` when throughput under uneven latency matters more than order.
+	 *
+	 * Same caveats as {@linkcode parallelMap}: the predicate is a closure on the caller's thread, so this overlaps I/O
+	 * latency, not CPU work — cross a thread boundary with `parallelMapWorkers` for CPU work. **Fusion barrier**, like
+	 * {@linkcode flatMap}.
+	 */
+	parallelFilter(
+		fn: (value: T, counter: number) => unknown,
+		{ concurrency, signal }: ParallelMapSequenceOptions = {}
+	): AsyncSequence<T> {
+		return new AsyncSequence<T>(
+			closingWith(filterValuesConcurrently(this, fn, normalizeConcurrency(concurrency), signal), this)
+		)
 	}
 
 	/**

@@ -262,7 +262,7 @@ const cakes = await JSONSpliterator.fromAsync<Row>("menu.jsonl", { delimiter: "\
 	.toArray()
 ```
 
-Filtering happens while streaming, and `take(10)` closes the file handle instead of reading the rest. The operators fuse into a single pass rather than nesting one async generator per step, so chain depth is nearly free — doubling the operator count costs about 10%, where nesting would roughly double it. `flatMap`, `chunks`, and `parallelMap` are the exceptions, since they need inner-iterator state.
+Filtering happens while streaming, and `take(10)` closes the file handle instead of reading the rest. The operators fuse into a single pass rather than nesting one async generator per step, so chain depth is nearly free — doubling the operator count costs about 10%, where nesting would roughly double it. `flatMap`, `chunks`, `parallelMap`, and `parallelFilter` are the exceptions, since they need inner-iterator state.
 
 The synchronous `from` returns a plain generator, which already has the same helpers natively on Node 24+.
 

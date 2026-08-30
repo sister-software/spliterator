@@ -3,7 +3,8 @@
 	"compilerOptions": {
 		"forceConsistentCasingInFileNames": true,
 		"emitDeclarationOnly": false,
-		"allowImportingTsExtensions": false
+		"allowImportingTsExtensions": false,
+		"stripInternal": true
 	},
 	"exclude": ["./out/**/*"]
 }

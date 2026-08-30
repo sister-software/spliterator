@@ -65,12 +65,12 @@ All high-level classes are abstract static-only (instantiation throws `TypeError
 
 ### `AsyncSequence` (`lib/AsyncSequence.ts`)
 
-A lazy, chainable async iterator returned by every `fromAsync`. Core methods (`map`, `filter`, `take`, `drop`, `flatMap`, `reduce`, `toArray`, `forEach`, `some`, `every`, `find`) match the [async iterator helpers proposal](https://github.com/tc39/proposal-async-iterator-helpers) in name, arity, and semantics, including the `counter` argument. Extras that are deliberately not spec surface: `chunks(size)`, `parallelMap(fn, opts)`, `toReadableStream()`, `pipeThrough()`.
+A lazy, chainable async iterator returned by every `fromAsync`. Core methods (`map`, `filter`, `take`, `drop`, `flatMap`, `reduce`, `toArray`, `forEach`, `some`, `every`, `find`) match the [async iterator helpers proposal](https://github.com/tc39/proposal-async-iterator-helpers) in name, arity, and semantics, including the `counter` argument. Extras that are deliberately not spec surface: `chunks(size)`, `parallelMap(fn, opts)`, `parallelFilter(fn, opts)`, `toReadableStream()`, `pipeThrough()`.
 
 - **Fused, not nested.** A chain is an op list plus a source; iteration runs the ops in a plain loop inside one hand-rolled `next()`. One async boundary per item regardless of chain depth — only the op loop grows. Measured on Node 26 over 2M items: bare async generator 10.3M/s, `AsyncSequence` 5.4M/s at three operators and 4.9M/s at six, nested async generators 2.3M/s. Do not "simplify" this into chained `async function*` wrappers; that is a 2.3× regression. Do not extract the pull loop into a separate `async` method either — the extra async frame per item cost 30% when it was tried.
-- **`flatMap`, `chunks`, and `parallelMap` are fusion barriers** — they need inner-iterator state, so each starts a fresh segment.
+- **`flatMap`, `chunks`, `parallelMap`, and `parallelFilter` are fusion barriers** — they need inner-iterator state, so each starts a fresh segment.
 - **Callbacks are awaited only when thenable**, so synchronous callbacks cost no microtask hop.
-- **Closure propagates.** Early exit (`take` satisfied, `find`/`some`/`every` hit, `break`, throwing callback) calls `return()` upstream, which reaches `AsyncSpliterator.#finalize()` and releases the file handle. `#finish()` obtains the upstream iterator even if nothing was ever pulled, because an eager source may hold a handle opened before the sequence was constructed — this is why `take(0)` still closes. A thunk source that was never invoked is skipped there, since invoking it would open a file purely to close it.
+- **Closure propagates.** Early exit (`take` satisfied, `find`/`some`/`every` hit, `break`, throwing callback) calls `return()` upstream, which reaches `AsyncSpliterator.#finalize()` and releases the file handle. `#finish()` obtains the upstream iterator even if nothing was ever pulled, because an eager source may hold a handle opened before the sequence was constructed — this is why `take(0)` still closes. Fusion barriers wrap their generator in `closingWith`, which forwards `return()` to the inner sequence — `return()` on a never-started generator skips its `finally`, so `barrier.take(0)` would otherwise leak. A thunk source that was never invoked is skipped there, since invoking it would open a file purely to close it.
 - **Sources may be deferred** (`SequenceSource<T>` = iterable, async iterable, or a thunk returning either, possibly promised). The thunk form is what lets `fromAsync` return synchronously while its underlying open is async — and it means nothing touches the filesystem until the first pull.
 - **Single-shot**, matching the proposal's iterators.
 - Wrapping costs ~1.9× a bare async generator. On parsed rows that's 3–8%; on raw `Uint8Array` ranges it's most of the cost, so iterate `AsyncSpliterator` directly for scan-only work.
@@ -99,15 +99,15 @@ Keyed off **per-row work**, not file size:
 
 Naming rule: **closure ⇒ caller's thread; module path ⇒ worker thread** (closures can't cross `postMessage`).
 
-|                     | Caller's thread                       | Worker threads                                       |
-| ------------------- | ------------------------------------- | ---------------------------------------------------- |
-| Collection of items | `parallelMap` (`lib/parallel-map.ts`) | `parallelMapWorkers` (`lib/parallel-map-workers.ts`) |
-| One large file      | `AsyncSpliterator.asMany`             | `AsyncSpliterator.asManyWorkers`                     |
-| Boundaries only     | `AsyncSpliterator.segments`           | (feeds either)                                       |
+|                     | Caller's thread                                                   | Worker threads                                       |
+| ------------------- | ----------------------------------------------------------------- | ---------------------------------------------------- |
+| Collection of items | `parallelMap` / `parallelFilter` (`lib/parallel/parallel-map.ts`) | `parallelMapWorkers` (`lib/parallel-map-workers.ts`) |
+| One large file      | `AsyncSpliterator.asMany`                                         | `AsyncSpliterator.asManyWorkers`                     |
+| Boundaries only     | `AsyncSpliterator.segments`                                       | (feeds either)                                       |
 
 ### Node.js adapter (`node/`)
 
-**`node/fs/index.ts`** — Node-specific file I/O. Exports `createChunkIterator` (opens a file handle and returns a readable stream as `AsyncChunkIterator`), `createFileWritableStream`, `readFileSize`, and `readBytes`. The `CreateChunkIteratorOptions.end` field is **inclusive** (matches Node.js `createReadStream({ end })`). This module is dynamically imported (`import("spliterator/node/fs")`) within the core layer so the library stays isomorphic — the dynamic import only runs in Node environments.
+**`node/fs/index.ts`** — Node-specific file I/O. Exports `createChunkIterator` (opens a file handle and returns a readable stream as `AsyncChunkIterator`), `createFileWritableStream`, `readFileSize`, `readBytes`, and `fsConcurrency` (libuv threadpool size from `UV_THREADPOOL_SIZE`, default 4 — the honest `concurrency` for `parallelMap`/`parallelFilter` over file paths; `availableParallelism()` counts CPUs, not I/O). The `CreateChunkIteratorOptions.end` field is **inclusive** (matches Node.js `createReadStream({ end })`). This module is dynamically imported (`import("spliterator/node/fs")`) within the core layer so the library stays isomorphic — the dynamic import only runs in Node environments.
 
 **`node/cli/`** — The `spliterator` binary, built on Node's built-in `util.parseArgs` (no dependencies). `index.ts` dispatches on the first argument; each command in `node/cli/commands/` owns its `parseArgs` call, its `help` string, and a `run(args)` entry. Shared flags and coercion helpers live in `node/cli/utils.ts`.
 

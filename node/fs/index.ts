@@ -11,6 +11,8 @@ import { WritableStream } from "node:stream/web"
 import { PathBuilder } from "path-ts"
 
 import { type AsyncChunkIterator, type AsyncDataResource, isFileHandleLike } from "../../lib/internal/shared.js"
+// Type-only, so the `{@linkcode}` references below resolve.
+import type { AsyncSequence } from "../../lib/iterators/AsyncSequence.js"
 
 /**
  * Create a readable stream from a file system source.
@@ -234,5 +236,37 @@ export async function createChunkIterator(
 
 	throw new TypeError("The provided source does not support async iteration.")
 }
+
+/**
+ * Libuv's threadpool size: the real ceiling on concurrent filesystem calls in Node.
+ *
+ * Every `fs` operation (and DNS, zlib, and much of crypto) is dispatched to this pool, so issuing more calls than it
+ * has threads only queues them inside libuv. The pool defaults to **4** threads and is sized by `UV_THREADPOOL_SIZE`,
+ * read once before the first pool use — so this reflects the env, parsed the way libuv parses it, not a live count.
+ * Sockets bypass the pool; their limit is the peer.
+ *
+ * {@linkcode AsyncSequence.parallelMap} / {@linkcode AsyncSequence.parallelFilter} use this as their default
+ * `concurrency` in Node. Reach for it directly when sizing some other fan-out, in place of `os.availableParallelism()`,
+ * which counts CPUs and says nothing about I/O.
+ *
+ * @see https://docs.libuv.org/en/v1.x/threadpool.html
+ */
+export function fsConcurrency(): number {
+	const raw = process.env.UV_THREADPOOL_SIZE
+
+	if (raw === undefined) return UV_THREADPOOL_DEFAULT
+
+	// Mirror libuv's own parse (src/threadpool.c): `atoi`, so leading whitespace, a sign, and trailing junk are
+	// tolerated and a fraction truncates; 0 or unparsable becomes 1; the result is an unsigned int clamped to 1024, so
+	// a negative value wraps and clamps to the maximum.
+	const parsed = Number.parseInt(raw, 10)
+
+	if (Number.isNaN(parsed) || parsed === 0) return 1
+
+	return parsed < 0 || parsed > UV_THREADPOOL_MAX ? UV_THREADPOOL_MAX : parsed
+}
+
+const UV_THREADPOOL_DEFAULT = 4
+const UV_THREADPOOL_MAX = 1024
 
 export default createChunkIterator

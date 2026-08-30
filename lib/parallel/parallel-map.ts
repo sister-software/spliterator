@@ -19,7 +19,8 @@ import { AsyncSequence, type ParallelMapSequenceOptions } from "../iterators/Asy
  *
  * @param source The collection to map.
  * @param fn The callback, receiving `(value, counter)`.
- * @param options Concurrency ceiling and optional abort signal.
+ * @param options Concurrency ceiling (defaults to the runtime's filesystem fan-out — see
+ *   {@linkcode ParallelMapSequenceOptions.concurrency}) and optional abort signal.
  *
  * @yields Each result, in completion order.
  * @see {@linkcode parallelMapWorkers} to run the handler on worker threads instead — it takes a module path rather than
@@ -29,7 +30,30 @@ import { AsyncSequence, type ParallelMapSequenceOptions } from "../iterators/Asy
 export function parallelMap<T, U>(
 	source: AsyncIterable<T> | Iterable<T>,
 	fn: (value: T, counter: number) => U | PromiseLike<U>,
-	options: ParallelMapSequenceOptions
+	options?: ParallelMapSequenceOptions
 ): AsyncSequence<U> {
 	return AsyncSequence.from(source).parallelMap(fn, options)
+}
+
+/**
+ * Keep the values of a collection that an async predicate accepts, with up to `concurrency` predicate calls in flight,
+ * yielding in **input order**.
+ *
+ * The free-function form of {@linkcode AsyncSequence.parallelFilter}; see there for the ordering guarantee and the
+ * default concurrency.
+ *
+ * @param source The collection to filter.
+ * @param fn The predicate, receiving `(value, counter)`; its result is truthiness-tested.
+ * @param options Concurrency ceiling (defaults to the runtime's filesystem fan-out — see
+ *   {@linkcode ParallelMapSequenceOptions.concurrency}) and optional abort signal.
+ *
+ * @yields Each accepted value, in input order.
+ * @see {@linkcode parallelMap} for the mapping counterpart, which yields in completion order.
+ */
+export function parallelFilter<T>(
+	source: AsyncIterable<T> | Iterable<T>,
+	fn: (value: T, counter: number) => unknown,
+	options?: ParallelMapSequenceOptions
+): AsyncSequence<T> {
+	return AsyncSequence.from(source).parallelFilter(fn, options)
 }
