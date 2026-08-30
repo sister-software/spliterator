@@ -1,0 +1,62 @@
+# The CI gate: lint, compile, and the full test suite on every PR and on every push to main.
+#
+# THE JOB IS NAMED `test` ON PURPOSE. The ruleset on `main` requires a status check with exactly
+# that context before a PR can merge, and publish.yml's prepare phase auto-merges the release PR
+# on that same check. Rename it and both break silently — the ruleset would wait forever for a
+# check that never reports.
+#
+# `workflow_dispatch` is here because PRs opened with GITHUB_TOKEN never trigger `on: pull_request`
+# (GitHub's anti-recursion rule); publish.yml dispatches this workflow against the release branch
+# explicitly so the required check lands on the branch head.
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable Corepack (yarn 4)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Lint
+        run: yarn lint
+
+      - name: Compile
+        run: yarn compile
+
+      # `--run` is required. Bare vitest watches and never exits.
+      - name: Test
+        run: yarn test --run
+
+      # Exercise the `files` array so a missing build artifact fails here, not in a consumer's
+      # node_modules.
+      - name: Pack and inspect the tarball
+        run: |
+          npm pack --dry-run
+          test -f out/index.js || { echo "::error::out/index.js missing — compile did not produce the published entry"; exit 1; }
+          test -f out/index.d.ts || { echo "::error::out/index.d.ts missing — no types would ship"; exit 1; }

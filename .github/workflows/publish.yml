@@ -1,17 +1,22 @@
-# Manual-dispatch publish to npm via Trusted Publishing (OIDC). Single-phase.
+# Manual-dispatch publish to npm via Trusted Publishing (OIDC). PR-based, two-phase.
 #
-# WHY SINGLE-PHASE, unlike the sibling mailwoman workflow: `main` here carries no branch protection
-# and no rulesets, so this job can bump, tag and push directly. If a ruleset is ever added that
-# requires a PR with a green check, this breaks with GH013 and has to split at the merge boundary
-# the way mailwoman's did.
+# WHY TWO PHASES: the ruleset on `main` requires every change to arrive through a PR with a green
+# `test` check, so nothing — this workflow included — can push a version bump straight to main.
+# The release therefore splits at the merge boundary:
 #
-# THIS WORKFLOW IS THE ONLY CI IN THE REPO, so the gate lives inside it: lint, compile and the full
-# test suite all run before anything is pushed or published. `yarn test` must be invoked with
-# `--run` — bare vitest enters watch mode and the job would hang until it timed out.
+#   PHASE 1 — mode=prepare (dispatch with a version): bump package.json on a `release/v<version>`
+#   branch, open the release PR, dispatch the Test workflow against that branch (PRs opened with
+#   GITHUB_TOKEN never trigger `on: pull_request` — GitHub's anti-recursion rule), and enable
+#   auto-merge. The PR merges itself the moment `test` is green; no click required.
 #
-# ORDER IS PUSH-FIRST, deliberately. A failed publish then leaves a pushed tag with nothing on npm,
-# which is visible and fixable by re-dispatching. The reverse order would leave npm ahead of git,
-# and an npm version is immutable — there is no taking it back.
+#   PHASE 2 — mode=publish (dispatch AFTER the release PR has merged): tag the merged commit, create
+#   the GitHub release, and publish via OIDC. Idempotent by construction — the tag, the release, and
+#   the npm publish are each skipped when they already exist — so re-dispatching after a partial
+#   failure is always safe. This same mode IS the recovery path.
+#
+# ORDER IN PHASE 2 IS TAG-FIRST, deliberately. A failed publish then leaves a pushed tag with
+# nothing on npm, which is visible and fixable by re-dispatching. The reverse would leave npm ahead
+# of git, and an npm version is immutable — there is no taking it back.
 #
 # AUTH: npm Trusted Publishing. No NPM_TOKEN anywhere. npmjs.com is configured to accept publishes
 # from this exact workflow file, matched LITERALLY by path — `.github/workflows/publish.yml`.
@@ -24,50 +29,142 @@ name: NPM Publish
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version bump: patch / minor / major / prerelease, or an exact semver like 6.3.0"
+      mode:
+        description: "prepare = bump the version + open the auto-merging release PR. publish = tag + npm-publish the ALREADY-MERGED release commit on main (also the partial-failure recovery path)."
         required: true
+        default: prepare
+        type: choice
+        options:
+          - prepare
+          - publish
+      version:
+        description: "prepare only: patch / minor / major / prerelease, or an exact semver like 6.4.0"
+        required: false
         default: patch
         type: string
       dry_run:
-        description: "Dry run — run the full gate and pack the tarball, but push nothing and publish nothing"
+        description: "Dry run — run everything up to the side effects, then push nothing, open nothing, publish nothing"
         required: false
         default: false
         type: boolean
 
-# `contents: write` pushes the bump commit and tag and creates the release.
-# `id-token: write` is what lets Actions mint the OIDC token npm verifies. Without it the publish
-# falls back to looking for a token and fails.
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
+# Serialize releases. Never cancel an in-flight run — a prepare may be mid-push and a publish
+# mid-tarball; killing either leaves a partial state a human has to unwind.
 concurrency:
   group: publish
   cancel-in-progress: false
 
 jobs:
-  publish:
-    # GITHUB-HOSTED ON PURPOSE — do not move this to a self-hosted runner. npm refuses provenance
-    # attestation from one outright: E422 `Unsupported GitHub Actions runner environment:
-    # "self-hosted". Only "github-hosted" runners are supported when publishing with provenance`.
-    # That failed a whole release loop in the sibling mailwoman repo (v7.6.0, 2026-07-23) after the
-    # tag had already been pushed. Nothing in this job needs lab data.
+  # PHASE 1 — version bump on a release branch + auto-merging PR. No tag, no npm.
+  prepare:
+    if: ${{ inputs.mode == 'prepare' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
+    permissions:
+      contents: write # push the release/v<version> branch
+      pull-requests: write # open the release PR + enable auto-merge
+      actions: write # dispatch the Test workflow against the release branch
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          # One source of truth. .nvmrc must satisfy package.json `engines` — it did not until 6.3.0
-          # (23.2.0 against a `>= 24.0.0` floor), which meant `nvm use` handed a contributor a Node
-          # the package declares unsupported while CI silently ran something else.
+          node-version-file: .nvmrc
+
+      # `npm version` without git side effects: only package.json changes. The commit and branch
+      # are made below, under the allowlist, so an unexpected dirty file is a failure here rather
+      # than a silent passenger in the release commit.
+      - name: Resolve and bump the version
+        id: bump
+        run: |
+          set -euo pipefail
+          NEW_VERSION="$(npm version "${{ inputs.version }}" --no-git-tag-version)"
+          VERSION="${NEW_VERSION#v}"
+          echo "Bumped package.json to ${VERSION}"
+          # Collision guards — the version must be new to both git and npm.
+          if git ls-remote --tags origin "v${VERSION}" | grep -q .; then
+            echo "::error::tag v${VERSION} already exists — pick a different version"; exit 1
+          fi
+          if npm view "spliterator@${VERSION}" version >/dev/null 2>&1; then
+            echo "::error::spliterator@${VERSION} is already on npm — pick a different version"; exit 1
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: "Dry run: show the bump and stop"
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "::notice::DRY RUN — would open a release PR for v${{ steps.bump.outputs.version }} with:"
+          git --no-pager diff
+
+      - name: Open the auto-merging release PR
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+          BRANCH="release/v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${BRANCH}"
+          # Only the manifest may change in a release commit. Anything else dirty is a fault to
+          # surface, never to ship.
+          git add package.json
+          UNEXPECTED="$(git status --porcelain --untracked-files=no | grep -v '^M  package.json$' || true)"
+          if [ -n "${UNEXPECTED}" ]; then
+            echo "::error::changed files outside package.json — refusing to commit them silently:"
+            echo "${UNEXPECTED}"
+            exit 1
+          fi
+          git commit -m "Release ${VERSION}"
+          git push origin "HEAD:refs/heads/${BRANCH}"
+          PR_URL="$(gh pr create --base main --head "${BRANCH}" \
+            --title "Release ${VERSION}" \
+            --body "Automated release PR (publish.yml mode=prepare). Auto-merges when the required \`test\` check passes; then dispatch \`publish.yml\` with mode=publish to tag and npm-publish.")"
+          echo "release PR: ${PR_URL}"
+          # GITHUB_TOKEN-created PRs do not trigger `on: pull_request`, so the required `test`
+          # check would never report and auto-merge would wait forever. Dispatch it explicitly;
+          # its check run lands on the branch head SHA, which is what the ruleset matches on.
+          gh workflow run test.yml --ref "${BRANCH}"
+          gh pr merge --auto --squash "${PR_URL}"
+          {
+            echo "## Release PR opened: v${VERSION}"
+            echo ""
+            echo "- ${PR_URL} (auto-merges when \`test\` is green)"
+            echo "- Next: dispatch this workflow with **mode=publish** after the merge."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  # PHASE 2 — tag + GitHub release + npm publish of the merged release commit on main.
+  publish:
+    if: ${{ inputs.mode == 'publish' }}
+    # GITHUB-HOSTED ON PURPOSE — do not move this to a self-hosted runner. npm refuses provenance
+    # attestation from one outright: E422 `Unsupported GitHub Actions runner environment:
+    # "self-hosted". Only "github-hosted" runners are supported when publishing with provenance`.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # push the version tag + create the GitHub release
+      id-token: write # npm Trusted Publishing (OIDC)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
           node-version-file: .nvmrc
           registry-url: https://registry.npmjs.org
 
@@ -77,14 +174,16 @@ jobs:
       - name: Install dependencies
         run: yarn install --immutable
 
-      # Trusted Publishing needs npm >= 11.5.1 for OIDC. Node 24 ships a new enough npm today, but
-      # pinning the requirement here means a future runner image change fails loudly on this line
-      # rather than as an unexplained auth error three steps later.
+      # Trusted Publishing needs npm >= 11.5.1 for OIDC. Pinning the requirement here means a
+      # future runner image change fails loudly on this line rather than as an unexplained auth
+      # error three steps later.
       - name: Ensure npm supports OIDC
         run: |
           npm install -g npm@latest
           npm --version
 
+      # The `test` check already gated the release PR; this re-run is cheap insurance that the
+      # tarball is built from exactly what is on main now, and produces `out/` for the publish.
       - name: Lint
         run: yarn lint
 
@@ -95,58 +194,70 @@ jobs:
       - name: Test
         run: yarn test --run
 
-      - name: Configure git identity
+      - name: Read the version on main
+        id: version
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=${VERSION}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
-      # `npm version` writes package.json, commits, and tags in one step. No `-w`/workspace handling
-      # is needed: this repo publishes exactly one package.
-      - name: Bump version
-        id: bump
-        run: |
-          NEW_VERSION="$(npm version "${{ inputs.version }}" --message 'Release %s')"
-          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Bumped to ${NEW_VERSION}"
-
-      # Packs from the real manifest so the `files` array is exercised before anything is pushed.
-      # A missing build artifact shows up here rather than in a consumer's node_modules.
       - name: Pack and inspect the tarball
         run: |
           npm pack --dry-run
           test -f out/index.js || { echo "::error::out/index.js missing — compile did not produce the published entry"; exit 1; }
           test -f out/index.d.ts || { echo "::error::out/index.d.ts missing — no types would ship"; exit 1; }
 
-      - name: Dry run summary
+      - name: "Dry run: summary and stop"
         if: ${{ inputs.dry_run }}
         run: |
-          echo "::notice::DRY RUN — would publish ${{ steps.bump.outputs.version }}. Nothing pushed, nothing published."
-          git --no-pager show --stat HEAD
+          echo "::notice::DRY RUN — would tag, release, and publish spliterator@${{ steps.version.outputs.version }} from $(git rev-parse --short HEAD). Nothing pushed, nothing published."
 
-      - name: Push the bump commit and tag
+      - name: Tag and GitHub release
         if: ${{ !inputs.dry_run }}
-        run: git push --follow-tags origin HEAD:main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --tags origin "v${VERSION}" | grep -q .; then
+            echo "tag v${VERSION} already on origin (recovery re-run) — skipping tag push"
+          else
+            git tag -a "v${VERSION}" -m "Release ${VERSION}"
+            git push origin "v${VERSION}"
+          fi
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "GitHub release v${VERSION} already exists (recovery re-run) — skipping"
+          else
+            gh release create "v${VERSION}" --title "v${VERSION}" --generate-notes
+          fi
 
       # --provenance signs a sigstore attestation against this workflow's OIDC identity. It needs a
       # public repo (this one is) AND a CI identity, so it cannot be reproduced by a local publish.
       - name: Publish to npm
         if: ${{ !inputs.dry_run }}
-        run: npm publish --provenance --access public
-
-      - name: Create the GitHub release
-        if: ${{ !inputs.dry_run }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release create "${{ steps.bump.outputs.version }}" \
-            --title "${{ steps.bump.outputs.version }}" \
-            --generate-notes
+          if npm view "spliterator@${VERSION}" version >/dev/null 2>&1; then
+            echo "spliterator@${VERSION} is already on npm (recovery re-run) — skipping publish"
+          else
+            npm publish --provenance --access public
+          fi
 
+      # The registry's read replicas lag the publish by a few seconds — a single `npm view` taken
+      # 1.9 s after the 6.4.0 publish still reported 6.3.1. Poll rather than sample once.
       - name: Verify the published version
         if: ${{ !inputs.dry_run }}
+        env:
+          EXPECTED: ${{ steps.version.outputs.version }}
         run: |
-          PUBLISHED="$(npm view spliterator version)"
-          EXPECTED="${{ steps.bump.outputs.version }}"
-          EXPECTED="${EXPECTED#v}"
-          echo "npm reports ${PUBLISHED}, expected ${EXPECTED}"
-          test "${PUBLISHED}" = "${EXPECTED}" || { echo "::error::npm still reports ${PUBLISHED}"; exit 1; }
+          for attempt in $(seq 1 12); do
+            PUBLISHED="$(npm view spliterator version 2>/dev/null || true)"
+            echo "attempt ${attempt}: npm reports '${PUBLISHED}', expected ${EXPECTED}"
+            test "${PUBLISHED}" = "${EXPECTED}" && exit 0
+            sleep 5
+          done
+          echo "::error::npm still reports '${PUBLISHED}' after 60s; expected ${EXPECTED}"
+          exit 1
