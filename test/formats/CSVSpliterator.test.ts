@@ -4,9 +4,17 @@
  * @author Teffen Ellis, et al.
  */
 
-import { CSVSpliterator, Delimiters, normalizeColumnNames, zipSync } from "spliterator"
+import {
+	type AsyncSequence,
+	CSVSpliterator,
+	Delimiters,
+	normalizeColumnNames,
+	PSVSpliterator,
+	TSVSpliterator,
+	zipSync,
+} from "spliterator"
 import { createChunkIterator } from "spliterator/node/fs"
-import { test } from "vitest"
+import { expectTypeOf, test } from "vitest"
 
 import { fixturesDirectory, loadFixture } from "../support/utils.js"
 
@@ -17,6 +25,58 @@ const rawHeader = fixture.decodedLines[0]!.split(",")
 const firstRow = fixture.decodedLines[1]!.split(",")
 
 const normalizedHeader = normalizeColumnNames(rawHeader)
+
+interface TypedCSVRow {
+	Country: string
+	Location: string
+}
+
+test("Object mode accepts an interface as its row type", async ({ expect }) => {
+	const source = (async function* () {
+		yield new TextEncoder().encode("Country,Location\nFR,PAR\n")
+	})()
+
+	const records = CSVSpliterator.fromAsync<TypedCSVRow>(source, {
+		mode: "object",
+		normalizeKeys: false,
+	})
+
+	expectTypeOf(records).toEqualTypeOf<AsyncSequence<TypedCSVRow>>()
+	expect(await records.toArray()).toEqual([{ Country: "FR", Location: "PAR" }])
+
+	const syncRecords = CSVSpliterator.from<TypedCSVRow>("Country,Location\nFR,PAR\n", {
+		mode: "object",
+		normalizeKeys: false,
+	})
+
+	expectTypeOf(syncRecords).toEqualTypeOf<Generator<TypedCSVRow>>()
+
+	expectTypeOf(
+		TSVSpliterator.from<TypedCSVRow>("Country\tLocation\nFR\tPAR\n", { mode: "object", normalizeKeys: false })
+	).toEqualTypeOf<Generator<TypedCSVRow>>()
+
+	expectTypeOf(
+		PSVSpliterator.from<TypedCSVRow>("Country|Location\nFR|PAR\n", { mode: "object", normalizeKeys: false })
+	).toEqualTypeOf<Generator<TypedCSVRow>>()
+
+	expectTypeOf(
+		TSVSpliterator.fromAsync<TypedCSVRow>(
+			(async function* () {
+				yield new TextEncoder().encode("Country\tLocation\nFR\tPAR\n")
+			})(),
+			{ mode: "object", normalizeKeys: false }
+		)
+	).toEqualTypeOf<AsyncSequence<TypedCSVRow>>()
+
+	expectTypeOf(
+		PSVSpliterator.fromAsync<TypedCSVRow>(
+			(async function* () {
+				yield new TextEncoder().encode("Country|Location\nFR|PAR\n")
+			})(),
+			{ mode: "object", normalizeKeys: false }
+		)
+	).toEqualTypeOf<AsyncSequence<TypedCSVRow>>()
+})
 
 test("Header is parsed", async ({ expect }) => {
 	const result = CSVSpliterator.from(fixture.bytes, { mode: "object", normalizeKeys: false }).next()

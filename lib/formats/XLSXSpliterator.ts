@@ -189,7 +189,7 @@ export abstract class XLSXSpliterator {
 	/**
 	 * @yields Each row as an object with the header names as keys.
 	 */
-	static fromAsync<T extends XLSXSpliteratorEmittedRecord = XLSXSpliteratorEmittedRecord>(
+	static fromAsync<T extends object = XLSXSpliteratorEmittedRecord>(
 		source: XLSXSource,
 		options?: XLSXSpliteratorInit & { mode: "object" }
 	): AsyncSequence<T>

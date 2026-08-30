@@ -275,7 +275,7 @@ export abstract class CSVSpliterator {
 		throw new TypeError("Static class cannot be instantiated. Did you mean `CSVSpliterator.from`?")
 	}
 
-	static from<T extends CSVSpliteratorEmittedRecord = CSVSpliteratorEmittedRecord>(
+	static from<T extends object = CSVSpliteratorEmittedRecord>(
 		source: CharacterSequenceInput,
 		options?: CSVSpliteratorInit & { mode: "object" }
 	): Generator<T>
@@ -364,7 +364,7 @@ export abstract class CSVSpliterator {
 	/**
 	 * @yields Each row as an object with the header names as keys.
 	 */
-	static fromAsync<T extends CSVSpliteratorEmittedRecord = CSVSpliteratorEmittedRecord>(
+	static fromAsync<T extends object = CSVSpliteratorEmittedRecord>(
 		source: AsyncDataResource | AsyncChunkIterator,
 		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode: "object" }
 	): AsyncSequence<T>
