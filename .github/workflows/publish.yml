@@ -119,6 +119,7 @@ jobs:
           # The PAT when present (see the header), else the workflow token.
           GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
           HAS_RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN != '' }}
+          WORKFLOW_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.bump.outputs.version }}
         run: |
           set -euo pipefail
@@ -148,7 +149,10 @@ jobs:
             # A dispatched run at least lands a `test` check on the branch head.
             gh workflow run test.yml --ref "${BRANCH}"
           fi
-          gh pr merge --auto --squash "${PR_URL}"
+          # Arming auto-merge is a GraphQL mutation (enablePullRequestAutoMerge) a fine-grained PAT
+          # is not permitted to call — "Resource not accessible by personal access token" — so it
+          # rides the workflow token, which may. Only the push and the PR need the human identity.
+          GH_TOKEN="${WORKFLOW_TOKEN}" gh pr merge --auto --squash "${PR_URL}"
           {
             echo "## Release PR opened: v${VERSION}"
             echo ""
