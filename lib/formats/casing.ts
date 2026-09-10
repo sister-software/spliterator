@@ -11,9 +11,9 @@ import type { CamelCase, SnakeCase } from "type-fest"
  * Any character that is not a letter, a digit, or an underscore, in ANY script.
  *
  * `\W` cannot serve here: it is `[^A-Za-z0-9_]` in JavaScript, with or without the `u` flag, so every character of a
- * non-Latin header is "non-word". A Korean CSV header (`영업상태명`) collapsed to a single `_`, and a file of them
- * became `_`, `__2`, `__3` … once `normalizeColumnNames` de-duplicated the collisions — the header was not renamed, it
- * was destroyed, and every value became unreachable by name.
+ * non-Latin header is "non-word". A Korean CSV header (`영업상태명`) collapsed to a single `_`, and a file of them became
+ * `_`, `__2`, `__3` … once `normalizeColumnNames` de-duplicated the collisions — the header was not renamed, it was
+ * destroyed, and every value became unreachable by name.
  */
 const NON_KEY_CHARACTER = /[^\p{L}\p{N}_]+/gu
 
@@ -21,8 +21,8 @@ const NON_KEY_CHARACTER = /[^\p{L}\p{N}_]+/gu
  * Converts a name to snake_case, unless the name is already in all caps.
  *
  * A CASELESS SCRIPT TAKES THE ALL-CAPS BRANCH, because `toUpperCase()` is the identity on Korean, Japanese, Chinese,
- * Hebrew and Arabic. That is the right branch — those names have no case to convert and should survive as written —
- * so the branch preserves letters of every script and replaces only what cannot be a key.
+ * Hebrew and Arabic. That is the right branch — those names have no case to convert and should survive as written — so
+ * the branch preserves letters of every script and replaces only what cannot be a key.
  */
 export function smartSnakeCase<T extends string>(name: T): T extends Uppercase<T> ? T : SnakeCase<T> {
 	const normalizedName = name
