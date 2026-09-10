@@ -305,14 +305,15 @@ export abstract class CSVSpliterator {
 		const {
 			// ---
 			header = true,
-			// `mode` is destructured before `normalizeKeys` because the latter's default reads it.
-			mode = "array",
+			// Without a header row there are no column names, so a row can only be an array.
+			// Declared before `normalizeKeys`, whose own default reads this one.
+			mode = header === false ? "array" : "object",
 			transformers: transformersInput = [],
 			// Matches `fromAsync`. These two defaulted differently until 4.0.1, so the same options
 			// object produced `row.some_name` from one entry point and `row["Some Name"]` from the other.
 			normalizeKeys = mode !== "array",
 			columnDelimiter: columnDelimiterInput = this.ColumnDelimiter,
-			enableQuoteHandling = false,
+			enableQuoteHandling = true,
 			// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
 			// never carries a stray `\r` on Windows-lineage sources.
 			crlf = true,
@@ -414,11 +415,12 @@ export abstract class CSVSpliterator {
 		const {
 			// ---
 			header = true,
-			mode = "array",
+			// Without a header row there are no column names, so a row can only be an array.
+			mode = header === false ? "array" : "object",
 			transformers: transformersInput = [],
 			normalizeKeys = mode !== "array",
 			columnDelimiter: columnDelimiterInput,
-			enableQuoteHandling = false,
+			enableQuoteHandling = true,
 			// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
 			// never carries a stray `\r` on Windows-lineage sources.
 			crlf = true,
