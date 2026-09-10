@@ -22,7 +22,14 @@
  *   - `AsyncSpliterator` accepts string chunks (UTF-8 encoded) instead of silently mis-reading.
  */
 
-import { AsyncSpliterator, CSVSpliterator, JSONSpliterator, Spliterator, TextSpliterator } from "spliterator"
+import {
+	AsyncSpliterator,
+	CSVSpliterator,
+	JSONSpliterator,
+	smartSnakeCase,
+	Spliterator,
+	TextSpliterator,
+} from "spliterator"
 import { test } from "vitest"
 
 const encoder = new TextEncoder()
@@ -257,12 +264,17 @@ test("CSV: from and fromAsync agree on default keys", async ({ expect }) => {
 	expect(sync).toEqual([{ h_1: "a", some_name: "b" }])
 })
 
-test("CSV: an ALL CAPS header is not case-folded by normalizeKeys", ({ expect }) => {
+test("CSV: normalizeKeys lower-cases an ALL CAPS header", ({ expect }) => {
 	const source = encoder.encode("LON,LAT,STREET\n1,2,Main St\n")
 	const rows = Array.from(CSVSpliterator.from(source, { mode: "object", normalizeKeys: true }))
 
-	// `smartSnakeCase` treats existing all-caps as deliberate. OpenAddresses headers land here.
-	expect(rows).toEqual([{ LON: "1", LAT: "2", STREET: "Main St" }])
+	// A column key is an identifier the caller types, and the same data ships as `LON,LAT` from OpenAddresses and
+	// `lon,lat` elsewhere. Preserving the difference makes every consumer handle both spellings.
+	expect(rows).toEqual([{ lon: "1", lat: "2", street: "Main St" }])
+})
+
+test("CSV: smartSnakeCase still leaves an all-caps name alone, outside column keys", ({ expect }) => {
+	expect(smartSnakeCase("LON")).toBe("LON")
 })
 
 test("Async CSV: quoted embedded delimiter and newline", async ({ expect }) => {

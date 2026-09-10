@@ -72,11 +72,16 @@ export function smartCapitalCase(input: string): string {
 
 /**
  * Given an array of column names, normalize them to ensure they are unique and usable as object keys.
+ *
+ * Keys are LOWER CASE, where {@link smartSnakeCase} leaves an all-caps name as it found it. A column key is an
+ * identifier a caller types, and one source's `LON,LAT,NUMBER` is another's `lon,lat,number` for the same data — a
+ * reader that preserves the difference makes every consumer handle both spellings. `smartSnakeCase` keeps its own
+ * contract for callers naming things other than columns.
  */
 export function normalizeColumnNames(columnHeaders: Iterable<string>): string[] {
 	const columnInputCountMap = new Map<string, number>()
 	const distinctColumns = new Set<string>()
-	const keyableColumnNames = Iterator.from(columnHeaders).map(smartSnakeCase)
+	const keyableColumnNames = Iterator.from(columnHeaders).map((name) => smartSnakeCase(name).toLowerCase())
 
 	for (const columnHeader of keyableColumnNames) {
 		if (distinctColumns.has(columnHeader)) {
