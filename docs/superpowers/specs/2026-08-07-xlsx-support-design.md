@@ -49,19 +49,24 @@ other static classes.
 ```ts
 type XLSXCellValue = string | number | boolean | Date | null
 
-interface XLSXSpliteratorInit {
-	/** Sheet number (1-based) or name. @default 1 */
-	sheet?: number | string
-	/** Output shape, as in CSVSpliterator. @default "array" */
-	mode?: CSVOutputMode
+interface RowSpliteratorInit<V> {
 	/** Treat the first row as a header. @default true */
 	header?: boolean
-	/** Normalize header keys. @default mode !== "array" (matches CSVSpliterator) */
+	/**
+	 * Output shape. A header row produces `"object"` rows by default; `header: false` produces `"array"` rows.
+	 */
+	mode?: CSVOutputMode
+	/** Normalize header keys. @default mode !== "array" */
 	normalizeKeys?: boolean
-	/** Per-column transformers; receive typed cell values, not strings. */
-	transformers?: Iterable<XLSXTransformerEntry> | XLSXTransformerRecord
+	/** Per-column transformers; receive each cell's native value. */
+	transformers?: Iterable<RowTransformerEntry<V>> | RowTransformerRecord<V>
 	drop?: number
 	take?: number
+}
+
+interface XLSXSpliteratorInit extends RowSpliteratorInit<XLSXCellValue> {
+	/** Sheet number (1-based) or name. @default 1 */
+	sheet?: number | string
 }
 ```
 

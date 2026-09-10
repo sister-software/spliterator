@@ -16,6 +16,7 @@ import {
 	createRowEmitters,
 	type RowEmitter,
 	type RowOutputMode,
+	type RowSpliteratorInit,
 	type RowTransformer,
 	type RowTransformerEntry,
 	type RowTransformerRecord,
@@ -41,26 +42,10 @@ export type CSVSpliteratorEmittedRecord<V = string | number | undefined> = Recor
 
 export const CSVSpliteratorEmitters: Record<CSVOutputMode, CSVEmitter | null> = createRowEmitters<string>("")
 
-export interface CSVSpliteratorInit extends SpliteratorInit {
-	/**
-	 * The mode determines the shape of the data emitted by the generator.
-	 *
-	 * - `object` will emit each row as an object with the header names as keys.
-	 * - `array` will emit each row as an array.
-	 * - `entries` will emit each row as an array of key-value pairs.
-	 *
-	 * Note that {@linkcode CSVSpliteratorInit.header} defaults to `true` in every mode — the first row is consumed as the
-	 * header even in `array` mode. Pass `header: false` for headerless data.
-	 *
-	 * Quote handling is enabled by default. Rows do not split on delimiters inside quotes (embedded newlines stay in
-	 * their row), columns do not split on quoted column delimiters, wrapping quotes are stripped, and doubled quotes
-	 * (`""`) unescape to `"`.
-	 *
-	 * {@linkcode SpliteratorInit.crlf} defaults to `true` here (unlike everywhere else): RFC 4180 mandates CRLF row
-	 * terminators, so a correct CSV parser must accept them without leaking `\r` into the last column.
-	 */
-	mode?: CSVOutputMode
-
+/**
+ * CSV-specific options, in addition to {@linkcode RowSpliteratorInit}'s common row-shaping options.
+ */
+export interface CSVSpliteratorInit extends SpliteratorInit, RowSpliteratorInit<string> {
 	/**
 	 * The delimiter to use for columns in a row.
 	 *
@@ -77,25 +62,11 @@ export interface CSVSpliteratorInit extends SpliteratorInit {
 	enableQuoteHandling?: boolean
 
 	/**
-	 * Whether to normalize the keys of the header row into `snake_case`, and to disambiguate duplicates by suffixing
-	 * `_2`, `_3`, … — making them usable as object keys.
-	 *
-	 * **A header that is already ALL CAPS is left alone**, on the reasoning that its casing is deliberate. So an
-	 * OpenAddresses header (`LON,LAT,NUMBER,STREET`) normalizes to `LON`/`NUMBER`, NOT `lon`/`number`, and a row is read
-	 * as `row.STREET`. Lower-case your own keys if you want case-folding — this option does not provide it.
-	 *
-	 * @default `mode !== "array"` — object and entries rows need keyable names; array rows have no keys to normalize.
-	 */
-	normalizeKeys?: boolean
-
-	/**
-	 * Whether to treat the first row as a header.
+	 * Whether to treat a carriage return immediately preceding a row delimiter as part of the delimiter.
 	 *
 	 * @default true
 	 */
-	header?: boolean
-
-	transformers?: Iterable<CSVTransformerEntry> | CSVTransformerRecord
+	crlf?: boolean
 }
 
 /**
@@ -123,7 +94,7 @@ export abstract class CSVSpliterator {
 
 	static from<T extends object = CSVSpliteratorEmittedRecord>(
 		source: CharacterSequenceInput,
-		options?: CSVSpliteratorInit & { mode: "object" }
+		options?: CSVSpliteratorInit & { mode?: "object"; header?: true }
 	): Generator<T>
 	/**
 	 * @yields Each row as a 3-tuple [key, value, idx].
@@ -140,7 +111,7 @@ export abstract class CSVSpliterator {
 	 */
 	static from<T extends string[] = string[]>(
 		source: CharacterSequenceInput,
-		options?: CSVSpliteratorInit & { mode?: "array" }
+		options?: CSVSpliteratorInit & ({ mode: "array" } | { mode?: "array"; header: false })
 	): Generator<T>
 	/**
 	 * Given a byte array or string, yield each row as an array of columns.
@@ -213,7 +184,7 @@ export abstract class CSVSpliterator {
 	 */
 	static fromAsync<T extends object = CSVSpliteratorEmittedRecord>(
 		source: AsyncDataResource | AsyncChunkIterator,
-		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode: "object" }
+		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode?: "object"; header?: true }
 	): AsyncSequence<T>
 
 	/**
@@ -228,7 +199,7 @@ export abstract class CSVSpliterator {
 	 */
 	static fromAsync<T extends string[] = string[]>(
 		source: AsyncDataResource | AsyncChunkIterator,
-		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode?: "array" }
+		options?: CSVSpliteratorInit & AsyncSpliteratorInit & ({ mode: "array" } | { mode?: "array"; header: false })
 	): AsyncSequence<T>
 	/**
 	 * Given an asychronous data source, splits the data by rows(usually by newline) and then by columns (usually by

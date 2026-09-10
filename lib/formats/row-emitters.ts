@@ -17,6 +17,52 @@ export type RowTransformerEntry<V, T = unknown> = [columnName: string, transform
 
 export type RowTransformerRecord<V> = Record<string, RowTransformer<V> | undefined>
 
+/**
+ * Options shared by spliterators that turn headered rows into arrays, records, or entries.
+ */
+export interface RowSpliteratorInit<V> {
+	/**
+	 * Whether to treat the first row as a header.
+	 *
+	 * @default true
+	 */
+	header?: boolean
+
+	/**
+	 * The shape of each emitted data row.
+	 *
+	 * The default follows `header`:
+	 *
+	 * - A header row (the default) produces `"object"` rows.
+	 * - `header: false` produces `"array"` rows.
+	 *
+	 * Set a mode explicitly to override that default.
+	 */
+	mode?: RowOutputMode
+
+	/**
+	 * Whether to normalize header keys into `snake_case` and disambiguate duplicates by suffixing `_2`, `_3`, ….
+	 *
+	 * @default `mode !== "array"`
+	 */
+	normalizeKeys?: boolean
+
+	/**
+	 * Per-column transformers, called with each cell's native value.
+	 */
+	transformers?: Iterable<RowTransformerEntry<V>> | RowTransformerRecord<V>
+
+	/**
+	 * The number of data rows to skip before yielding.
+	 */
+	drop?: number
+
+	/**
+	 * The maximum number of data rows to yield.
+	 */
+	take?: number
+}
+
 export type RowEmitter<V, T = unknown> = (columns: Iterable<V>, headerColumns?: Iterable<RowTransformerEntry<V>>) => T
 
 export type EmittedRecord<V = unknown> = Record<string, V>

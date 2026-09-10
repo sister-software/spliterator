@@ -44,12 +44,20 @@ test("Object mode accepts an interface as its row type", async ({ expect }) => {
 	expectTypeOf(records).toEqualTypeOf<AsyncSequence<TypedCSVRow>>()
 	expect(await records.toArray()).toEqual([{ Country: "FR", Location: "PAR" }])
 
+	const defaultRecords = CSVSpliterator.fromAsync<Record<string, string>>(source, { columnDelimiter: "," })
+
+	expectTypeOf(defaultRecords).toEqualTypeOf<AsyncSequence<Record<string, string>>>()
+
 	const syncRecords = CSVSpliterator.from<TypedCSVRow>("Country,Location\nFR,PAR\n", {
 		mode: "object",
 		normalizeKeys: false,
 	})
 
 	expectTypeOf(syncRecords).toEqualTypeOf<Generator<TypedCSVRow>>()
+
+	expectTypeOf(
+		CSVSpliterator.from<Record<string, string>>("Country,Location\nFR,PAR\n", { columnDelimiter: "," })
+	).toEqualTypeOf<Generator<Record<string, string>>>()
 
 	expectTypeOf(
 		TSVSpliterator.from<TypedCSVRow>("Country\tLocation\nFR\tPAR\n", { mode: "object", normalizeKeys: false })

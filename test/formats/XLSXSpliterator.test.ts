@@ -74,13 +74,13 @@ test("Instantiation throws", ({ expect }) => {
 	expect(() => new XLSXSpliterator()).toThrowError(TypeError)
 })
 
-test("Rows emit as arrays of typed cells, header consumed by default", async ({ expect }) => {
+test("Rows emit as records with normalized keys, header consumed by default", async ({ expect }) => {
 	const rows = await XLSXSpliterator.fromAsync(fixturePath).toArray()
 
 	expect(rows).toEqual([
-		["Ada", 42, true, joined],
-		["Grace", 3.5, false, null],
-		["Linus", 7, true, null],
+		{ full_name: "Ada", score: 42, active: true, joined },
+		{ full_name: "Grace", score: 3.5, active: false, joined: null },
+		{ full_name: "Linus", score: 7, active: true, joined: null },
 	])
 })
 
@@ -130,7 +130,7 @@ test("Sheet selection by name and by number", async ({ expect }) => {
 
 	const byNumber = await XLSXSpliterator.fromAsync(fixturePath, { sheet: 2 }).toArray()
 
-	expect(byNumber).toEqual([["answer", 42]])
+	expect(byNumber).toEqual([{ key: "answer", value: 42 }])
 })
 
 test("Unknown sheet propagates the vendor error", async ({ expect }) => {
@@ -140,7 +140,7 @@ test("Unknown sheet propagates the vendor error", async ({ expect }) => {
 test("`drop` and `take` bound the emitted rows", async ({ expect }) => {
 	const rows = await XLSXSpliterator.fromAsync(fixturePath, { drop: 1, take: 1 }).toArray()
 
-	expect(rows).toEqual([["Grace", 3.5, false, null]])
+	expect(rows).toEqual([{ full_name: "Grace", score: 3.5, active: false, joined: null }])
 })
 
 test("Transformers receive typed cell values", async ({ expect }) => {
@@ -228,8 +228,8 @@ test("Write: missing record keys become null cells", async ({ expect }) => {
 	const rows = await XLSXSpliterator.fromAsync(new Uint8Array(buffer)).toArray()
 
 	expect(rows).toEqual([
-		[1, 2],
-		[3, null],
+		{ a: 1, b: 2 },
+		{ a: 3, b: null },
 	])
 })
 

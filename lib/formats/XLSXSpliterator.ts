@@ -12,6 +12,7 @@ import {
 	createRowEmitters,
 	type RowEmitter,
 	type RowOutputMode,
+	type RowSpliteratorInit,
 	type RowTransformer,
 	type RowTransformerEntry,
 	type RowTransformerRecord,
@@ -49,54 +50,16 @@ export type XLSXWritableRow =
 export const XLSXSpliteratorEmitters: Record<RowOutputMode, RowEmitter<XLSXCellValue> | null> =
 	createRowEmitters<XLSXCellValue>(null)
 
-export interface XLSXSpliteratorInit {
+/**
+ * XLSX-specific options, in addition to {@linkcode RowSpliteratorInit}'s common row-shaping options.
+ */
+export interface XLSXSpliteratorInit extends RowSpliteratorInit<XLSXCellValue> {
 	/**
 	 * The sheet to read, as a 1-based sheet number or a sheet name.
 	 *
 	 * @default 1
 	 */
 	sheet?: number | string
-
-	/**
-	 * The mode determines the shape of the data emitted by the generator.
-	 *
-	 * - `object` will emit each row as an object with the header names as keys.
-	 * - `array` will emit each row as an array.
-	 * - `entries` will emit each row as an array of key-value pairs.
-	 *
-	 * @default "array"
-	 */
-	mode?: RowOutputMode
-
-	/**
-	 * Whether to treat the first row as a header.
-	 *
-	 * @default true
-	 */
-	header?: boolean
-
-	/**
-	 * Whether to normalize the keys of the header row into `snake_case`, matching {@linkcode CSVSpliterator}.
-	 *
-	 * @default `mode !== "array"`
-	 */
-	normalizeKeys?: boolean
-
-	/**
-	 * Per-column transformers. Unlike CSV transformers, these receive typed cell values ({@linkcode XLSXCellValue}), not
-	 * strings.
-	 */
-	transformers?: Iterable<XLSXTransformerEntry> | XLSXTransformerRecord
-
-	/**
-	 * The number of data rows to skip before yielding.
-	 */
-	drop?: number
-
-	/**
-	 * The maximum number of rows to yield.
-	 */
-	take?: number
 }
 
 export interface XLSXWriteInit {
@@ -191,7 +154,7 @@ export abstract class XLSXSpliterator {
 	 */
 	static fromAsync<T extends object = XLSXSpliteratorEmittedRecord>(
 		source: XLSXSource,
-		options?: XLSXSpliteratorInit & { mode: "object" }
+		options?: XLSXSpliteratorInit & { mode?: "object"; header?: true }
 	): AsyncSequence<T>
 	/**
 	 * @yields Each row as a 3-tuple [key, value, idx].
@@ -205,7 +168,7 @@ export abstract class XLSXSpliterator {
 	 */
 	static fromAsync<T extends XLSXCellValue[] = XLSXCellValue[]>(
 		source: XLSXSource,
-		options?: XLSXSpliteratorInit & { mode?: "array" }
+		options?: XLSXSpliteratorInit & ({ mode: "array" } | { mode?: "array"; header: false })
 	): AsyncSequence<T>
 	/**
 	 * Given an XLSX workbook, yield each row of a sheet, shaped according to the `mode` option.
@@ -222,7 +185,8 @@ export abstract class XLSXSpliterator {
 			// ---
 			sheet = 1,
 			header = true,
-			mode = "array",
+			// Without a header row there are no column names, so a row can only be an array.
+			mode = header === false ? "array" : "object",
 			transformers: transformersInput = [],
 			normalizeKeys = mode !== "array",
 			take = Infinity,
