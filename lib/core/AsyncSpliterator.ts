@@ -66,13 +66,13 @@ export interface SpliteratorInit {
 	/**
 	 * Whether to treat double-quoted regions as opaque: a delimiter inside `"…"` does not split, and the emitted slices
 	 * keep their quotes verbatim. Quote _stripping_ and `""` unescaping are the consumer's concern —
-	 * {@linkcode CSVSpliterator} does both when this flag is set.
+	 * {@linkcode CSVSpliterator} enables this by default and also strips/unescapes its columns.
 	 *
 	 * The asynchronous engine requires a single-byte delimiter for this mode (every {@linkcode Delimiters} entry
 	 * qualifies) — a multi-byte delimiter straddling a chunk boundary cannot be rescanned without re-toggling quote
 	 * state.
 	 *
-	 * @default false
+	 * @default false for `Spliterator` and `AsyncSpliterator`; `true` for `CSVSpliterator`.
 	 */
 	enableQuoteHandling?: boolean
 
