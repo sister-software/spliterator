@@ -57,12 +57,13 @@ import { CSVSpliterator } from "spliterator"
 
 const reader = CSVSpliterator.fromAsync("people.csv")
 
-for await (const columns of reader) {
-	console.log(columns) // ["Full Name", "Occupation", "Age"], ["Morgan", "Developer", 30], etc.
+for await (const row of reader) {
+	console.log(row) // { full_name: "Morgan", occupation: "Developer", age: "30" }, etc.
 }
 ```
 
-CSV files can also be emitted as objects with headers as keys, with some quality-of-life features, such as normalizing property keys:
+CSV defaults to objects keyed by its header row, with normalized property names. Supply a row type when you want the
+type checker to know those keys:
 
 ```ts
 import { CSVSpliterator } from "spliterator"
@@ -73,7 +74,7 @@ interface Person {
 	age: number
 }
 
-const reader = CSVSpliterator.fromAsync<Person>("people.csv", { mode: "object" })
+const reader = CSVSpliterator.fromAsync<Person>("people.csv")
 
 for await (const columns of reader) {
 	console.log(columns) // { full_name: "Morgan", occupation: "Developer", age: 30 }, etc.
@@ -85,7 +86,7 @@ For tab-separated files, reach for `TSVSpliterator`. It accepts the same options
 ```ts
 import { TSVSpliterator } from "spliterator"
 
-const reader = TSVSpliterator.fromAsync("people.tsv", { mode: "object" })
+const reader = TSVSpliterator.fromAsync("people.tsv")
 
 for await (const columns of reader) {
 	console.log(columns)
@@ -106,7 +107,7 @@ Reading mirrors `CSVSpliterator`'s options — `mode`, `header`, `normalizeKeys`
 ```ts
 import { XLSXSpliterator } from "spliterator"
 
-const reader = XLSXSpliterator.fromAsync("people.xlsx", { mode: "object", sheet: "Employees" })
+const reader = XLSXSpliterator.fromAsync("people.xlsx", { sheet: "Employees" })
 
 for await (const row of reader) {
 	console.log(row) // { full_name: "Morgan", hired: Date, age: 30 }, etc.
@@ -117,7 +118,6 @@ Transformers receive those typed cell values, which makes them a natural place t
 
 ```ts
 const reader = XLSXSpliterator.fromAsync("form499.xlsx", {
-	mode: "object",
 	transformers: {
 		filer_499_id: (value) => Number(value),
 		alabama: (value) => value === "TRUE",
@@ -128,7 +128,7 @@ const reader = XLSXSpliterator.fromAsync("form499.xlsx", {
 Writing accepts any iterable or async iterable of rows — arrays of cells, or records whose keys become the header row — so a Spliterator pipeline can terminate in a workbook:
 
 ```ts
-const rows = CSVSpliterator.fromAsync("people.csv", { mode: "object" }).map((person) => ({
+const rows = CSVSpliterator.fromAsync("people.csv").map((person) => ({
 	...person,
 	age: Number(person.age),
 }))

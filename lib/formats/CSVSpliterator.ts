@@ -49,7 +49,7 @@ export interface CSVSpliteratorInit extends SpliteratorInit, RowSpliteratorInit<
 	/**
 	 * The delimiter to use for columns in a row.
 	 *
-	 * @default Delimiter.Comma
+	 * @default Delimiters.Comma
 	 */
 	columnDelimiter?: CharacterSequenceInput
 
@@ -62,7 +62,8 @@ export interface CSVSpliteratorInit extends SpliteratorInit, RowSpliteratorInit<
 	enableQuoteHandling?: boolean
 
 	/**
-	 * Whether to treat a carriage return immediately preceding a row delimiter as part of the delimiter.
+	 * Normalize CRLF row terminators by treating a carriage return immediately preceding a row delimiter as part of that
+	 * delimiter.
 	 *
 	 * @default true
 	 */
@@ -202,7 +203,7 @@ export abstract class CSVSpliterator {
 		options?: CSVSpliteratorInit & AsyncSpliteratorInit & ({ mode: "array" } | { mode?: "array"; header: false })
 	): AsyncSequence<T>
 	/**
-	 * Given an asychronous data source, splits the data by rows(usually by newline) and then by columns (usually by
+	 * Given an asynchronous data source, split the data by rows (usually newline-delimited) and then by columns (usually
 	 * comma).
 	 *
 	 * @param source The data source to split.
@@ -215,7 +216,7 @@ export abstract class CSVSpliterator {
 		init?: CSVSpliteratorInit & AsyncSpliteratorInit
 	): AsyncSequence<unknown>
 	/**
-	 * Given an asychronous data source, splits the data by rows (usually by newline) and then by columns (usually by
+	 * Given an asynchronous data source, split the data by rows (usually newline-delimited) and then by columns (usually
 	 * comma).
 	 *
 	 * @param source The data source to split.

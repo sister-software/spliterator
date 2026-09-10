@@ -18,7 +18,7 @@ export type RowTransformerEntry<V, T = unknown> = [columnName: string, transform
 export type RowTransformerRecord<V> = Record<string, RowTransformer<V> | undefined>
 
 /**
- * Options shared by spliterators that turn headered rows into arrays, records, or entries.
+ * Options shared by spliterators that shape rows as arrays, records, or entries.
  */
 export interface RowSpliteratorInit<V> {
 	/**
@@ -30,6 +30,10 @@ export interface RowSpliteratorInit<V> {
 
 	/**
 	 * The shape of each emitted data row.
+	 *
+	 * - `"object"` maps columns to header names.
+	 * - `"array"` preserves positional columns.
+	 * - `"entries"` emits `[key, value, index]` tuples.
 	 *
 	 * The default follows `header`:
 	 *
