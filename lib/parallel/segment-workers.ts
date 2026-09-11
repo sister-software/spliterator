@@ -7,7 +7,7 @@
 import { Worker } from "node:worker_threads"
 
 import type { CharacterSequenceInput } from "../core/CharacterSequence.js"
-import type { AsyncDataResource, ByteRange } from "../internal/shared.js"
+import { isPathBuilderLike, toPathString, type AsyncDataResource, type ByteRange } from "../internal/shared.js"
 import { mergeAsyncIterators } from "./merge-async-iterators.js"
 import { computeSegments } from "./segments.js"
 import type { WorkerLease, WorkerPool } from "./worker-pool.js"
@@ -169,7 +169,7 @@ export async function* runSegmentWorkers<R>(
 	source: AsyncDataResource,
 	options: AsManyWorkersOptions
 ): AsyncIterableIterator<R> {
-	if (typeof source !== "string" && !(source instanceof URL)) {
+	if (!isPathBuilderLike(source) && !(source instanceof URL)) {
 		throw new TypeError("asManyWorkers requires a file path or URL — file handles cannot cross threads.")
 	}
 
@@ -182,7 +182,8 @@ export async function* runSegmentWorkers<R>(
 	const handlerUrl =
 		options.worker instanceof URL ? options.worker.href : new URL(options.worker, `file://${process.cwd()}/`).href
 
-	const sourcePath = source instanceof URL ? source.href : source
+	// Resolved here rather than in the worker: a PathBuilder is callable and cannot cross `postMessage`.
+	const sourcePath = source instanceof URL ? source.href : toPathString(source)
 
 	const segments: ByteRange[] = await computeSegments(source, {
 		delimiter: options.delimiter,

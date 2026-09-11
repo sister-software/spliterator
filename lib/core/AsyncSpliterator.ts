@@ -6,7 +6,12 @@
 
 import { ReadableStream, type ReadableWritablePair, type StreamPipeOptions } from "node:stream/web"
 
-import type { AsyncChunkIterator, AsyncDataResource, ByteRange } from "../internal/shared.js"
+import {
+	isPathBuilderLike,
+	type AsyncChunkIterator,
+	type AsyncDataResource,
+	type ByteRange,
+} from "../internal/shared.js"
 import { type AsManyWorkersOptions, runSegmentWorkers } from "../parallel/segment-workers.js"
 import { computeSegments, type SegmentOptions } from "../parallel/segments.js"
 import { BufferController } from "./BufferController.js"
@@ -768,7 +773,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 		options: AsManyWorkersOptions
 	): AsyncIterableIterator<R> {
 		// Validate eagerly so callers fail fast (the generator body is otherwise lazy until consumed).
-		if (typeof source !== "string" && !(source instanceof URL)) {
+		if (!isPathBuilderLike(source) && !(source instanceof URL)) {
 			throw new TypeError("asManyWorkers requires a file path or URL — file handles cannot cross threads.")
 		}
 

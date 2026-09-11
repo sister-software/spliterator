@@ -134,6 +134,10 @@ export interface CreateChunkIteratorOptions {
  * @internal
  */
 export async function readFileSize(source: AsyncDataResource): Promise<number> {
+	if (source instanceof PathBuilder) {
+		source = source.toString()
+	}
+
 	if (typeof source === "string" || source instanceof URL) {
 		return stat(source).then(({ size }) => size)
 	}
@@ -152,6 +156,10 @@ export async function readFileSize(source: AsyncDataResource): Promise<number> {
  * @internal
  */
 export async function readBytes(source: AsyncDataResource, start: number, length: number): Promise<Uint8Array> {
+	if (source instanceof PathBuilder) {
+		source = source.toString()
+	}
+
 	if (typeof source !== "string" && !(source instanceof URL) && !isFileHandleLike(source)) {
 		throw new TypeError("readBytes requires a file path, URL, or file handle.")
 	}

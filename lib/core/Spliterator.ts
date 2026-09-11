@@ -6,6 +6,7 @@
 
 import {
 	isFileHandleLike,
+	isPathBuilderLike,
 	type AsyncChunkIterator,
 	type AsyncDataResource,
 	type ByteRange,
@@ -101,7 +102,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 			return new AsyncSpliterator(source, init)
 		}
 
-		if (typeof source === "string" || source instanceof URL || isFileHandleLike(source)) {
+		if (isPathBuilderLike(source) || source instanceof URL || isFileHandleLike(source)) {
 			return import("spliterator/node/fs").then(async ({ createChunkIterator }) => {
 				let chunkIterator: AsyncChunkIterator
 
@@ -110,7 +111,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 						highWaterMark: init.highWaterMark,
 					})
 				} catch (error) {
-					if (typeof source === "string" || source instanceof URL) {
+					if (isPathBuilderLike(source) || source instanceof URL) {
 						const wrapped = new Error(
 							"`Spliterator.from` was called with an invalid async data resource. Did you mean to use `Spliterator.fromSync`?"
 						)

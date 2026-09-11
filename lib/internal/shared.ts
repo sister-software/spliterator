@@ -67,6 +67,34 @@ export function isFileHandleLike(input: unknown): input is FileHandleLike {
 }
 
 /**
+ * Type-predicate for a path reference: a string, or a `PathBuilder` from `path-ts`.
+ *
+ * A `PathBuilder` is **callable** — `typeof` reports `"function"` — so every `typeof === "object"` guard misses it and
+ * a source meant to be opened as a file is read as byte data instead. It is also a proxy whose `in` checks are
+ * unreliable, so its brand symbol cannot be probed structurally, and `path-ts` cannot be imported for the real
+ * `instanceof` check: it statically imports `node:path`, which would cost this layer its isomorphism.
+ *
+ * Callability carries the test on its own, since nothing else accepted as a data resource is a function. The `toString`
+ * comparison is what keeps an ordinary function from being mistaken for a path.
+ */
+export function isPathBuilderLike(input: unknown): input is PathBuilderLike {
+	if (typeof input === "string") return true
+
+	return (
+		typeof input === "function" &&
+		typeof input.toString === "function" &&
+		input.toString !== Function.prototype.toString
+	)
+}
+
+/**
+ * Resolve a path reference to the string the Node adapter opens.
+ */
+export function toPathString(input: PathBuilderLike): string {
+	return typeof input === "string" ? input : input.toString()
+}
+
+/**
  * Type-helper to determine the destination type for a typed array.
  *
  * This is useful to infer the ultimate return type of a function which optionally accepts a typed array destination.
