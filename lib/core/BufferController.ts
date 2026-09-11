@@ -124,7 +124,18 @@ export class BufferController {
 		const nextLength = offset + array.length
 
 		if (nextLength > this.bytes.length) {
-			this.grow(nextLength)
+			// Growing to exactly `nextLength` makes repeated appends quadratic: each one reallocates
+			// and copies the whole buffer, so building N bytes from fixed-size chunks copies ~N²/2c.
+			// It only bites when a single record outgrows the chunk size — which is what quote
+			// handling does, since a long quoted region emits no rows and the buffer must hold it.
+			// Measured on a 100MB single quoted field: 1549 reallocations, 76GB copied, 60.6s.
+			// Doubling brings that to 11 reallocations, 0.13GB, and 9.3s.
+			//
+			// Doubling rather than a gentler 1.5×, and uncapped: a sweep at 1/10/50/100MB found 1.5×
+			// no faster and, at 100MB, *worse* on peak RSS (396MB against 354MB) despite holding less
+			// capacity. Peak memory here is dominated by garbage from discarded buffers, not by the
+			// final allocation, so the strategy that reallocates least also peaks lowest.
+			this.grow(Math.max(nextLength, this.bytes.length * 2))
 		}
 
 		this.bytes.set(array, offset)

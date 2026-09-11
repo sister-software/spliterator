@@ -39,3 +39,56 @@ test("subarray rejects out-of-range ends rather than reading garbage", ({ expect
 
 	expect(() => controller.subarray(0, 5)).toThrow(RangeError)
 })
+
+// Regression: `set` used to call `grow(nextLength)` — the exact length needed — which bypassed
+// `grow`'s own doubling default and made repeated appends O(n²) in bytes copied. Building a 1MiB
+// buffer from 1KiB appends reallocated 1023 times and copied ~512MiB. Measured end-to-end on a
+// 100MB single quoted CSV field, that cost 1549 reallocations, 76GB of memcpy, and 60.6s against
+// 9.3s once growth was geometric.
+test("set grows the buffer geometrically, not by the exact amount needed", ({ expect }) => {
+	const controller = new BufferController({ initialBufferSize: 1024 })
+	const chunk = new Uint8Array(1024)
+
+	let reallocations = 0
+	let lastBuffer = controller.bytes.buffer
+
+	for (let i = 0; i < 1024; i++) {
+		controller.set(chunk, controller.bytesWritten)
+
+		if (controller.bytes.buffer !== lastBuffer) {
+			reallocations++
+			lastBuffer = controller.bytes.buffer
+		}
+	}
+
+	expect(controller.bytesWritten, "A full mebibyte was appended").toBe(1024 * 1024)
+
+	// Doubling from 1KiB to 1MiB is ten reallocations. Exact growth is 1023.
+	expect(reallocations, "Reallocation count is logarithmic in the final size").toBeLessThanOrEqual(16)
+})
+
+test("geometric growth still preserves appended contents exactly", ({ expect }) => {
+	const controller = new BufferController({ initialBufferSize: 4 })
+
+	for (let i = 0; i < 64; i++) {
+		controller.set(new Uint8Array([i, i, i]), controller.bytesWritten)
+	}
+
+	expect(controller.bytesWritten, "Every append landed").toBe(192)
+
+	const written = Array.from(controller.bytes.subarray(0, controller.bytesWritten))
+	const expected = Array.from({ length: 64 }, (_, i) => [i, i, i]).flat()
+
+	expect(written, "Contents survive reallocation").toEqual(expected)
+})
+
+// A single append larger than double the current capacity must still be satisfied.
+test("set honors an append larger than twice the current capacity", ({ expect }) => {
+	const controller = new BufferController({ initialBufferSize: 8 })
+
+	controller.set(new Uint8Array(1000).fill(7), 0)
+
+	expect(controller.bytesWritten).toBe(1000)
+	expect(controller.bytes.length, "Allocation covers the oversized append").toBeGreaterThanOrEqual(1000)
+	expect(controller.bytes[999], "Last byte of the oversized append is intact").toBe(7)
+})
