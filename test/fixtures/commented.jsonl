@@ -1,0 +1,9 @@
+// invariance suite — regenerate with `yarn suite:build`
+// do not edit by hand
+
+{"id":"a-1","input":"100 Main St","expect":{"road":"Main St"}}
+{"id":"a-2","input":"200 Oak Ave","expect":{"road":"Oak Ave"}}
+   
+{"id":"a-3","input":"300 Elm Rd","expect":{"road":"Elm Rd"}}
+	// indented comment, tab-led
+{"id":"a-4","input":"400 Pine Ln","expect":{"road":"// Pine Ln"}}
