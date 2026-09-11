@@ -92,3 +92,75 @@ test("set honors an append larger than twice the current capacity", ({ expect })
 	expect(controller.bytes.length, "Allocation covers the oversized append").toBeGreaterThanOrEqual(1000)
 	expect(controller.bytes[999], "Last byte of the oversized append is intact").toBe(7)
 })
+
+// Regression: `compress` reassigned `bytes` to a subarray, so the discarded prefix stayed inside the
+// same `ArrayBuffer` — addressable by nobody, freed by nothing until a `grow` happened to replace the
+// allocation. Geometric growth removed most of those grows, which turned an incidental reclamation
+// into none at all: a 100MB quoted CSV field left 101.58MB stranded for the rest of the stream.
+// Compacting only when the stranded prefix outweighs the live bytes keeps the copy amortized O(1).
+test("compress reclaims the stranded prefix once it outweighs the live bytes", ({ expect }) => {
+	const controller = new BufferController({ initialBufferSize: 1024 })
+
+	// Distinctive contents so a misaligned slide is visible rather than silently plausible.
+	controller.set(
+		Uint8Array.from({ length: 1000 }, (_, i) => i % 251),
+		0
+	)
+
+	controller.compress(900)
+
+	expect(controller.bytesWritten, "One hundred bytes remain live").toBe(100)
+	expect(controller.bytes.byteOffset, "The prefix was reclaimed, not merely hidden behind a view").toBe(0)
+
+	const kept = Array.from(controller.bytes.subarray(0, controller.bytesWritten))
+	const expected = Array.from({ length: 100 }, (_, i) => (900 + i) % 251)
+
+	expect(kept, "The live bytes survived the slide intact").toEqual(expected)
+})
+
+test("compaction hands the whole allocation back as addressable capacity", ({ expect }) => {
+	const controller = new BufferController({ initialBufferSize: 1024 })
+	controller.set(new Uint8Array(1000).fill(9), 0)
+
+	controller.compress(900)
+
+	expect(controller.bytes.length, "Capacity behind the old view is usable again").toBe(
+		controller.bytes.buffer.byteLength
+	)
+})
+
+// The other half of the amortization: compacting on every cycle would be the throughput cost the
+// old comment feared, so a prefix smaller than the live bytes is still left as a cheap view.
+test("compress leaves a view while the stranded prefix is smaller than the live bytes", ({ expect }) => {
+	const controller = new BufferController({ initialBufferSize: 1024 })
+	controller.set(new Uint8Array(1000).fill(4), 0)
+
+	controller.compress(100)
+
+	expect(controller.bytesWritten, "Nine hundred bytes remain live").toBe(900)
+	expect(controller.bytes.byteOffset, "A small prefix is not worth a copy").toBe(100)
+})
+
+// The streaming steady state: append a chunk, consume it, repeat. Stranding made the view shrink
+// every cycle until it forced another allocation — 788 reallocations over a 1M-row CSV.
+test("repeated append-and-consume cycles neither strand memory nor force regrowth", ({ expect }) => {
+	const controller = new BufferController({ initialBufferSize: 256 })
+	const chunk = new Uint8Array(64).fill(3)
+
+	let reallocations = 0
+	let lastBuffer = controller.bytes.buffer
+
+	for (let i = 0; i < 1000; i++) {
+		controller.set(chunk, controller.bytesWritten)
+
+		if (controller.bytes.buffer !== lastBuffer) {
+			reallocations++
+			lastBuffer = controller.bytes.buffer
+		}
+
+		controller.compress(controller.bytesWritten)
+	}
+
+	expect(controller.bytes.byteOffset, "Nothing is stranded in the steady state").toBe(0)
+	expect(reallocations, "The steady state stops reallocating entirely").toBeLessThan(10)
+})
