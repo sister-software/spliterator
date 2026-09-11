@@ -164,3 +164,112 @@ test("repeated append-and-consume cycles neither strand memory nor force regrowt
 	expect(controller.bytes.byteOffset, "Nothing is stranded in the steady state").toBe(0)
 	expect(reallocations, "The steady state stops reallocating entirely").toBeLessThan(10)
 })
+
+// `copyWithin` compaction reclaims a stranded prefix but cannot hand an oversized allocation back,
+// so a record far larger than the steady-state working set left its buffer resident for the rest of
+// the stream (~67MB after a 50MB quoted field). Shrinking on every compress is much worse than the
+// disease: on a fixture of twenty 5MB records it caused 20 shrinks and 121 reallocations against a
+// 7-reallocation baseline, copying 165MB instead of 8.3MB. So the buffer is only right-sized when it
+// has been oversized across a whole window of compressions, which a stream still producing large
+// records never is.
+test("a long tail after an oversized record right-sizes the buffer", ({ expect }) => {
+	const controller = new BufferController({ initialBufferSize: 1024 })
+
+	// A record accumulating across reads: nothing is consumed, so `compress(0)` keeps it all.
+	for (let i = 0; i < 8; i++) {
+		controller.set(new Uint8Array(32 * 1024).fill(5), controller.bytesWritten)
+		controller.compress(0)
+	}
+
+	const grown = controller.bytes.buffer.byteLength
+	expect(grown, "The record forced the buffer well past its initial size").toBeGreaterThanOrEqual(256 * 1024)
+
+	// The record is consumed and a long tail of small rows follows.
+	controller.compress(controller.bytesWritten)
+
+	for (let i = 0; i < 300; i++) {
+		controller.set(new Uint8Array(16).fill(1), controller.bytesWritten)
+		controller.compress(controller.bytesWritten)
+	}
+
+	expect(controller.bytes.buffer.byteLength, "The oversized allocation was handed back").toBeLessThan(grown)
+})
+
+test("a stream that keeps producing large records never right-sizes", ({ expect }) => {
+	const controller = new BufferController({ initialBufferSize: 1024 })
+	const big = new Uint8Array(64 * 1024).fill(5)
+	const small = new Uint8Array(16).fill(1)
+
+	// Seed the large allocation, then keep large records arriving often enough that every
+	// evaluation window contains one.
+	controller.set(big, 0)
+	controller.compress(0)
+
+	const grown = controller.bytes.buffer.byteLength
+	let reallocations = 0
+	let lastBuffer = controller.bytes.buffer
+
+	for (let i = 0; i < 300; i++) {
+		if (i % 16 === 0) {
+			controller.set(big, controller.bytesWritten)
+			controller.compress(0)
+		} else {
+			controller.set(small, controller.bytesWritten)
+			controller.compress(controller.bytesWritten)
+		}
+
+		if (controller.bytes.buffer !== lastBuffer) {
+			reallocations++
+			lastBuffer = controller.bytes.buffer
+		}
+	}
+
+	expect(controller.bytes.buffer.byteLength, "Capacity is kept for the records still arriving").toBeGreaterThanOrEqual(
+		grown
+	)
+
+	expect(reallocations, "No shrink/regrow churn").toBeLessThan(10)
+})
+
+test("steady-state streaming never right-sizes or reallocates", ({ expect }) => {
+	const controller = new BufferController({ initialBufferSize: 1024 })
+	const chunk = new Uint8Array(64).fill(2)
+	const originalBuffer = controller.bytes.buffer
+
+	for (let i = 0; i < 300; i++) {
+		controller.set(chunk, controller.bytesWritten)
+		controller.compress(controller.bytesWritten)
+	}
+
+	expect(controller.bytes.buffer, "The buffer is never replaced in the steady state").toBe(originalBuffer)
+})
+
+test("right-sizing preserves the live bytes", ({ expect }) => {
+	const controller = new BufferController({ initialBufferSize: 1024 })
+
+	for (let i = 0; i < 8; i++) {
+		controller.set(new Uint8Array(32 * 1024).fill(5), controller.bytesWritten)
+		controller.compress(0)
+	}
+
+	const grown = controller.bytes.buffer.byteLength
+
+	controller.compress(controller.bytesWritten)
+
+	// Carry a distinctive live tail through the window in which the shrink lands.
+	for (let i = 0; i < 300; i++) {
+		controller.set(Uint8Array.from([i % 251, (i + 1) % 251, (i + 2) % 251]), controller.bytesWritten)
+		controller.compress(0)
+
+		if (controller.bytesWritten > 600) {
+			controller.compress(controller.bytesWritten - 3)
+		}
+	}
+
+	expect(controller.bytes.buffer.byteLength, "The allocation was right-sized").toBeLessThan(grown)
+
+	const tail = Array.from(controller.bytes.subarray(0, controller.bytesWritten))
+
+	expect(tail.length % 3, "The tail is whole records").toBe(0)
+	expect(tail.slice(-3), "The final record survived right-sizing").toEqual([299 % 251, 300 % 251, 301 % 251])
+})

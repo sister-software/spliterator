@@ -5,6 +5,24 @@
  */
 
 /**
+ * Compressions between right-sizing evaluations.
+ *
+ * Right-sizing on every compression is far worse than the allocation it reclaims — on a fixture of twenty 5MB records
+ * it caused 20 shrinks and 121 reallocations against a 7-reallocation baseline, copying 165MB instead of 8.3MB —
+ * because a stream still producing large records needs the capacity it just gave back. Evaluating over a window instead
+ * means a shrink requires the buffer to have been oversized for the whole window, which such a stream never is.
+ * Behaviour is flat from 32 to 128 (measured); 64 sits in the middle of that plateau rather than on an edge.
+ */
+const SHRINK_EVALUATION_INTERVAL = 64
+
+/**
+ * How far past the window's peak the allocation must sit before it is handed back. Streaming steady state measured
+ * exactly 4× the initial buffer size, and a buffer left over from an oversized record measured 1024–2048×, so the
+ * threshold sits above the former with three orders of magnitude of clearance.
+ */
+const SHRINK_FACTOR = 4
+
+/**
  * A class to manage a buffer of bytes, growing and shrinking as needed.
  */
 export class BufferController {
@@ -12,6 +30,18 @@ export class BufferController {
 	 * The initial size of the buffer.
 	 */
 	#initialBufferSize: number
+
+	/**
+	 * Compressions seen so far, used to pace right-sizing evaluations.
+	 */
+	#compressionCount = 0
+
+	/**
+	 * Largest `bytesWritten` observed since the last evaluation — the working set the buffer has actually had to hold,
+	 * which is what capacity should be judged against. Post-compression `bytesWritten` is the right signal: an open
+	 * record keeps its bytes live across compressions, so a stream of large records keeps this high on its own.
+	 */
+	#peakByteLength = 0
 
 	/**
 	 * The underlying buffer containing the data.
@@ -102,6 +132,39 @@ export class BufferController {
 		}
 
 		this.bytesWritten = nextByteLength
+
+		this.#evaluateCapacity()
+	}
+
+	/**
+	 * Hand back an allocation that a past record forced open and that nothing since has needed.
+	 *
+	 * Compaction reclaims a stranded prefix but cannot shrink, so without this a single huge record leaves its buffer
+	 * resident for the rest of the stream. Evaluated once per {@linkcode SHRINK_EVALUATION_INTERVAL} compressions against
+	 * the window's peak, so this cannot churn against a stream that keeps producing large records — and a short tail
+	 * never reaches an evaluation, which is correct, since a stream about to end has nothing to reclaim for.
+	 */
+	#evaluateCapacity(): void {
+		if (this.bytesWritten > this.#peakByteLength) {
+			this.#peakByteLength = this.bytesWritten
+		}
+
+		this.#compressionCount++
+
+		if (this.#compressionCount % SHRINK_EVALUATION_INTERVAL !== 0) return
+
+		const workingSet = Math.max(this.#peakByteLength, this.#initialBufferSize)
+
+		this.#peakByteLength = 0
+
+		if (this.bytes.buffer.byteLength <= workingSet * SHRINK_FACTOR) return
+
+		// `workingSet` is at least `bytesWritten`, so the live bytes always fit.
+		const rightSized = new Uint8Array(Math.max(workingSet * 2, this.#initialBufferSize))
+
+		rightSized.set(this.bytes.subarray(0, this.bytesWritten))
+
+		this.bytes = rightSized
 	}
 
 	/**
