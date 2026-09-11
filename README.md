@@ -303,6 +303,38 @@ for await (const jsonLine of AsyncSpliterator.asManyWorkers<Uint8Array>("huge.cs
 
 Need just the byte ranges to drive your own pool? `AsyncSpliterator.segments(path, { delimiter, concurrency })` returns them.
 
+#### Reusing workers across calls
+
+Both threaded primitives spawn and terminate their workers per call. Spawning measured 17ms for one worker and 48ms for eight — half to two-thirds of a small call — and a handler that loads a model or opens a connection at import pays far more than that again, every call.
+
+Pass a `WorkerPool` to keep them warm:
+
+```ts
+import { AsyncSpliterator, WorkerPool } from "spliterator"
+
+await using pool = new WorkerPool({ size: 4 })
+
+for (const path of manySmallFiles) {
+	for await (const row of AsyncSpliterator.asManyWorkers(path, {
+		worker: new URL("./transform.js", import.meta.url),
+		delimiter: "\n",
+		concurrency: 4,
+		pool, // `parallelMapWorkers` takes the same option
+	})) {
+		out.write(row)
+	}
+}
+```
+
+Measured over a 200KB file: **3.3× across 5 calls and 5.6× across 20** — and **0.98× on a 52MB file**, because startup only matters when it is a large share of the call. Reach for a pool when you make many small calls, not when you parse one big file.
+
+Two things follow from workers being reused, both of them the point rather than surprises:
+
+- **The handler module is imported once per worker, not once per call**, so its top-level state persists across calls. That is what makes loading a model worthwhile. Handlers that assume a clean slate per call need to reset it themselves.
+- **`workerData` belongs to the pool**, fixed when it spawns a worker. Passing it per call alongside `pool` throws rather than being silently ignored.
+
+A pool smaller than `concurrency` bounds the real parallelism — segments queue for a worker instead of running at once, and `parallelMapWorkers` clamps to the pool's size. Dispose it when you are done, or bind it with `await using` as above.
+
 ### Custom generators
 
 While Spliterator includes premade exports for most use-cases, custom generators can be created via `Spliterator` and `AsyncSpliterator`. This class is a low-level interface that allows you to create your own generators for any kind of delimited content.
