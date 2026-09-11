@@ -10,6 +10,7 @@ import type { CharacterSequenceInput } from "../core/CharacterSequence.js"
 import type { AsyncDataResource, ByteRange } from "../internal/shared.js"
 import { mergeAsyncIterators } from "./merge-async-iterators.js"
 import { computeSegments } from "./segments.js"
+import type { WorkerLease, WorkerPool } from "./worker-pool.js"
 
 export { mergeAsyncIterators } from "./merge-async-iterators.js"
 
@@ -112,8 +113,51 @@ export interface AsManyWorkersOptions {
 	maxInFlight?: number
 	/**
 	 * Forwarded to every worker via `workerData.userData`.
+	 *
+	 * Not accepted alongside {@linkcode pool} — a pooled worker's `workerData` is fixed when the pool spawns it, so a
+	 * per-call value could not reach it. Pass it to the {@linkcode WorkerPool} constructor instead.
 	 */
 	workerData?: unknown
+
+	/**
+	 * Reuse warm workers from this pool instead of spawning and terminating one per segment.
+	 *
+	 * Worth it for repeated calls and for handlers with expensive top-level initialisation — spawning alone measured half
+	 * to two-thirds of a small call. Note that the handler module is then imported once per worker rather than once per
+	 * call, so its top-level state persists across calls.
+	 *
+	 * Segments beyond the pool's size wait for a worker rather than running concurrently, so a pool smaller than
+	 * `concurrency` bounds the real parallelism.
+	 */
+	pool?: WorkerPool
+}
+
+/**
+ * Present a pooled lease as the minimal worker {@linkcode workerToIterable} drains, translating the lease-scoped
+ * protocol into the single-use one so the drain logic is shared and tested once.
+ */
+function leaseAsWorker(lease: WorkerLease): MinimalWorker {
+	return {
+		on(event: string, callback: (payload: never) => void): void {
+			if (event === "message") {
+				lease.onMessage((raw) => {
+					const message = raw as { type: string; records?: unknown[]; message?: string }
+
+					if (message.type === "records") {
+						;(callback as (m: unknown) => void)({ type: "batch", records: message.records })
+					} else if (message.type === "done") {
+						;(callback as (m: unknown) => void)({ type: "done" })
+					} else if (message.type === "failed") {
+						;(callback as (m: unknown) => void)({ type: "error", message: message.message })
+					}
+				})
+
+				return
+			}
+
+			lease.onError(callback as unknown as (error: Error) => void)
+		},
+	} as MinimalWorker
 }
 
 /**
@@ -129,6 +173,12 @@ export async function* runSegmentWorkers<R>(
 		throw new TypeError("asManyWorkers requires a file path or URL — file handles cannot cross threads.")
 	}
 
+	if (options.pool && options.workerData !== undefined) {
+		throw new TypeError(
+			"`workerData` cannot be combined with `pool` — a pooled worker's workerData is fixed when the pool spawns it. Pass it to the WorkerPool constructor instead."
+		)
+	}
+
 	const handlerUrl =
 		options.worker instanceof URL ? options.worker.href : new URL(options.worker, `file://${process.cwd()}/`).href
 
@@ -139,6 +189,59 @@ export async function* runSegmentWorkers<R>(
 		concurrency: options.concurrency,
 		probeSize: options.probeSize,
 	})
+
+	const batchSize = options.batchSize ?? 256
+	const maxInFlight = options.maxInFlight ?? 8
+
+	if (options.pool) {
+		const pool = options.pool
+		const leases: WorkerLease[] = []
+
+		try {
+			// Acquiring is sequential by necessity: a pool smaller than the segment count hands workers
+			// out as they come free, so awaiting all of them up front would deadlock. Each segment takes
+			// its lease when one is available and releases it on completion.
+			const iterables = segments.map(([start, end], segmentIndex) => {
+				return (async function* (): AsyncIterableIterator<R> {
+					const lease = await pool.acquire()
+
+					leases.push(lease)
+
+					try {
+						const drain = workerToIterable<R>(leaseAsWorker(lease), () =>
+							lease.post({ type: "ack", leaseId: lease.id })
+						)
+
+						lease.post({
+							type: "segment",
+							leaseId: lease.id,
+							handlerUrl,
+							source: sourcePath,
+							start,
+							end,
+							delimiter: options.delimiter ?? null,
+							segmentIndex,
+							batchSize,
+							maxInFlight,
+						})
+
+						yield* drain
+					} finally {
+						lease.release()
+					}
+				})()
+			})
+
+			yield* mergeAsyncIterators(iterables)
+		} finally {
+			// Releasing twice is a no-op, so an early return that skipped a generator's `finally` is safe.
+			for (const lease of leases) {
+				lease.release()
+			}
+		}
+
+		return
+	}
 
 	const workers: Worker[] = []
 	const entryUrl = new URL("./segment-worker-entry.js", import.meta.url)
@@ -153,8 +256,8 @@ export async function* runSegmentWorkers<R>(
 					end,
 					delimiter: options.delimiter ?? null,
 					segmentIndex,
-					batchSize: options.batchSize ?? 256,
-					maxInFlight: options.maxInFlight ?? 8,
+					batchSize,
+					maxInFlight,
 					userData: options.workerData,
 				},
 			})

@@ -7,6 +7,7 @@
 import { Worker } from "node:worker_threads"
 
 import { type PoolWorker, runPool } from "./parallel-map-runtime.js"
+import type { WorkerLease, WorkerPool } from "./worker-pool.js"
 
 /**
  * Per-item handler a parallelMapWorkers worker module exports. `index` is per-worker monotonic.
@@ -34,8 +35,60 @@ export interface ParallelMapWorkersOptions {
 	batchSize?: number
 	/**
 	 * Forwarded to every worker via `workerData.userData` (must be structured-cloneable).
+	 *
+	 * Not accepted alongside {@linkcode pool} — a pooled worker's `workerData` is fixed when the pool spawns it. Pass it
+	 * to the {@linkcode WorkerPool} constructor instead.
 	 */
 	workerData?: unknown
+
+	/**
+	 * Reuse warm workers from this pool instead of spawning and terminating one per call.
+	 *
+	 * Effective concurrency is clamped to the pool's size — asking for more leases than the pool can ever hand out would
+	 * wait forever. The handler module is imported once per worker rather than once per call, so its top-level state
+	 * persists across calls; that is usually the point, since loading it is the expensive part.
+	 */
+	pool?: WorkerPool
+}
+
+/**
+ * Present a pooled lease as a {@linkcode PoolWorker} slot, so {@linkcode runPool} drives pooled and unpooled workers
+ * through exactly the same dispatch loop.
+ */
+function leaseHandle<T, R>(lease: WorkerLease, handlerUrl: string): PoolWorker<T, R> {
+	let pending: { resolve: (results: R[]) => void; reject: (error: Error) => void } | null = null
+
+	const settle = (fn: (p: NonNullable<typeof pending>) => void) => {
+		if (!pending) return
+
+		const p = pending
+		pending = null
+		fn(p)
+	}
+
+	lease.onMessage((raw) => {
+		const message = raw as { type: string; results?: R[]; message?: string }
+
+		if (message.type === "results") {
+			settle((p) => p.resolve(message.results ?? []))
+		} else if (message.type === "failed") {
+			settle((p) => p.reject(new Error(message.message)))
+		}
+	})
+
+	lease.onError((error) => settle((p) => p.reject(error)))
+
+	// Opens the lease so the worker knows which handler to use and resets its per-call item index.
+	lease.post({ type: "map", leaseId: lease.id, handlerUrl })
+
+	return {
+		process(batch) {
+			return new Promise<R[]>((resolve, reject) => {
+				pending = { resolve, reject }
+				lease.post({ type: "items", leaseId: lease.id, batch })
+			})
+		},
+	}
 }
 
 /**
@@ -103,25 +156,54 @@ export function parallelMapWorkers<T, R = unknown>(
 	const handlerUrl =
 		options.worker instanceof URL ? options.worker.href : new URL(options.worker, `file://${process.cwd()}/`).href
 
-	const concurrency = Math.max(1, Math.floor(options.concurrency))
+	const requested = Math.max(1, Math.floor(options.concurrency))
 	const batchSize = options.batchSize ?? 64
 	const entryUrl = new URL("./parallel-map-worker-entry.js", import.meta.url)
 	const workers: Worker[] = []
 
+	if (options.pool && options.workerData !== undefined) {
+		throw new TypeError(
+			"`workerData` cannot be combined with `pool` — a pooled worker's workerData is fixed when the pool spawns it. Pass it to the WorkerPool constructor instead."
+		)
+	}
+
+	async function* runPooled(sharedPool: WorkerPool): AsyncIterableIterator<R> {
+		// More leases than the pool holds would wait on workers that can only come free when this call
+		// finishes, so the request is clamped rather than allowed to hang.
+		const concurrency = Math.min(requested, sharedPool.size)
+		const leases: WorkerLease[] = []
+
+		try {
+			for (let i = 0; i < concurrency; i++) {
+				leases.push(await sharedPool.acquire())
+			}
+
+			yield* runPool(
+				leases.map((lease) => leaseHandle<T, R>(lease, handlerUrl)),
+				source,
+				batchSize
+			)
+		} finally {
+			for (const lease of leases) {
+				lease.release()
+			}
+		}
+	}
+
 	async function* run(): AsyncIterableIterator<R> {
 		try {
-			const pool = Array.from({ length: concurrency }, () => {
+			const slots = Array.from({ length: requested }, () => {
 				const worker = new Worker(entryUrl, { workerData: { handlerUrl, userData: options.workerData } })
 				workers.push(worker)
 
 				return workerHandle<T, R>(worker)
 			})
 
-			yield* runPool(pool, source, batchSize)
+			yield* runPool(slots, source, batchSize)
 		} finally {
 			await Promise.all(workers.map((worker) => worker.terminate()))
 		}
 	}
 
-	return run()
+	return options.pool ? runPooled(options.pool) : run()
 }
