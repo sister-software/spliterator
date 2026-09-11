@@ -288,6 +288,109 @@ describe("WASM SIMD scanner", () => {
 		expect(new TextDecoder().decode(buf.subarray(state.pendingSliceStart))).toBe("tail")
 	})
 
+	// Regression: `scanRanges` used to stage the whole buffer into WASM memory on every call
+	// (`set(haystack.subarray(0, end))`) even though the scan resumes at `state.scanCursor`. A record
+	// spanning many reads was therefore re-copied once per read — 76.36GB for a 100MB quoted field,
+	// a second O(n²) alongside the `BufferController.set` one. Only the unscanned window is staged
+	// now, which means emitted offsets are window-relative and the wrapper must rebase them.
+	describe("windowed staging", () => {
+		test("resuming mid-buffer still emits absolute ranges", () => {
+			const comma = new CharacterSequence(Delimiters.Comma)
+			const buf = commaHaystack(4096, [10, 2000, 3000, 3500, 4000])
+
+			// Pretend bytes up to 2001 are already scanned and a record opened at 1500 — i.e.
+			// `pendingSliceStart` sits well behind `scanCursor`, which is the shape a long record makes.
+			const scan = comma.scanRanges(buf, { scanCursor: 2001, pendingSliceStart: 1500, insideQuotes: false }, 4096)
+
+			expect(scan, "WASM path is active").not.toBeNull()
+			expect(scan!.count, "Three delimiters remain past the cursor").toBe(3)
+
+			// The first range begins before the staged window and must carry the absolute start.
+			expect([scan!.ranges[0], scan!.ranges[1]], "First range spans from the carried slice start").toEqual([1500, 3000])
+
+			expect([scan!.ranges[2], scan!.ranges[3]], "Second range is absolute").toEqual([3001, 3500])
+			expect([scan!.ranges[4], scan!.ranges[5]], "Third range is absolute").toEqual([3501, 4000])
+
+			expect(scan!.scanCursor, "Cursor is absolute").toBe(4096)
+			expect(scan!.pendingSliceStart, "Pending slice start is absolute").toBe(4001)
+		})
+
+		test("a record spanning several bounded batches keeps its true start", () => {
+			const comma = new CharacterSequence(Delimiters.Comma)
+			// One long record from 0 to 5000, then short ones — the giant-quoted-field shape.
+			const buf = commaHaystack(8192, [5000, 5100, 5200, 5300, 5400])
+			const ranges: Array<[number, number]> = []
+			let state = { scanCursor: 0, pendingSliceStart: 0, insideQuotes: false }
+
+			while (state.scanCursor < buf.length) {
+				const scan = comma.scanRanges(buf, state, buf.length, undefined, 2)
+
+				expect(scan, "WASM path is active").not.toBeNull()
+
+				for (let i = 0; i < scan!.count; i++) {
+					ranges.push([scan!.ranges[i * 2]!, scan!.ranges[i * 2 + 1]!])
+				}
+
+				expect(scan!.scanCursor, "Each batch advances").toBeGreaterThan(state.scanCursor)
+				state = scan!
+			}
+
+			expect(ranges, "Batched scan reproduces the oracle exactly").toEqual(referenceRanges(buf, comma).slice(0, -1))
+
+			expect(ranges[0], "The long leading record survives batching intact").toEqual([0, 5000])
+		})
+
+		test("quote state and absolute offsets survive together across batches", () => {
+			const comma = new CharacterSequence(Delimiters.Comma)
+			const quote = new CharacterSequence(Delimiters.DoubleQuote)
+			// A quoted region holding commas, opened well before the first batch boundary.
+			const text = `${"x".repeat(600)},"${",".repeat(400)}",tail,`
+			const buf = encoder.encode(text)
+			const ranges: Array<[number, number]> = []
+			let state = { scanCursor: 0, pendingSliceStart: 0, insideQuotes: false }
+
+			while (state.scanCursor < buf.length) {
+				const scan = comma.scanRanges(buf, state, buf.length, quote, 1)
+
+				expect(scan, "WASM path is active").not.toBeNull()
+
+				for (let i = 0; i < scan!.count; i++) {
+					ranges.push([scan!.ranges[i * 2]!, scan!.ranges[i * 2 + 1]!])
+				}
+
+				state = scan!
+			}
+
+			const values = ranges.map(([start, end]) => new TextDecoder().decode(buf.subarray(start, end)))
+
+			expect(values, "Commas inside the quoted region never split it").toEqual([
+				"x".repeat(600),
+				`"${",".repeat(400)}"`,
+				"tail",
+			])
+
+			expect(state.insideQuotes, "Quote state closed").toBe(false)
+		})
+
+		// The staging region sits immediately after the copied bytes, so its offset reveals how much
+		// was copied. Staging the whole buffer would put it past `end`; staging only the window puts
+		// it just past the window. This is the property that makes the scan linear rather than
+		// quadratic for a record spanning many reads.
+		test("only the unscanned window is staged into WASM memory", () => {
+			const comma = new CharacterSequence(Delimiters.Comma)
+			const buf = commaHaystack(65_536, [64_000, 65_000])
+
+			const scan = comma.scanRanges(buf, { scanCursor: 63_000, pendingSliceStart: 62_000, insideQuotes: false }, 65_536)
+
+			expect(scan, "WASM path is active").not.toBeNull()
+
+			expect(
+				scan!.ranges.byteOffset,
+				"Results are staged just past the 2.5KB window, not past the 64KB buffer"
+			).toBeLessThan(65_536)
+		})
+	})
+
 	// A haystack ending exactly on a delimiter has a trailing empty field.
 	// The JS scan emits it (matching String.split); the WASM kernel must too, or the last column silently
 	// disappears for wide rows ending in a separator.

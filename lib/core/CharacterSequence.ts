@@ -281,6 +281,12 @@ export class CharacterSequence extends Uint8Array {
 	 * boundaries through the native scan and exposes the packed result view directly. The returned view aliases shared
 	 * WASM memory and must be consumed before another scanner call.
 	 *
+	 * Only `[state.scanCursor, end)` is staged into WASM memory — re-staging the scanned prefix on every call is what
+	 * made a record spanning many reads quadratic. Everything returned is in `haystack` coordinates regardless.
+	 *
+	 * `state.pendingSliceStart` must not exceed `state.scanCursor`; a record begins at or before the point scanning has
+	 * reached. `AsyncSpliterator` maintains that across reads and buffer compression.
+	 *
 	 * Returns `null` when the SIMD module is unavailable, the delimiter/quote is not one byte, or the buffer is below the
 	 * WASM threshold. Callers must retain their existing JavaScript path as the fallback.
 	 */
@@ -305,19 +311,29 @@ export class CharacterSequence extends Uint8Array {
 			return null
 		}
 
-		const resultsOffset = alignTo4(end)
+		// Stage only the bytes the kernel will actually read. It never dereferences below its
+		// `scan_start` — `pending_slice_start` is written into emitted ranges, never used as a read
+		// offset — so the already-scanned prefix is dead weight. Copying it anyway made a record
+		// spanning many reads quadratic: 76GB staged for one 100MB quoted CSV field, once per read.
+		const windowStart = Math.min(state.scanCursor, end)
+		const windowLength = end - windowStart
+
+		const resultsOffset = alignTo4(windowLength)
 		const resultValueCount = 3 + maxRanges * 2
 		const totalNeeded = resultsOffset + resultValueCount * Int32Array.BYTES_PER_ELEMENT
 
 		ensureWasmCapacity(wasm.memory, totalNeeded)
-		new Uint8Array(wasm.memory.buffer, 0, end).set(haystack.subarray(0, end))
+		new Uint8Array(wasm.memory.buffer, 0, windowLength).set(haystack.subarray(windowStart, end))
 		CharacterSequence.#wasmHaystack = null
 
 		const count = wasm.scanDelimitedRanges(
 			0,
-			end,
-			state.scanCursor,
-			state.pendingSliceStart,
+			windowLength,
+			0,
+			// A record may have opened before this window, and a start behind it cannot be expressed
+			// in window coordinates. The kernel is given zero and the first emitted range — the only
+			// one that can begin before the window — takes the carried absolute start below.
+			0,
 			this[0]!,
 			quotePattern?.[0] ?? -1,
 			state.insideQuotes ? 1 : 0,
@@ -326,12 +342,25 @@ export class CharacterSequence extends Uint8Array {
 		)
 
 		const result = new Int32Array(wasm.memory.buffer, resultsOffset, 3 + count * 2)
+		const ranges = result.subarray(3)
+
+		// Rebase window coordinates back onto the buffer. The view aliases WASM memory and belongs to
+		// this call, so it is edited in place rather than copied out.
+		for (let i = count * 2 - 1; i >= 0; i--) {
+			ranges[i] = ranges[i]! + windowStart
+		}
+
+		if (count > 0) {
+			ranges[0] = state.pendingSliceStart
+		}
 
 		return {
-			ranges: result.subarray(3),
+			ranges,
 			count,
-			scanCursor: result[0]!,
-			pendingSliceStart: result[1]!,
+			scanCursor: windowStart + result[0]!,
+			// With nothing emitted the kernel echoes back the zero it was handed, which says nothing
+			// about where the open record began — the carried value is still the authority.
+			pendingSliceStart: count > 0 ? windowStart + result[1]! : state.pendingSliceStart,
 			insideQuotes: result[2] === 1,
 		}
 	}
