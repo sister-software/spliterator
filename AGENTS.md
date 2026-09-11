@@ -141,11 +141,16 @@ File path / Buffer / AsyncIterable
 
 ### Exports
 
-The package exposes three entry points:
+The package's public entry points:
 
 - `.` → `out/index.js` — all public symbols
 - `./node/fs` → `out/node/fs/index.js` — Node file helpers (dynamically imported by core)
-- `./test/utils` → `out/test/support/utils.js` — test fixture helpers
+
+Plus four worker-runtime subpaths (`./merge-async-iterators`, `./parallel-map-runtime`, `./segment-runtime`, `./segment-workers`), which exist so worker entry modules can import them by specifier rather than by relative path.
+
+**Every non-type import reachable from an entry point must be a real `dependency`.** `change-case` and `type-fest` are (the root re-exports `casing`, whose emitted `.d.ts` references `type-fest`), and so is `path-ts` (`node/fs` imports `PathBuilder` as a value). Only `read-excel-file` and `write-excel-file` are optional peers, because `XLSXSpliterator` reaches them through `await import(...)` and throws an error naming the package when they are absent. Declaring a statically imported package optional makes the installed package unimportable — that shipped in 7.3.0 and is worth re-checking before a release: pack the tarball, install it into an empty project, and import it.
+
+Examples import test helpers by relative path (`../test/support/utils.js`), not through the package. `out/test/**` is deliberately not shipped — it is ~944KB of compiled tests, and `fixturesDirectory` resolves relative to the cwd, so it could never work for a consumer.
 
 ### Testing
 

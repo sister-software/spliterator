@@ -6,7 +6,8 @@
 
 import * as Colorette from "colorette"
 import { debugAsVisibleCharacters, Spliterator } from "spliterator"
-import { fixturesDirectory } from "spliterator/test/utils"
+
+import { fixturesDirectory } from "../test/support/utils.js"
 
 const fixturePath = fixturesDirectory("phonetic-single-spaced.txt")
 

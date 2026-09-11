@@ -10,7 +10,8 @@
 import * as fs from "node:fs/promises"
 
 import { AsyncSpliterator } from "spliterator"
-import { fixturesDirectory } from "spliterator/test/utils"
+
+import { fixturesDirectory } from "../test/support/utils.js"
 
 const fixturePath = fixturesDirectory("bdc_06_Cable_fixed_broadband_J24_10dec2024.csv")
 const fileSize = await fs.stat(fixturePath.toString()).then((stat) => stat.size)

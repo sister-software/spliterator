@@ -4,7 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import { ReadableStream, type ReadableWritablePair, type StreamPipeOptions } from "stream/web"
+import { ReadableStream, type ReadableWritablePair, type StreamPipeOptions } from "node:stream/web"
 
 import type { AsyncChunkIterator, AsyncDataResource, ByteRange } from "../internal/shared.js"
 import { type AsManyWorkersOptions, runSegmentWorkers } from "../parallel/segment-workers.js"
