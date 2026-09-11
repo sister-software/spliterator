@@ -102,6 +102,8 @@ Keyed off **per-row work**, not file size:
 
 Naming rule: **closure ⇒ caller's thread; module path ⇒ worker thread** (closures can't cross `postMessage`).
 
+**Reusing workers across calls.** `asManyWorkers` and `parallelMapWorkers` spawn and terminate their workers per call. Pass a `WorkerPool` (`lib/parallel/worker-pool.ts`) to keep them warm instead — measured **3.3–5.6×** on repeated calls over a 200KB file, and **0.98× on a 52MB file**, because startup only matters when it is a large share of the call. Ownership is explicit (`await using pool = new WorkerPool({ size })`); there is no implicit global.
+
 |                     | Caller's thread                                                   | Worker threads                                                |
 | ------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------- |
 | Collection of items | `parallelMap` / `parallelFilter` (`lib/parallel/parallel-map.ts`) | `parallelMapWorkers` (`lib/parallel/parallel-map-workers.ts`) |
@@ -171,16 +173,16 @@ The parallel-parsing layers are tested bottom-up so the worker protocol is verif
 
 - **The WASM scanner loads asynchronously**: synchronous callers (`Spliterator.fromSync`, `CSVSpliterator.from`) that finish in a single tick silently use the JS scanner. `await CharacterSequence.whenReady()` first to opt into SIMD.
 
+- **`BufferController` right-sizes over a window, never per compression**: capacity is judged once per 64 compressions against the largest `bytesWritten` seen across that window, and only handed back above 4× it. Shrinking on every compress was measured at 20 shrinks and 121 reallocations against a 7-reallocation baseline (165MB copied against 8.3MB) — a stream still producing large records needs the capacity it was just handed back. A short tail deliberately never reaches an evaluation.
+
+- **A pooled worker imports the handler once, not once per call**: with a `WorkerPool`, handler module top-level state persists across every call routed through that worker — which is the reason to pool, since loading a model is the expensive part, but it is a real difference from the unpooled path where each call gets a fresh module. Relatedly, `workerData` is fixed when the pool spawns a worker, so passing it per call alongside `pool` throws rather than being silently dropped.
+
+- **Pooled worker messages carry a `leaseId`**: a worker is handed to the next caller while a batch from the previous lease may still be in flight, so every message is matched against the active lease and anything else is dropped. Adding a message type to `pool-worker-entry.ts` means carrying the id through it.
+
 - **`Array.shift()` is O(n)**: Avoid `shift()` on large arrays in hot paths. Use a `head` pointer instead (`chunks[head++]`).
 
 ## Known Performance Issues
 
 Open items only — resolved work is in the git log, and the invariants it left behind are in the gotchas above.
 
-- [ ] **`asManyWorkers` — persistent worker pool**
-
-  - v1 spawns and terminates one Worker per segment per call (startup amortizes over a multi-GB file). A pre-warmed pool reused across calls would cut repeated-call startup and make the many-small-files case (currently `parallelMap`) viable on threads.
-
-- [ ] **`BufferController.compress` cannot shrink an oversized allocation**
-
-  - Compaction slides live bytes down within the same `ArrayBuffer`, so a record far larger than the steady-state working set leaves its allocation resident for the rest of the stream (~67MB after a 50MB quoted field). Right-sizing into a fresh buffer was measured and is worse — it forces constant re-growth for no peak-RSS gain. Revisit only if a long tail after a huge record proves to matter.
+Nothing open. Add entries here as they are found, and move the invariant into the gotchas above when one is fixed.
