@@ -348,7 +348,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	/**
 	 * Wrap any iterable or async iterable as a chainable sequence.
 	 */
-	static from<T>(source: SequenceSource<T>): AsyncSequence<T> {
+	public static from<T>(source: SequenceSource<T>): AsyncSequence<T> {
 		return source instanceof AsyncSequence ? source : new AsyncSequence<T>(source)
 	}
 
@@ -387,14 +387,14 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	/**
 	 * Transform each value. The callback receives `(value, counter)` and may return a promise.
 	 */
-	map<U>(fn: (value: T, counter: number) => U | PromiseLike<U>): AsyncSequence<U> {
+	public map<U>(fn: (value: T, counter: number) => U | PromiseLike<U>): AsyncSequence<U> {
 		return this.#derive<U>({ kind: OP_MAP, fn })
 	}
 
 	/**
 	 * Keep values for which the callback is truthy. The callback receives `(value, counter)` and may return a promise.
 	 */
-	filter(fn: (value: T, counter: number) => unknown): AsyncSequence<T> {
+	public filter(fn: (value: T, counter: number) => unknown): AsyncSequence<T> {
 		return this.#derive<T>({ kind: OP_FILTER, fn })
 	}
 
@@ -404,7 +404,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	 * The close is what makes this safe on a file-backed source — `take(5)` over a 40GB file releases the handle rather
 	 * than leaving it open until GC.
 	 */
-	take(limit: number): AsyncSequence<T> {
+	public take(limit: number): AsyncSequence<T> {
 		const normalized = Math.trunc(limit)
 
 		if (!Number.isFinite(normalized) || normalized < 0) {
@@ -417,7 +417,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	/**
 	 * Skip the first `limit` values.
 	 */
-	drop(limit: number): AsyncSequence<T> {
+	public drop(limit: number): AsyncSequence<T> {
 		const normalized = Math.trunc(limit)
 
 		if (!Number.isFinite(normalized) || normalized < 0) {
@@ -434,7 +434,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	 * rather than joining the current op list. Stacking `flatMap` costs one async boundary each; stacking
 	 * `map`/`filter`/`take`/`drop` costs nothing.
 	 */
-	flatMap<U>(
+	public flatMap<U>(
 		fn: (value: T, counter: number) => AsyncIterable<U> | Iterable<U> | PromiseLike<AsyncIterable<U> | Iterable<U>>
 	): AsyncSequence<U> {
 		return new AsyncSequence<U>(closingWith(flattenValues(this, fn), this))
@@ -450,7 +450,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	 * **Reads the whole source into memory.** On a sequence backed by a file this defeats the point of streaming — filter
 	 * and map first so only what you keep is materialized.
 	 */
-	async toArray(): Promise<T[]> {
+	public async toArray(): Promise<T[]> {
 		const values: T[] = []
 
 		for await (const value of this) {
@@ -461,9 +461,19 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	}
 
 	/**
+	 * Returns a copy of an array with its elements sorted.
+	 *
+	 * @param compareFn A function that defines the sort order. If omitted, the elements are sorted in ascending, ASCII
+	 *   character order.
+	 */
+	public toSorted(compareFn?: (a: T, b: T) => number): Promise<T[]> {
+		return this.toArray().then((array) => array.toSorted(compareFn))
+	}
+
+	/**
 	 * Invoke the callback for each value, for side effects.
 	 */
-	async forEach(fn: (value: T, counter: number) => unknown): Promise<void> {
+	public async forEach(fn: (value: T, counter: number) => unknown): Promise<void> {
 		let counter = 0
 
 		for await (const value of this) {
@@ -479,9 +489,9 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	 * Fold the sequence to a single value. Without `initialValue` the first value seeds the accumulator, and an empty
 	 * sequence is a `TypeError` — matching `Array.prototype.reduce`.
 	 */
-	reduce(fn: (accumulator: T, value: T, counter: number) => T | PromiseLike<T>): Promise<T>
-	reduce<U>(fn: (accumulator: U, value: T, counter: number) => U | PromiseLike<U>, initialValue: U): Promise<U>
-	async reduce<U>(
+	public reduce(fn: (accumulator: T, value: T, counter: number) => T | PromiseLike<T>): Promise<T>
+	public reduce<U>(fn: (accumulator: U, value: T, counter: number) => U | PromiseLike<U>, initialValue: U): Promise<U>
+	public async reduce<U>(
 		fn: (accumulator: U, value: T, counter: number) => U | PromiseLike<U>,
 		...rest: [initialValue?: U]
 	): Promise<U> {
@@ -512,7 +522,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	/**
 	 * Whether any value satisfies the callback. Short-circuits and closes the underlying iterator.
 	 */
-	async some(fn: (value: T, counter: number) => unknown): Promise<boolean> {
+	public async some(fn: (value: T, counter: number) => unknown): Promise<boolean> {
 		let counter = 0
 
 		for await (const value of this) {
@@ -527,7 +537,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	/**
 	 * Whether every value satisfies the callback. Short-circuits and closes the underlying iterator.
 	 */
-	async every(fn: (value: T, counter: number) => unknown): Promise<boolean> {
+	public async every(fn: (value: T, counter: number) => unknown): Promise<boolean> {
 		let counter = 0
 
 		for await (const value of this) {
@@ -542,7 +552,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	/**
 	 * The first value satisfying the callback, or `undefined`. Short-circuits and closes the underlying iterator.
 	 */
-	async find(fn: (value: T, counter: number) => unknown): Promise<T | undefined> {
+	public async find(fn: (value: T, counter: number) => unknown): Promise<T | undefined> {
 		let counter = 0
 
 		for await (const value of this) {
@@ -566,7 +576,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	 *
 	 * **Fusion barrier**, like {@linkcode flatMap}.
 	 */
-	chunks(size: number): AsyncSequence<T[]> {
+	public chunks(size: number): AsyncSequence<T[]> {
 		const normalized = Math.trunc(size)
 
 		if (!Number.isFinite(normalized) || normalized < 1) {
@@ -586,7 +596,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	 *
 	 * **Fusion barrier**, like {@linkcode flatMap}.
 	 */
-	parallelMap<U>(
+	public parallelMap<U>(
 		fn: (value: T, counter: number) => U | PromiseLike<U>,
 		{ concurrency, signal }: ParallelMapSequenceOptions = {}
 	): AsyncSequence<U> {
@@ -609,7 +619,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	 * latency, not CPU work — cross a thread boundary with `parallelMapWorkers` for CPU work. **Fusion barrier**, like
 	 * {@linkcode flatMap}.
 	 */
-	parallelFilter(
+	public parallelFilter(
 		fn: (value: T, counter: number) => unknown,
 		{ concurrency, signal }: ParallelMapSequenceOptions = {}
 	): AsyncSequence<T> {
@@ -621,7 +631,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	/**
 	 * Expose the sequence as a web stream, for interop with `pipeThrough`/`pipeTo` consumers.
 	 */
-	toReadableStream(): ReadableStream<T> {
+	public toReadableStream(): ReadableStream<T> {
 		const iterator = this[Symbol.asyncIterator]()
 
 		return new ReadableStream<T>({
@@ -641,7 +651,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	/**
 	 * Pipe the sequence through a transform stream.
 	 */
-	pipeThrough<U>(transform: ReadableWritablePair<U, T>, options?: StreamPipeOptions): ReadableStream<U> {
+	public pipeThrough<U>(transform: ReadableWritablePair<U, T>, options?: StreamPipeOptions): ReadableStream<U> {
 		return this.toReadableStream().pipeThrough(transform, options)
 	}
 
@@ -649,7 +659,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 
 	//#region Iteration
 
-	async next(): Promise<IteratorResult<T>> {
+	public async next(): Promise<IteratorResult<T>> {
 		if (this.#done) return { value: undefined, done: true }
 
 		const ops = this.#ops
@@ -738,7 +748,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	/**
 	 * Close the sequence and release the underlying source.
 	 */
-	async return(): Promise<IteratorResult<T>> {
+	public async return(): Promise<IteratorResult<T>> {
 		return this.#finish()
 	}
 

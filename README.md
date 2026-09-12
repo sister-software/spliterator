@@ -1,8 +1,39 @@
-# Spliterator 🎀
+<h1 align="center">Spliterator 🎀</h1>
 
-Spliterator is a TypeScript library for streaming delimited content such as CSV, TSV and JSONL.
+<p align="center"><strong>Streams delimited byte content — CSV, TSV, JSONL, XLSX — without loading the file into memory.</strong></p>
 
-Let's say you have a huge newline-delimited JSON file that can't fit into memory:
+<p align="center">
+  <a href="https://www.npmjs.com/package/spliterator"><img alt="npm version" src="https://img.shields.io/npm/v/spliterator"></a>
+  <img alt="npm downloads" src="https://img.shields.io/npm/dm/spliterator">
+  <img alt="node version" src="https://img.shields.io/node/v/spliterator">
+  <img alt="license" src="https://img.shields.io/npm/l/spliterator">
+</p>
+
+<p align="center">
+  <a href="#quick-start"><strong>Quick start</strong></a> ·
+  <a href="#chaining">Chaining</a> ·
+  <a href="#choosing-a-primitive">Choosing a primitive</a> ·
+  <a href="#command-line">CLI</a> ·
+  <a href="./examples">Examples</a>
+</p>
+
+Spliterator scans for delimiters rather than materializing lines, so a parse costs one pass over the bytes and a queue of `[start, end]` ranges. An embedded WebAssembly SIMD scanner does the scanning — roughly 5–6 GB/s for multi-byte delimiters against ~600 MB/s for the JavaScript fallback — with no extra files, fetches, or configuration. Files small enough that setup dominates are read whole and parsed synchronously instead, automatically.
+
+Every `fromAsync` returns an `AsyncSequence`: a lazy, chainable async iterator matching the [async iterator helpers proposal][helpers], fused into a single pass so chain depth is nearly free. Early exit closes the file handle. The core is isomorphic, Node file I/O lives behind a subpath, and a CLI ships in the box. Every export carries TSDoc, so your editor is the reference.
+
+[helpers]: https://github.com/tc39/proposal-async-iterator-helpers
+
+## Installation
+
+```bash
+yarn add spliterator
+# or
+npm install spliterator
+```
+
+## Quick start
+
+Say you have a newline-delimited JSON file too large to fit into memory:
 
 ```js
 {"name": "Jessie", "age": 30}
@@ -11,7 +42,7 @@ Let's say you have a huge newline-delimited JSON file that can't fit into memory
 // Several hundred thousand more lines...
 ```
 
-Spliterator can help you read it line-by-line without loading the entire file into memory:
+Spliterator reads it line by line, holding only the current record:
 
 ```ts
 import { JSONSpliterator } from "spliterator"
@@ -21,25 +52,12 @@ interface Person {
 	age: number
 }
 
-const reader = JSONSpliterator.fromAsync("example.jsonl")
+const reader = JSONSpliterator.fromAsync<Person>("example.jsonl")
 
-for await (const line of reader) {
-	console.log(line) // {"name": "Alice", "age": 30}, etc.
+for await (const person of reader) {
+	console.log(person) // { name: "Jessie", age: 30 }, etc.
 }
 ```
-
-[![NPM Version](https://img.shields.io/npm/v/spliterator)](https://www.npmjs.com/package/spliterator)
-![NPM License](https://img.shields.io/npm/l/spliterator)
-
-# Installation
-
-```bash
-yarn add spliterator
-# or
-npm install spliterator
-```
-
-# Usage
 
 ## Character-delimited files
 
@@ -93,6 +111,43 @@ for await (const columns of reader) {
 }
 ```
 
+## Chaining
+
+`fromAsync` returns an `AsyncSequence` — a lazy, chainable async iterator whose core methods (`map`, `filter`, `take`, `drop`, `flatMap`, `reduce`, `toArray`, `forEach`, `some`, `every`, `find`) match the [async iterator helpers proposal][helpers] in name and semantics. No polyfill required.
+
+```ts
+const cakes = await JSONSpliterator.fromAsync<Row>("menu.jsonl", { delimiter: "\n" })
+	.filter((row) => row.category === "Ice Cream Cake")
+	.map((row) => row.item_name)
+	.take(10)
+	.toArray()
+```
+
+Filtering happens while streaming, and `take(10)` closes the file handle instead of reading the rest. The operators fuse into a single pass rather than nesting one async generator per step, so chain depth is nearly free — doubling the operator count costs about 10%, where nesting would roughly double it. `flatMap`, `chunks`, `parallelMap`, and `parallelFilter` are the exceptions, since they need inner-iterator state.
+
+The synchronous `from` returns a plain generator, which already has the same helpers natively on Node 24+.
+
+### Reading from a stream
+
+All included Spliterators implement the `Generator` and `AsyncGenerator` interfaces, so you can use them in `for...of` and `for await...of` loops, as well the web-native [ReadableStreams](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream), so you can use them in `for await...of` loops, as well as piping them through transformations to avoid nested and partially materialized streams.
+
+```ts
+import { JSONSpliterator } from "spliterator"
+
+const people = [
+	{ name: "Alice", age: 30 },
+	{ name: "Bob", age: 40 },
+	{ name: "Charlie", age: 50 },
+]
+
+const generator = JSONSpliterator.from(people.map(JSON.stringify).join("\n"))
+const stream = ReadableStream.from(generator)
+
+for await (const line of stream) {
+	console.log(line) // {"name": "Alice", "age": 30}, etc.
+}
+```
+
 ## Excel workbooks (XLSX)
 
 Spliterator can read and write `.xlsx` workbooks through `XLSXSpliterator`. Support is powered by two optional peer dependencies — install the one you need:
@@ -142,9 +197,59 @@ A few caveats worth knowing:
 - **There is no synchronous reader.** Decompression and XML parsing are asynchronous in the underlying reader, so `XLSXSpliterator.from()` always throws, pointing you to `fromAsync`.
 - **One sheet at a time.** Reading targets a single sheet per call, and writing produces a single-sheet workbook. Cell styling, formats, and formulas are out of scope.
 
-See `examples/xlsx-to-jsonl.ts` for a complete conversion script with derived transformers.
+See [`examples/xlsx-to-jsonl.ts`](./examples/xlsx-to-jsonl.ts) for a complete conversion script with derived transformers.
 
-## CLI Usage
+## Discovering files (Node.js)
+
+`Globerator` is the Node-only filesystem discovery API. Import it from the `spliterator/node/fs` subpath; it returns an
+`AsyncSequence`, so glob results compose with the same `map`, `filter`, `take`, and `toArray` operations as parsed rows.
+
+```ts
+import { Globerator } from "spliterator/node/fs"
+
+for await (const path of Globerator.files(["json", ".jsonl"], {
+	cwd: "data",
+	recursive: true,
+})) {
+	console.log(path) // absolute path to each matching non-directory entry
+}
+```
+
+`files()` accepts one or more extensions, with or without a leading dot. It searches `cwd` itself by default; pass
+`recursive: true` to search descendants. Pass `absolute: false` when a consumer needs paths relative to `cwd`.
+
+For arbitrary patterns, use `from()`. It supports multiple patterns, exclusions, symlink traversal, cancellation, and
+`Dirent` output:
+
+```ts
+const features = Globerator.from("**/data/**/*.geojson", {
+	cwd: "wof-repositories",
+	exclude: ["**/*-alt-*.geojson"],
+	followSymlinks: true,
+	throwIfUnmatched: true,
+})
+
+for await (const path of features) {
+	// JSONSpliterator.fromAsync(path), upload(path), etc.
+}
+```
+
+Missing `cwd` directories throw by default, while an unmatched pattern yields an empty sequence. Use
+`throwIfDirectoryMissing: false` for an absence-tolerant walk, or `throwIfUnmatched: true` when an empty result is an
+error. These checks run when iteration begins, preserving lazy construction.
+
+```ts
+const entries = await Globerator.from("*.csv", {
+	cwd: "imports",
+	withFileTypes: true,
+}).toArray()
+
+for (const entry of entries) {
+	console.log(entry.parentPath, entry.name)
+}
+```
+
+## Command line
 
 Spliterator also includes a CLI tool that can be used to stream delimited content from the command line, transform it, filter it, and more.
 
@@ -178,51 +283,6 @@ Use `-k` to preserve input order, `--line-buffer` for live complete lines, `--no
 
 For information on all available commands, run `spliterator --help`.
 
-## Advanced Usage
-
-Spliterator includes a collection of low-level classes and interfaces that can be used to create custom generators for any kind of delimited content.
-
-For more advanced usage, check out our tests in the `test` directory, or our fully-annotated source code.
-
-### Reading from a stream
-
-All included Spliterators implement the `Generator` and `AsyncGenerator` interfaces, so you can use them in `for...of` and `for await...of` loops, as well the web-native [ReadableStreams](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream), so you can use them in `for await...of` loops, as well as piping them through transformations to avoid nested and partially materialized streams.
-
-```ts
-import { JSONSpliterator } from "spliterator"
-
-const people = [
-	{ name: "Alice", age: 30 },
-	{ name: "Bob", age: 40 },
-	{ name: "Charlie", age: 50 },
-]
-
-const generator = JSONSpliterator.from(people.map(JSON.stringify).join("\n"))
-const stream = ReadableStream.from(generator)
-
-for await (const line of stream) {
-	console.log(line) // {"name": "Alice", "age": 30}, etc.
-}
-```
-
-### SIMD acceleration
-
-Spliterator ships a small WebAssembly SIMD scanner that accelerates delimiter and quote scanning (roughly 5–6× over the JavaScript scanner for multi-byte delimiters, more for column splitting). It is embedded in the package — no extra files, fetches, or configuration.
-
-The module loads **asynchronously**. Asynchronous parsing (`fromAsync`, streams) picks it up automatically once loaded. Purely synchronous parsing that finishes in a single tick would otherwise complete before the module is ready and transparently use the JavaScript scanner — to opt in, await it first:
-
-```ts
-import { CharacterSequence, CSVSpliterator } from "spliterator"
-
-await CharacterSequence.whenReady() // resolves to true once the SIMD scanner is active
-
-for (const row of CSVSpliterator.from(largeCsvString)) {
-	// ...now backed by the SIMD scanner
-}
-```
-
-Correctness is identical either way; `whenReady()` only affects which scanner runs.
-
 ## Choosing a primitive
 
 The question that predicts the answer is not "how big is my file?" — it's **how much work happens per row.**
@@ -248,37 +308,6 @@ Closures can't cross a `postMessage` boundary, so `parallelMap` takes a function
 | One large file        | `AsyncSpliterator.asMany`   | `AsyncSpliterator.asManyWorkers` |
 | Just the boundaries   | `AsyncSpliterator.segments` | (feeds either)                   |
 
-### Chaining
-
-`fromAsync` returns an `AsyncSequence` — a lazy, chainable async iterator whose core methods (`map`, `filter`, `take`, `drop`, `flatMap`, `reduce`, `toArray`, `forEach`, `some`, `every`, `find`) match the [async iterator helpers proposal][helpers] in name and semantics. No polyfill required.
-
-[helpers]: https://github.com/tc39/proposal-async-iterator-helpers
-
-```ts
-const cakes = await JSONSpliterator.fromAsync<Row>("menu.jsonl", { delimiter: "\n" })
-	.filter((row) => row.category === "Ice Cream Cake")
-	.map((row) => row.item_name)
-	.take(10)
-	.toArray()
-```
-
-Filtering happens while streaming, and `take(10)` closes the file handle instead of reading the rest. The operators fuse into a single pass rather than nesting one async generator per step, so chain depth is nearly free — doubling the operator count costs about 10%, where nesting would roughly double it. `flatMap`, `chunks`, `parallelMap`, and `parallelFilter` are the exceptions, since they need inner-iterator state.
-
-The synchronous `from` returns a plain generator, which already has the same helpers natively on Node 24+.
-
-### Small sources are read whole
-
-Opening a file handle and standing up a read stream costs about 100µs, which is most of the work for a small file. So `fromAsync` reads sources of 128 KiB or less into memory and parses them synchronously — measured ~1.85× faster at 635 B and ~1.4× at 125 KiB. Output is identical either way.
-
-The threshold is deliberately small. Above ~256 KiB the advantage stops being measurable, while the memory cost keeps growing — a 1 GiB file costs ~105 MB resident streamed against ~1.1 GB read whole. Raising it buys nothing and spends memory linearly.
-
-```ts
-// Force streaming, whatever the size — when a bounded footprint is the point.
-JSONSpliterator.fromAsync("data.jsonl", { delimiter: "\n", bulkThreshold: 0 })
-```
-
-Sources with no knowable length (a pipe, a `ReadableStream`) get an end-of-input test instead: if the first chunk read is also the last, the whole input is already in memory and is parsed directly. Otherwise it streams as normal.
-
 ### Parallel parsing across threads
 
 For one large file with a CPU-bound per-row transform, `AsyncSpliterator.asManyWorkers` splits the file into delimiter-aligned segments and runs a handler module across worker threads — each worker owns its own handle and reads only its segment. Results stream back to the main thread as a single async iterator, for a single-thread writer (a database, a JSONL file).
@@ -303,7 +332,7 @@ for await (const jsonLine of AsyncSpliterator.asManyWorkers<Uint8Array>("huge.cs
 
 Need just the byte ranges to drive your own pool? `AsyncSpliterator.segments(path, { delimiter, concurrency })` returns them.
 
-#### Reusing workers across calls
+### Reusing workers across calls
 
 Both threaded primitives spawn and terminate their workers per call. Spawning measured 17ms for one worker and 48ms for eight — half to two-thirds of a small call — and a handler that loads a model or opens a connection at import pays far more than that again, every call.
 
@@ -335,15 +364,47 @@ Two things follow from workers being reused, both of them the point rather than 
 
 A pool smaller than `concurrency` bounds the real parallelism — segments queue for a worker instead of running at once, and `parallelMapWorkers` clamps to the pool's size. Dispose it when you are done, or bind it with `await using` as above.
 
+## Under the hood
+
+### SIMD acceleration
+
+Spliterator ships a small WebAssembly SIMD scanner that accelerates delimiter and quote scanning (roughly 5–6× over the JavaScript scanner for multi-byte delimiters, more for column splitting). It is embedded in the package — no extra files, fetches, or configuration.
+
+The module loads **asynchronously**. Asynchronous parsing (`fromAsync`, streams) picks it up automatically once loaded. Purely synchronous parsing that finishes in a single tick would otherwise complete before the module is ready and transparently use the JavaScript scanner — to opt in, await it first:
+
+```ts
+import { CharacterSequence, CSVSpliterator } from "spliterator"
+
+await CharacterSequence.whenReady() // resolves to true once the SIMD scanner is active
+
+for (const row of CSVSpliterator.from(largeCsvString)) {
+	// ...now backed by the SIMD scanner
+}
+```
+
+Correctness is identical either way; `whenReady()` only affects which scanner runs.
+
+### Small sources are read whole
+
+Opening a file handle and standing up a read stream costs about 100µs, which is most of the work for a small file. So `fromAsync` reads sources of 128 KiB or less into memory and parses them synchronously — measured ~1.85× faster at 635 B and ~1.4× at 125 KiB. Output is identical either way.
+
+The threshold is deliberately small. Above ~256 KiB the advantage stops being measurable, while the memory cost keeps growing — a 1 GiB file costs ~105 MB resident streamed against ~1.1 GB read whole. Raising it buys nothing and spends memory linearly.
+
+```ts
+// Force streaming, whatever the size — when a bounded footprint is the point.
+JSONSpliterator.fromAsync("data.jsonl", { delimiter: "\n", bulkThreshold: 0 })
+```
+
+Sources with no knowable length (a pipe, a `ReadableStream`) get an end-of-input test instead: if the first chunk read is also the last, the whole input is already in memory and is parsed directly. Otherwise it streams as normal.
+
 ### Custom generators
 
-While Spliterator includes premade exports for most use-cases, custom generators can be created via `Spliterator` and `AsyncSpliterator`. This class is a low-level interface that allows you to create your own generators for any kind of delimited content.
+While Spliterator includes premade exports for most use-cases, custom generators can be created via `Spliterator` and `AsyncSpliterator`. These are the low-level interfaces the rest of the library is built on, and they handle any kind of delimited content.
 
-# License
+For more advanced usage, check out the [examples](./examples), the tests in [`test/`](./test), or the fully-annotated source.
 
-Spliterator is licensed under the AGPL-3.0 license. Generally,
-this means that you can use the software for free, but you must share
-any modifications you make to the software.
+## License
 
-For more information on commercial usage licensing, please contact us at
-`hello@sister.software`
+Spliterator is licensed under the [MIT License](https://opensource.org/licenses/MIT).
+
+For commercial usage licensing, please contact us at `hello@sister.software`.
