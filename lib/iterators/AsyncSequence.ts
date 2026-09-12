@@ -394,6 +394,10 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	/**
 	 * Keep values for which the callback is truthy. The callback receives `(value, counter)` and may return a promise.
 	 */
+	public filter<S extends T>(predicate: (value: T, counter: number) => value is S): AsyncSequence<S>
+
+	public filter(predicate: (value: T, counter: number) => unknown): AsyncSequence<T>
+
 	public filter(fn: (value: T, counter: number) => unknown): AsyncSequence<T> {
 		return this.#derive<T>({ kind: OP_FILTER, fn })
 	}
@@ -619,6 +623,14 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	 * latency, not CPU work — cross a thread boundary with `parallelMapWorkers` for CPU work. **Fusion barrier**, like
 	 * {@linkcode flatMap}.
 	 */
+	public parallelFilter<S extends T>(
+		predicate: (value: T, counter: number) => value is S,
+		options?: ParallelMapSequenceOptions
+	): AsyncSequence<S>
+	public parallelFilter(
+		fn: (value: T, counter: number) => unknown,
+		options?: ParallelMapSequenceOptions
+	): AsyncSequence<T>
 	public parallelFilter(
 		fn: (value: T, counter: number) => unknown,
 		{ concurrency, signal }: ParallelMapSequenceOptions = {}
