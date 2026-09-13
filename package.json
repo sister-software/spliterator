@@ -35,14 +35,33 @@
 		"out/node/**/*"
 	],
 	"type": "module",
+	"types": "./out/index.d.ts",
 	"exports": {
 		"./package.json": "./package.json",
-		".": "./out/index.js",
-		"./node/fs": "./out/node/fs/index.js",
-		"./merge-async-iterators": "./out/lib/parallel/merge-async-iterators.js",
-		"./parallel-map-runtime": "./out/lib/parallel/parallel-map-runtime.js",
-		"./segment-runtime": "./out/lib/parallel/segment-runtime.js",
-		"./segment-workers": "./out/lib/parallel/segment-workers.js"
+		".": {
+			"types": "./out/index.d.ts",
+			"default": "./out/index.js"
+		},
+		"./node/fs": {
+			"types": "./out/node/fs/index.d.ts",
+			"default": "./out/node/fs/index.js"
+		},
+		"./merge-async-iterators": {
+			"types": "./out/lib/parallel/merge-async-iterators.d.ts",
+			"default": "./out/lib/parallel/merge-async-iterators.js"
+		},
+		"./parallel-map-runtime": {
+			"types": "./out/lib/parallel/parallel-map-runtime.d.ts",
+			"default": "./out/lib/parallel/parallel-map-runtime.js"
+		},
+		"./segment-runtime": {
+			"types": "./out/lib/parallel/segment-runtime.d.ts",
+			"default": "./out/lib/parallel/segment-runtime.js"
+		},
+		"./segment-workers": {
+			"types": "./out/lib/parallel/segment-workers.d.ts",
+			"default": "./out/lib/parallel/segment-workers.js"
+		}
 	},
 	"publishConfig": {
 		"access": "public",
