@@ -145,28 +145,28 @@ export abstract class XLSXSpliterator {
 	 *
 	 * @throws {TypeError} Always. Use {@linkcode XLSXSpliterator.fromAsync}.
 	 */
-	static from(_source?: unknown, _init?: unknown): never {
+	public static from(_source?: unknown, _init?: unknown): never {
 		throw new TypeError("XLSX cannot be parsed synchronously. Did you mean `XLSXSpliterator.fromAsync`?")
 	}
 
 	/**
 	 * @yields Each row as an object with the header names as keys.
 	 */
-	static fromAsync<T extends object = XLSXSpliteratorEmittedRecord>(
+	public static fromAsync<T extends object = XLSXSpliteratorEmittedRecord>(
 		source: XLSXSource,
 		options?: XLSXSpliteratorInit & { mode?: "object"; header?: true }
 	): AsyncSequence<T>
 	/**
 	 * @yields Each row as a 3-tuple [key, value, idx].
 	 */
-	static fromAsync<T extends RowTuple<unknown>[] = RowTuple<XLSXCellValue>[]>(
+	public static fromAsync<T extends RowTuple<unknown>[] = RowTuple<XLSXCellValue>[]>(
 		source: XLSXSource,
 		options?: XLSXSpliteratorInit & { mode: "entries" }
 	): AsyncSequence<T>
 	/**
 	 * @yields Each row as an array of typed cells.
 	 */
-	static fromAsync<T extends XLSXCellValue[] = XLSXCellValue[]>(
+	public static fromAsync<T extends XLSXCellValue[] = XLSXCellValue[]>(
 		source: XLSXSource,
 		options?: XLSXSpliteratorInit & ({ mode: "array" } | { mode?: "array"; header: false })
 	): AsyncSequence<T>
@@ -180,7 +180,7 @@ export abstract class XLSXSpliterator {
 	 *
 	 * @yields Each row, shaped according to the `mode` option.
 	 */
-	static fromAsync(source: XLSXSource, init: XLSXSpliteratorInit = {}): AsyncSequence<unknown> {
+	public static fromAsync(source: XLSXSource, init: XLSXSpliteratorInit = {}): AsyncSequence<unknown> {
 		const {
 			// ---
 			sheet = 1,

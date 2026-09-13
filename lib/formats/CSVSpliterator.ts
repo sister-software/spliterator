@@ -135,7 +135,7 @@ export abstract class CSVSpliterator {
 		}
 	}
 
-	static from<T extends object = CSVSpliteratorEmittedRecord>(
+	public static from<T extends object = CSVSpliteratorEmittedRecord>(
 		source: CharacterSequenceInput,
 		options?: CSVSpliteratorInit & { mode?: "object"; header?: true }
 	): Generator<T>
@@ -143,7 +143,7 @@ export abstract class CSVSpliterator {
 	 * @yields Each row as a 3-tuple [key, value, idx].
 	 */
 
-	static from<T extends RowTuple[] = RowTuple[]>(
+	public static from<T extends RowTuple[] = RowTuple[]>(
 		source: CharacterSequenceInput,
 		options?: CSVSpliteratorInit & { mode: "entries" }
 	): Generator<T>
@@ -152,7 +152,7 @@ export abstract class CSVSpliterator {
 	 *
 	 * @yields Each row as an array of columns.
 	 */
-	static from<T extends string[] = string[]>(
+	public static from<T extends string[] = string[]>(
 		source: CharacterSequenceInput,
 		options?: CSVSpliteratorInit & ({ mode: "array" } | { mode?: "array"; header: false })
 	): Generator<T>
@@ -161,7 +161,7 @@ export abstract class CSVSpliterator {
 	 *
 	 * @yields Each row as an array of columns.
 	 */
-	static *from(source: CharacterSequenceInput, init: CSVSpliteratorInit = {}) {
+	public static *from(source: CharacterSequenceInput, init: CSVSpliteratorInit = {}) {
 		const {
 			// ---
 			header = true,
@@ -225,7 +225,7 @@ export abstract class CSVSpliterator {
 	/**
 	 * @yields Each row as an object with the header names as keys.
 	 */
-	static fromAsync<T extends object = CSVSpliteratorEmittedRecord>(
+	public static fromAsync<T extends object = CSVSpliteratorEmittedRecord>(
 		source: AsyncDataResource | AsyncChunkIterator,
 		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode?: "object"; header?: true }
 	): AsyncSequence<T>
@@ -233,14 +233,14 @@ export abstract class CSVSpliterator {
 	/**
 	 * @yields Each row as a 3-tuple [key, value, idx].
 	 */
-	static fromAsync<T extends RowTuple[] = RowTuple[]>(
+	public static fromAsync<T extends RowTuple[] = RowTuple[]>(
 		source: AsyncDataResource | AsyncChunkIterator,
 		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode: "entries" }
 	): AsyncSequence<T>
 	/**
 	 * @yields Each row as an array of columns.
 	 */
-	static fromAsync<T extends string[] = string[]>(
+	public static fromAsync<T extends string[] = string[]>(
 		source: AsyncDataResource | AsyncChunkIterator,
 		options?: CSVSpliteratorInit & AsyncSpliteratorInit & ({ mode: "array" } | { mode?: "array"; header: false })
 	): AsyncSequence<T>
@@ -253,7 +253,7 @@ export abstract class CSVSpliterator {
 	 *
 	 * @yields Each row, shaped according to the `mode` option.
 	 */
-	static fromAsync(
+	public static fromAsync(
 		source: AsyncDataResource | AsyncChunkIterator,
 		init?: CSVSpliteratorInit & AsyncSpliteratorInit
 	): AsyncSequence<unknown>
@@ -266,7 +266,7 @@ export abstract class CSVSpliterator {
 	 *
 	 * @yields Each row, shaped according to the `mode` option.
 	 */
-	static fromAsync(
+	public static fromAsync(
 		source: AsyncDataResource | AsyncChunkIterator,
 		init: CSVSpliteratorInit & AdaptiveSourceInit = {}
 	): AsyncSequence<unknown> {

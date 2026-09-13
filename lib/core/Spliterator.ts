@@ -42,7 +42,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 * @param init - The initialization options for the generator.
 	 * @see {@linkcode AsyncSpliterator} for usage.
 	 */
-	static fromAsync = AsyncSpliterator.from
+	public static fromAsync = AsyncSpliterator.from
 
 	/**
 	 * Create a spliterator from an iterable resource such as a **buffer, array, or string**.
@@ -50,7 +50,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 * @param source - The data resource to read from.
 	 * @param init - The initialization options for the generator.
 	 */
-	static fromSync<T extends CharacterSequenceInput>(source: T, init: SpliteratorInit = {}): Spliterator {
+	public static fromSync<T extends CharacterSequenceInput>(source: T, init: SpliteratorInit = {}): Spliterator {
 		return new Spliterator(normalizeCharacterInput(source), init)
 	}
 
@@ -61,7 +61,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 * @param init - The initialization options for the generator.
 	 * @see {@linkcode Spliterator.fromSync} to ensure synchronous operation for string inputs.
 	 */
-	static from(source: DataView | ArrayBuffer | Buffer | Iterable<number>, init?: SpliteratorInit): Spliterator
+	public static from(source: DataView | ArrayBuffer | Buffer | Iterable<number>, init?: SpliteratorInit): Spliterator
 	/**
 	 * Create a new delimited generator from an **asynchronous byte stream**.
 	 *
@@ -70,7 +70,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 *
 	 * @returns A new generator instance, yielding byte ranges.
 	 */
-	static from(source: AsyncChunkIterator, init?: AsyncSpliteratorInit): AsyncSpliterator
+	public static from(source: AsyncChunkIterator, init?: AsyncSpliteratorInit): AsyncSpliterator
 	/**
 	 * Create a new delimited generator from a resource such as a **file handle or URL**.
 	 *
@@ -80,7 +80,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 * @returns A new generator instance, yielding byte ranges.
 	 * @see {@linkcode Spliterator.fromSync} to ensure synchronous operation for string inputs.
 	 */
-	static from(source: AsyncDataResource, init?: AsyncSpliteratorInit): Promise<AsyncSpliterator>
+	public static from(source: AsyncDataResource, init?: AsyncSpliteratorInit): Promise<AsyncSpliterator>
 	/**
 	 * Create a new delimited generator from a resource such as a **file handle, URL, or byte stream**.
 	 *
@@ -90,11 +90,11 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 * @returns A new generator instance, yielding byte ranges.
 	 * @see {@linkcode Spliterator.fromSync} to ensure synchronous operation for string inputs.
 	 */
-	static from(
+	public static from(
 		source: CharacterSequenceInput | AsyncDataResource | AsyncChunkIterator,
 		init?: SpliteratorInit & AsyncSpliteratorInit
 	): Spliterator | AsyncSpliterator | Promise<AsyncSpliterator>
-	static from(
+	public static from(
 		source: CharacterSequenceInput | AsyncDataResource | AsyncChunkIterator,
 		init: SpliteratorInit & AsyncSpliteratorInit = {}
 	): Spliterator | AsyncSpliterator | Promise<AsyncSpliterator> {

@@ -131,10 +131,10 @@ export abstract class Globerator {
 	 * {@linkcode AsyncSequence} for composable async iteration. Path results are absolute by default; pass `{ absolute:
 	 * false }` to make them relative to `cwd`.
 	 */
-	static from(pattern: GlobPatternInput, options: GlobDirentOptions): AsyncSequence<Dirent>
-	static from(pattern: GlobPatternInput, options?: GlobStringOptions): AsyncSequence<string>
+	public static from(pattern: GlobPatternInput, options: GlobDirentOptions): AsyncSequence<Dirent>
+	public static from(pattern: GlobPatternInput, options?: GlobStringOptions): AsyncSequence<string>
 
-	static from(pattern: GlobPatternInput, options: GlobOptions = {}): AsyncSequence<string | Dirent> {
+	public static from(pattern: GlobPatternInput, options: GlobOptions = {}): AsyncSequence<string | Dirent> {
 		return AsyncSequence.from(() => globEntries(pattern, options))
 	}
 
@@ -144,7 +144,7 @@ export abstract class Globerator {
 	 * Extensions may include their leading dot, so `"json"` and `".json"` are equivalent. Pass `recursive: true` to
 	 * search descendants; the default only examines `cwd` itself.
 	 */
-	static files(
+	public static files(
 		extensions: FileExtension | readonly FileExtension[],
 		options: FileGlobOptions = {}
 	): AsyncSequence<string> {

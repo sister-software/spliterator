@@ -45,7 +45,7 @@ export abstract class TextSpliterator {
 	 * @see {@linkcode TextSpliterator.fromAsync} for asynchronous iteration with decoding.
 	 * @see {@linkcode Spliterator.fromSync} for synchronous iteration without decoding.
 	 */
-	static *from(
+	public static *from(
 		source: CharacterSequenceInput,
 		{ encoding, fatal, ignoreBOM, ...options }: TextSpliteratorInit & SpliteratorInit = {}
 	): Generator<string> {
@@ -82,7 +82,7 @@ export abstract class TextSpliterator {
 	 * @see {@linkcode TextSpliterator.from} for synchronous iteration with decoding.
 	 * @see {@linkcode Spliterator.fromAsync} for asynchronous iteration without decoding.
 	 */
-	static fromAsync(
+	public static fromAsync(
 		source: AsyncDataResource,
 		{ encoding, fatal, ignoreBOM, ...options }: TextSpliteratorInit & AdaptiveSourceInit = {}
 	): AsyncSequence<string> {

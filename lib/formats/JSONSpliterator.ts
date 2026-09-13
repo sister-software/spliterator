@@ -58,7 +58,7 @@ export abstract class JSONSpliterator {
 		throw new TypeError("Static class cannot be instantiated. Did you mean `JSONSpliterator.from`?")
 	}
 
-	static *from<T = unknown>(
+	public static *from<T = unknown>(
 		source: CharacterSequenceInput,
 		{ comment, ...options }: SpliteratorInit & JSONSpliteratorInit = {}
 	): Generator<T> {
@@ -95,7 +95,7 @@ export abstract class JSONSpliterator {
 	 *
 	 * @yields Each row as an array of columns.
 	 */
-	static fromAsync<T = unknown>(
+	public static fromAsync<T = unknown>(
 		source: AsyncDataResource,
 		{ comment, ...options }: AdaptiveSourceInit & JSONSpliteratorInit = {}
 	): AsyncSequence<T> {

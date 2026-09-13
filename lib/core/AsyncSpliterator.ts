@@ -150,7 +150,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	 *
 	 * @returns A new generator instance, yielding byte ranges.
 	 */
-	static from(source: AsyncChunkIterator, init?: AsyncSpliteratorInit): AsyncSpliterator
+	public static from(source: AsyncChunkIterator, init?: AsyncSpliteratorInit): AsyncSpliterator
 	/**
 	 * Create a new delimited generator from a resource such as a file handle or URL.
 	 *
@@ -159,7 +159,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	 *
 	 * @returns A new generator instance, yielding byte ranges.
 	 */
-	static from(source: AsyncDataResource, init?: AsyncSpliteratorInit): Promise<AsyncSpliterator>
+	public static from(source: AsyncDataResource, init?: AsyncSpliteratorInit): Promise<AsyncSpliterator>
 	/**
 	 * Create a new delimited generator from a resource such as a file handle, URL, or byte stream.
 	 *
@@ -168,11 +168,11 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	 *
 	 * @returns A new generator instance, yielding byte ranges.
 	 */
-	static from(
+	public static from(
 		source: AsyncDataResource | AsyncChunkIterator,
 		init?: AsyncSpliteratorInit
 	): AsyncSpliterator | Promise<AsyncSpliterator>
-	static from(
+	public static from(
 		source: AsyncDataResource | AsyncChunkIterator,
 		init: AsyncSpliteratorInit = {}
 	): AsyncSpliterator | Promise<AsyncSpliterator> {
