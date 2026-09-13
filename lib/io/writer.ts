@@ -4,7 +4,9 @@
  * @author Teffen Ellis, et al.
  */
 
-import { type WriteStream, createWriteStream, type PathLike } from "node:fs"
+import { type WriteStream, createWriteStream } from "node:fs"
+
+import type { PathBuilderLike } from "path-ts"
 
 /**
  * Callback for writing a line to a newline-delimited file.
@@ -45,8 +47,8 @@ export interface NewlineWriter extends AsyncDisposable {
  * for (const row of rows) await out.write(JSON.stringify(row))
  * ```
  */
-export function createNewlineWriter(filePath: PathLike): NewlineWriter {
-	const writer = createWriteStream(filePath)
+export function createNewlineWriter(filePath: PathBuilderLike): NewlineWriter {
+	const writer = createWriteStream(String(filePath))
 
 	const write: WriteLineCallback = (content: any, encoding?: BufferEncoding) => {
 		return new Promise((resolve, reject) => {
