@@ -12,14 +12,14 @@ import { test } from "vitest"
 
 import { fixturesDirectory, loadFixture } from "../support/utils.js"
 
-test("countDelimiters has wc -l semantics without consuming a later file parse", async ({ expect }) => {
+test("count/countAsync have wc -l semantics without consuming a later file parse", async ({ expect }) => {
 	const fixturePath = fixturesDirectory("phonetic-single-spaced.txt")
 	const bytes = new TextEncoder().encode("one\n\ntwo")
 
-	expect(Spliterator.countDelimiters(bytes)).toBe(2)
-	expect(Spliterator.countDelimiters('"one\ntwo"\nthree', { enableQuoteHandling: true })).toBe(1)
+	expect(Spliterator.count(bytes)).toBe(2)
+	expect(Spliterator.count('"one\ntwo"\nthree', { enableQuoteHandling: true })).toBe(1)
 
-	const count = await AsyncSpliterator.countDelimiters(fixturePath)
+	const count = await Spliterator.countAsync(fixturePath)
 	const fixture = await loadFixture(fixturePath)
 	const rows = await Array.fromAsync(await Spliterator.from(fixturePath))
 
@@ -27,7 +27,7 @@ test("countDelimiters has wc -l semantics without consuming a later file parse",
 	expect(rows.length).toBeGreaterThan(0)
 })
 
-test("AsyncSpliterator.countDelimiters carries quote state across chunks", async ({ expect }) => {
+test("AsyncSpliterator.count carries quote state across chunks", async ({ expect }) => {
 	const encoder = new TextEncoder()
 
 	const source = (async function* () {
@@ -35,7 +35,7 @@ test("AsyncSpliterator.countDelimiters carries quote state across chunks", async
 		yield encoder.encode('\ntwo"\nlast')
 	})()
 
-	expect(await AsyncSpliterator.countDelimiters(source, { enableQuoteHandling: true })).toBe(2)
+	expect(await AsyncSpliterator.count(source, { enableQuoteHandling: true })).toBe(2)
 })
 
 test("Synchronous parity with String.prototype.split", async ({ expect }) => {

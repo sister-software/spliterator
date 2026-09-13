@@ -31,14 +31,15 @@ interface TypedCSVRow {
 	Location: string
 }
 
-test("countRows counts logical CSV data rows without consuming a later path parse", async ({ expect }) => {
-	const counted = await CSVSpliterator.countRows(fixturePath)
+test("count/countAsync count logical CSV rows without consuming a later path parse", async ({ expect }) => {
+	const counted = await CSVSpliterator.countAsync(fixturePath)
 	const parsed = await CSVSpliterator.fromAsync(fixturePath).toArray()
 
+	expect(CSVSpliterator.count('name,note\nfirst,"one\ntwo"\nsecond,three\n')).toBe(2)
 	expect(counted).toBe(parsed.length)
 })
 
-test("countRows honours quoted newlines, headers, drop, and take", async ({ expect }) => {
+test("countAsync honours quoted newlines, headers, drop, and take", async ({ expect }) => {
 	const encoder = new TextEncoder()
 
 	const source = (async function* () {
@@ -46,14 +47,14 @@ test("countRows honours quoted newlines, headers, drop, and take", async ({ expe
 		yield encoder.encode('\ntwo"\nsecond,three\nthird,four\n')
 	})()
 
-	expect(await CSVSpliterator.countRows(source, { drop: 1, take: 1 })).toBe(1)
+	expect(await CSVSpliterator.countAsync(source, { drop: 1, take: 1 })).toBe(1)
 })
 
-test("TSV and PSV inherit countRows", async ({ expect }) => {
+test("TSV and PSV inherit count/countAsync", async ({ expect }) => {
 	const encoder = new TextEncoder()
 
 	expect(
-		await TSVSpliterator.countRows(
+		await TSVSpliterator.countAsync(
 			(async function* () {
 				yield encoder.encode("a\tb\n1\t2\n")
 			})()
@@ -61,7 +62,7 @@ test("TSV and PSV inherit countRows", async ({ expect }) => {
 	).toBe(1)
 
 	expect(
-		await PSVSpliterator.countRows(
+		await PSVSpliterator.countAsync(
 			(async function* () {
 				yield encoder.encode("a|b\n1|2\n")
 			})()

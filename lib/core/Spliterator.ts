@@ -137,9 +137,9 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 * This has `wc -l` semantics for the default line-feed delimiter: a final unterminated record does not add to the
 	 * count. Quote-aware mode excludes delimiters inside quoted regions.
 	 *
-	 * @see {@linkcode AsyncSpliterator.countDelimiters} for files and other asynchronous sources.
+	 * @see {@linkcode countAsync} for files and other asynchronous sources.
 	 */
-	public static countDelimiters(source: CharacterSequenceInput, init: SpliteratorInit = {}): number {
+	public static count(source: CharacterSequenceInput, init: SpliteratorInit = {}): number {
 		// `skipEmpty: false` makes the iterator expose its unconditional final tail. Every delimiter produces one range
 		// before that tail, so subtracting it counts matches while retaining the engine's quote and delimiter semantics.
 		const slices = new Spliterator(normalizeCharacterInput(source), {
@@ -157,6 +157,13 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 
 		return count
 	}
+
+	/**
+	 * Asynchronously count delimiter occurrences in a file or byte stream.
+	 *
+	 * @see {@linkcode count} for synchronous byte sources.
+	 */
+	public static countAsync = AsyncSpliterator.count
 
 	/**
 	 * Create a new delimited generator from a data resource.

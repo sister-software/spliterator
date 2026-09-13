@@ -96,11 +96,45 @@ export abstract class CSVSpliterator {
 	/**
 	 * Count logical data rows without decoding columns or constructing emitted records.
 	 *
+	 * Row boundaries follow {@linkcode from}, including quote handling and CRLF normalization. The header (when enabled),
+	 * `drop`, and `take` have the same effect they do when yielding rows.
+	 *
+	 * @see {@linkcode countAsync} for files and other asynchronous sources.
+	 */
+	public static count(source: CharacterSequenceInput, init: CSVSpliteratorInit = {}): number {
+		const { header = true, enableQuoteHandling = true, crlf = true, drop = 0, take = Infinity, ...rowInit } = init
+		const rows = Spliterator.fromSync(source, { ...rowInit, crlf, enableQuoteHandling })
+
+		if (header && rows.next().done) return 0
+
+		let skipped = 0
+		let count = 0
+
+		while (count < take) {
+			const row = rows.next()
+
+			if (row.done) break
+
+			if (skipped < drop) {
+				skipped++
+
+				continue
+			}
+
+			count++
+		}
+
+		return count
+	}
+
+	/**
+	 * Count logical data rows without decoding columns or constructing emitted records.
+	 *
 	 * Row boundaries follow {@linkcode fromAsync}, including quote handling and CRLF normalization. The header (when
 	 * enabled), `drop`, and `take` have the same effect they do when yielding rows. A path or URL is opened independently
 	 * and can subsequently be passed to {@linkcode fromAsync}; an arbitrary async iterable is inherently consumed.
 	 */
-	public static async countRows(
+	public static async countAsync(
 		source: AsyncDataResource | AsyncChunkIterator,
 		init: CSVSpliteratorInit & AdaptiveSourceInit = {}
 	): Promise<number> {
@@ -115,10 +149,10 @@ export abstract class CSVSpliterator {
 			let skipped = 0
 			let count = 0
 
-			for (;;) {
+			while (count < take) {
 				const row = await iterator.next()
 
-				if (row.done || count >= take) break
+				if (row.done) break
 
 				if (skipped < drop) {
 					skipped++

@@ -73,6 +73,51 @@ export abstract class TextSpliterator {
 	}
 
 	/**
+	 * Count logical text rows without decoding them.
+	 *
+	 * This counts exactly the slices {@linkcode from} would yield, including a final unterminated row and its `skipEmpty`,
+	 * `drop`, and `take` behavior.
+	 *
+	 * @see {@linkcode countAsync} for files and other asynchronous sources.
+	 */
+	public static count(source: CharacterSequenceInput, init: TextSpliteratorInit & SpliteratorInit = {}): number {
+		const { encoding: _encoding, fatal: _fatal, ignoreBOM: _ignoreBOM, ...options } = init
+		let count = 0
+
+		for (const _row of Spliterator.fromSync(source, options)) {
+			count++
+		}
+
+		return count
+	}
+
+	/**
+	 * Count logical text rows without decoding them.
+	 *
+	 * This counts exactly the slices {@linkcode fromAsync} would yield, including a final unterminated row and its
+	 * `skipEmpty`, `drop`, and `take` behavior. A path, URL, or file handle is opened independently and can then be
+	 * passed to {@linkcode fromAsync}; an async chunk source is inherently consumed.
+	 */
+	public static async countAsync(
+		source: AsyncDataResource,
+		{
+			encoding: _encoding,
+			fatal: _fatal,
+			ignoreBOM: _ignoreBOM,
+			...options
+		}: TextSpliteratorInit & AdaptiveSourceInit = {}
+	): Promise<number> {
+		const rows = await openDelimitedRows(source, options)
+		let count = 0
+
+		for await (const _row of rows) {
+			count++
+		}
+
+		return count
+	}
+
+	/**
 	 * Asynchronously yield delimited text from a byte array or string.
 	 *
 	 * @param source The async data resource to split.

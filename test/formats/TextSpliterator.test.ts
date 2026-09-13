@@ -9,6 +9,22 @@ import { test } from "vitest"
 
 import { fixturesDirectory, loadFixture } from "../support/utils.js"
 
+test("count/countAsync support sync and async resources without consuming a later path parse", async ({ expect }) => {
+	const fixturePath = fixturesDirectory("phonetic-single-spaced.txt")
+	const counted = await TextSpliterator.countAsync(fixturePath, { skipEmpty: false })
+	const parsed = await TextSpliterator.fromAsync(fixturePath, { skipEmpty: false }).toArray()
+	const encoder = new TextEncoder()
+
+	const chunks = (async function* () {
+		yield encoder.encode("one\n")
+		yield encoder.encode("two")
+	})()
+
+	expect(TextSpliterator.count("one\n\ntwo", { skipEmpty: false })).toBe(3)
+	expect(counted).toBe(parsed.length)
+	expect(await TextSpliterator.countAsync(chunks)).toBe(2)
+})
+
 test("Synchronous parity with String.prototype.split", async ({ expect }) => {
 	const fixturePath = fixturesDirectory("phonetic-single-spaced.txt")
 	const fixture = await loadFixture(fixturePath)

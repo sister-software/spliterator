@@ -196,7 +196,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	 * count. Quote-aware mode excludes delimiters inside quoted regions. A path or URL is opened independently, so it can
 	 * be counted before being passed to {@linkcode from}; an arbitrary async iterable is inherently consumed.
 	 */
-	public static async countDelimiters(
+	public static async count(
 		source: AsyncDataResource | AsyncChunkIterator,
 		init: AsyncSpliteratorInit = {}
 	): Promise<number> {
