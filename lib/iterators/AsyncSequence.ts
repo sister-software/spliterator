@@ -465,6 +465,34 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	}
 
 	/**
+	 * Collect every remaining value into a `Map`. The callback receives `(value, counter)` and may return a promise.
+	 *
+	 * ```ts
+	 * const map = await AsyncSequence.from(["a", "b", "c"]).toMap((value) => {
+	 * 	return [value, value.charCodeAt(0)]
+	 * })
+	 *
+	 * for (const [key, value] of map) {
+	 * 	console.log(key, value) // "a" 97, "b" 98, "c" 99
+	 * }
+	 * ```
+	 */
+	public async toMap<K, V>(
+		fn: (value: T, counter: number) => readonly [K, V] | PromiseLike<readonly [K, V]>
+	): Promise<Map<K, V>> {
+		const map = new Map<K, V>()
+
+		let counter = 0
+
+		for await (const value of this) {
+			const entry = await fn(value, counter++)
+			map.set(entry[0], entry[1])
+		}
+
+		return map
+	}
+
+	/**
 	 * Returns a copy of an array with its elements sorted.
 	 *
 	 * @param compareFn A function that defines the sort order. If omitted, the elements are sorted in ascending, ASCII
