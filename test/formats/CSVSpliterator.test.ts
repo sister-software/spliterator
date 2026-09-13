@@ -31,6 +31,44 @@ interface TypedCSVRow {
 	Location: string
 }
 
+test("countRows counts logical CSV data rows without consuming a later path parse", async ({ expect }) => {
+	const counted = await CSVSpliterator.countRows(fixturePath)
+	const parsed = await CSVSpliterator.fromAsync(fixturePath).toArray()
+
+	expect(counted).toBe(parsed.length)
+})
+
+test("countRows honours quoted newlines, headers, drop, and take", async ({ expect }) => {
+	const encoder = new TextEncoder()
+
+	const source = (async function* () {
+		yield encoder.encode('name,note\nfirst,"one')
+		yield encoder.encode('\ntwo"\nsecond,three\nthird,four\n')
+	})()
+
+	expect(await CSVSpliterator.countRows(source, { drop: 1, take: 1 })).toBe(1)
+})
+
+test("TSV and PSV inherit countRows", async ({ expect }) => {
+	const encoder = new TextEncoder()
+
+	expect(
+		await TSVSpliterator.countRows(
+			(async function* () {
+				yield encoder.encode("a\tb\n1\t2\n")
+			})()
+		)
+	).toBe(1)
+
+	expect(
+		await PSVSpliterator.countRows(
+			(async function* () {
+				yield encoder.encode("a|b\n1|2\n")
+			})()
+		)
+	).toBe(1)
+})
+
 test("Object mode accepts an interface as its row type", async ({ expect }) => {
 	const source = (async function* () {
 		yield new TextEncoder().encode("Country,Location\nFR,PAR\n")

@@ -93,6 +93,48 @@ export abstract class CSVSpliterator {
 		throw new TypeError("Static class cannot be instantiated. Did you mean `CSVSpliterator.from`?")
 	}
 
+	/**
+	 * Count logical data rows without decoding columns or constructing emitted records.
+	 *
+	 * Row boundaries follow {@linkcode fromAsync}, including quote handling and CRLF normalization. The header (when
+	 * enabled), `drop`, and `take` have the same effect they do when yielding rows. A path or URL is opened independently
+	 * and can subsequently be passed to {@linkcode fromAsync}; an arbitrary async iterable is inherently consumed.
+	 */
+	public static async countRows(
+		source: AsyncDataResource | AsyncChunkIterator,
+		init: CSVSpliteratorInit & AdaptiveSourceInit = {}
+	): Promise<number> {
+		const { header = true, enableQuoteHandling = true, crlf = true, drop = 0, take = Infinity, ...rowInit } = init
+
+		const rows = await openDelimitedRows(source, { ...rowInit, crlf, enableQuoteHandling })
+		const iterator = Symbol.asyncIterator in rows ? rows[Symbol.asyncIterator]() : rows[Symbol.iterator]()
+
+		try {
+			if (header && (await iterator.next()).done) return 0
+
+			let skipped = 0
+			let count = 0
+
+			for (;;) {
+				const row = await iterator.next()
+
+				if (row.done || count >= take) break
+
+				if (skipped < drop) {
+					skipped++
+
+					continue
+				}
+
+				count++
+			}
+
+			return count
+		} finally {
+			await iterator.return?.()
+		}
+	}
+
 	static from<T extends object = CSVSpliteratorEmittedRecord>(
 		source: CharacterSequenceInput,
 		options?: CSVSpliteratorInit & { mode?: "object"; header?: true }

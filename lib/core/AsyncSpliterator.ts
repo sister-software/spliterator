@@ -190,6 +190,33 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	}
 
 	/**
+	 * Stream-count delimiter occurrences without materialising the split slices.
+	 *
+	 * This has `wc -l` semantics for the default line-feed delimiter: a final unterminated record does not add to the
+	 * count. Quote-aware mode excludes delimiters inside quoted regions. A path or URL is opened independently, so it can
+	 * be counted before being passed to {@linkcode from}; an arbitrary async iterable is inherently consumed.
+	 */
+	public static async countDelimiters(
+		source: AsyncDataResource | AsyncChunkIterator,
+		init: AsyncSpliteratorInit = {}
+	): Promise<number> {
+		const slices = await AsyncSpliterator.from(source, {
+			...init,
+			drop: 0,
+			skipEmpty: false,
+			take: Infinity,
+		})
+
+		let count = -1
+
+		for await (const _slice of slices) {
+			count++
+		}
+
+		return count
+	}
+
+	/**
 	 * Dispose of the spliterator, closing the file handle if necessary.
 	 */
 	public async [Symbol.asyncDispose](): Promise<void> {

@@ -12,6 +12,32 @@ import { test } from "vitest"
 
 import { fixturesDirectory, loadFixture } from "../support/utils.js"
 
+test("countDelimiters has wc -l semantics without consuming a later file parse", async ({ expect }) => {
+	const fixturePath = fixturesDirectory("phonetic-single-spaced.txt")
+	const bytes = new TextEncoder().encode("one\n\ntwo")
+
+	expect(Spliterator.countDelimiters(bytes)).toBe(2)
+	expect(Spliterator.countDelimiters('"one\ntwo"\nthree', { enableQuoteHandling: true })).toBe(1)
+
+	const count = await AsyncSpliterator.countDelimiters(fixturePath)
+	const fixture = await loadFixture(fixturePath)
+	const rows = await Array.fromAsync(await Spliterator.from(fixturePath))
+
+	expect(count).toBe(Array.from(fixture.bytes).filter((byte) => byte === 0x0a).length)
+	expect(rows.length).toBeGreaterThan(0)
+})
+
+test("AsyncSpliterator.countDelimiters carries quote state across chunks", async ({ expect }) => {
+	const encoder = new TextEncoder()
+
+	const source = (async function* () {
+		yield encoder.encode('header\n"one')
+		yield encoder.encode('\ntwo"\nlast')
+	})()
+
+	expect(await AsyncSpliterator.countDelimiters(source, { enableQuoteHandling: true })).toBe(2)
+})
+
 test("Synchronous parity with String.prototype.split", async ({ expect }) => {
 	const decoder = new TextDecoder()
 
