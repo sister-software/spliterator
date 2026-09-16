@@ -210,13 +210,13 @@ import { Globerator } from "spliterator/node/fs"
 for await (const path of Globerator.files(["json", ".jsonl"], {
 	cwd: "data",
 })) {
-	console.log(path) // absolute path to each matching non-directory entry
+	console.log(path) // path relative to data
 }
 ```
 
-`files()` accepts one or more extensions, with or without a leading dot, and searches descendants by default. Pass
-`recursive: false` to limit discovery to `cwd` itself, or `absolute: false` when a consumer needs paths relative to
-`cwd`.
+`files()` accepts one or more extensions, with or without a leading dot, and searches descendants with paths relative
+to `cwd` by default. Pass `recursive: false` to limit discovery to `cwd` itself, or `absolute: true` when a consumer
+needs absolute paths.
 
 For arbitrary patterns, use `from()`. It supports multiple patterns, exclusions, symlink traversal, cancellation, and
 `Dirent` output:

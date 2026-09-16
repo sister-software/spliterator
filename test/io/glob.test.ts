@@ -24,24 +24,24 @@ afterAll(async () => {
 })
 
 describe("Globerator", () => {
-	test("returns a composable sequence of absolute, non-directory paths by default", async () => {
+	test("returns a composable sequence of relative, non-directory paths by default", async () => {
 		const matches = Globerator.from("**/*", { cwd: dir })
 
 		expect(matches).toBeInstanceOf(AsyncSequence)
 
 		expect((await matches.filter((path) => path.endsWith(".txt")).toArray()).toSorted()).toEqual(
-			[join(dir, "abc.txt"), join(dir, "nested", "second.txt")].toSorted()
+			["abc.txt", "nested/second.txt"].toSorted()
 		)
 	})
 
-	test("supports exclusions and relative paths", async () => {
+	test("supports exclusions and absolute paths", async () => {
 		const matches = await Globerator.from("**/*", {
 			cwd: dir,
 			exclude: ["nested/**"],
-			absolute: false,
+			absolute: true,
 		}).toArray()
 
-		expect(matches).toEqual(["abc.txt"])
+		expect(matches).toEqual([join(dir, "abc.txt")])
 	})
 
 	test("returns dirents with an absolute parent path", async () => {
@@ -75,13 +75,13 @@ describe("Globerator", () => {
 	})
 
 	test("finds one or more extensions recursively by default", async () => {
-		const files = await Globerator.files(["txt", ".log"], { cwd: dir, absolute: false }).toArray()
+		const files = await Globerator.files(["txt", ".log"], { cwd: dir }).toArray()
 
 		expect(files.toSorted()).toEqual(["abc.txt", "nested/ignored.log", "nested/second.txt"])
 	})
 
 	test("can limit extension discovery to cwd", async () => {
-		const files = await Globerator.files(".txt", { cwd: dir, absolute: false, recursive: false }).toArray()
+		const files = await Globerator.files(".txt", { cwd: dir, recursive: false }).toArray()
 
 		expect(files).toEqual(["abc.txt"])
 	})

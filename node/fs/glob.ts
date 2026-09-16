@@ -37,7 +37,7 @@ interface GlobCommonOptions {
 	/**
 	 * Yield only non-directory entries.
 	 *
-	 * @default true
+	 * @default false
 	 */
 	onlyFiles?: boolean
 
@@ -128,8 +128,8 @@ export abstract class Globerator {
 	 *
 	 * Unlike Node's {@linkcode globNative}, this yields only non-directory entries by default, resolves `cwd` to an
 	 * absolute path (including `Dirent.parentPath`), accepts {@linkcode PathBuilder}s, and returns an
-	 * {@linkcode AsyncSequence} for composable async iteration. Path results are absolute by default; pass `{ absolute:
-	 * false }` to make them relative to `cwd`.
+	 * {@linkcode AsyncSequence} for composable async iteration. Path results are relative to `cwd` by default; pass `{
+	 * absolute: true }` for absolute paths.
 	 */
 	public static from(pattern: GlobPatternInput, options: GlobDirentOptions): AsyncSequence<Dirent>
 	public static from(pattern: GlobPatternInput, options?: GlobStringOptions): AsyncSequence<string>
@@ -201,7 +201,7 @@ async function* globEntries(pattern: GlobPatternInput, options: GlobOptions): As
 		const path = join(entry.parentPath, entry.name)
 
 		matched = true
-		yield options.absolute === false ? relative(cwd, path) : path
+		yield options.absolute === true ? path : relative(cwd, path)
 	}
 
 	if (!matched && options.throwIfUnmatched) {
