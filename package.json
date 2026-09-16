@@ -64,7 +64,7 @@
 	},
 	"dependencies": {
 		"change-case": "^5.4.4",
-		"path-ts": "^2.1.0",
+		"path-ts": "^2.4.0",
 		"type-fest": "^5.8.0"
 	},
 	"devDependencies": {
