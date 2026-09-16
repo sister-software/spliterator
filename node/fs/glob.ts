@@ -107,7 +107,7 @@ export interface FileGlobOptions extends GlobStringOptions {
 	/**
 	 * Search descendant directories as well as `cwd`.
 	 *
-	 * @default false
+	 * @default true
 	 */
 	recursive?: boolean
 }
@@ -141,15 +141,15 @@ export abstract class Globerator {
 	/**
 	 * Lazily find files with one or more extensions.
 	 *
-	 * Extensions may include their leading dot, so `"json"` and `".json"` are equivalent. Pass `recursive: true` to
-	 * search descendants; the default only examines `cwd` itself.
+	 * Extensions may include their leading dot, so `"json"` and `".json"` are equivalent. Searches descendants by
+	 * default; pass `recursive: false` to examine `cwd` itself only.
 	 */
 	public static files(
 		extensions: FileExtension | readonly FileExtension[],
 		options: FileGlobOptions = {}
 	): AsyncSequence<string> {
 		const normalized = (Array.isArray(extensions) ? extensions : [extensions]).map(normalizeExtension)
-		const prefix = options.recursive ? "**/" : ""
+		const prefix = options.recursive === false ? "" : "**/"
 		const { recursive: _recursive, ...globOptions } = options
 
 		return Globerator.from(

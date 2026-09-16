@@ -74,12 +74,16 @@ describe("Globerator", () => {
 		expect(await Globerator.from("*.json", { cwd: dir }).toArray()).toEqual([])
 	})
 
-	test("finds one or more extensions, with recursion opt-in", async () => {
-		const shallow = await Globerator.files(".txt", { cwd: dir, absolute: false }).toArray()
-		const recursive = await Globerator.files(["txt", ".log"], { cwd: dir, absolute: false, recursive: true }).toArray()
+	test("finds one or more extensions recursively by default", async () => {
+		const files = await Globerator.files(["txt", ".log"], { cwd: dir, absolute: false }).toArray()
 
-		expect(shallow).toEqual(["abc.txt"])
-		expect(recursive.toSorted()).toEqual(["abc.txt", "nested/ignored.log", "nested/second.txt"])
+		expect(files.toSorted()).toEqual(["abc.txt", "nested/ignored.log", "nested/second.txt"])
+	})
+
+	test("can limit extension discovery to cwd", async () => {
+		const files = await Globerator.files(".txt", { cwd: dir, absolute: false, recursive: false }).toArray()
+
+		expect(files).toEqual(["abc.txt"])
 	})
 
 	test("rejects extensions that are empty or glob patterns", () => {
