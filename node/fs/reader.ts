@@ -6,9 +6,13 @@
 
 import { open, stat } from "node:fs/promises"
 
-import { PathBuilder } from "path-ts"
-
-import { type AsyncChunkIterator, type AsyncDataResource, isFileHandleLike } from "../../lib/internal/shared.js"
+import {
+	type AsyncChunkIterator,
+	type AsyncDataResource,
+	isFileHandleLike,
+	isPathBuilderLike,
+	toPathString,
+} from "../../lib/internal/shared.js"
 
 /**
  * Create a readable stream from a file system source.
@@ -53,8 +57,8 @@ export interface CreateChunkIteratorOptions {
  * @internal
  */
 export async function readFileSize(source: AsyncDataResource): Promise<number> {
-	if (source instanceof PathBuilder) {
-		source = source.toString()
+	if (isPathBuilderLike(source)) {
+		source = toPathString(source)
 	}
 
 	if (typeof source === "string" || source instanceof URL) return stat(source).then(({ size }) => size)
@@ -72,8 +76,8 @@ export async function readFileSize(source: AsyncDataResource): Promise<number> {
  * @internal
  */
 export async function readBytes(source: AsyncDataResource, start: number, length: number): Promise<Uint8Array> {
-	if (source instanceof PathBuilder) {
-		source = source.toString()
+	if (isPathBuilderLike(source)) {
+		source = toPathString(source)
 	}
 
 	if (typeof source !== "string" && !(source instanceof URL) && !isFileHandleLike(source)) {
@@ -107,8 +111,8 @@ export async function createChunkIterator(
 		throw new TypeError("Cannot create a chunk iterator from an undefined or null source.")
 	}
 
-	if (source instanceof PathBuilder) {
-		source = source.toString()
+	if (isPathBuilderLike(source)) {
+		source = toPathString(source)
 	}
 
 	if (typeof source === "string" || source instanceof URL) {

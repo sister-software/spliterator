@@ -9,7 +9,13 @@ import type { Stats } from "node:fs"
 // oxlint-disable-next-line no-restricted-imports
 import type { FileHandle } from "node:fs/promises"
 
-import type { PathBuilderLike } from "path-ts"
+/**
+ * A string path or a string-like path object such as `path-ts`'s callable `PathBuilder`.
+ *
+ * This deliberately describes the capability rather than importing `PathBuilderLike`: a consumer and this package can
+ * legitimately receive separate physical copies of path-ts, whose runtime builders interoperate through `toString()`.
+ */
+export type PathBuilderLike = string | CallableFunction
 
 /**
  * A trimmed-down version of the Node.js `Stats` interface.

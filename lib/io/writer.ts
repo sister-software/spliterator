@@ -6,7 +6,7 @@
 
 import { type WriteStream, createWriteStream } from "node:fs"
 
-import type { PathBuilderLike } from "path-ts"
+import type { PathBuilderLike } from "../internal/shared.js"
 
 /**
  * Callback for writing a line to a newline-delimited file.
@@ -48,7 +48,7 @@ export interface NewlineWriter extends AsyncDisposable {
  * ```
  */
 export function createNewlineWriter(filePath: PathBuilderLike): NewlineWriter {
-	const writer = createWriteStream(String(filePath))
+	const writer = createWriteStream(filePath.toString())
 
 	const write: WriteLineCallback = (content: any, encoding?: BufferEncoding) => {
 		return new Promise((resolve, reject) => {

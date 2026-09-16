@@ -20,6 +20,10 @@ const fixture = fixturesDirectory("phonetic-single-spaced.txt")
 const csvFixture = fixturesDirectory("carvel.csv")
 const jsonlFixture = fixturesDirectory("carvel.jsonl")
 
+// Deliberately not an instance of this install's PathBuilder: this models a builder received through another dependency
+// which carries its own physical copy of path-ts.
+const foreignPathBuilder = Object.assign(() => undefined, { toString: () => fixture.toString() })
+
 describe("PathBuilder sources", () => {
 	test("Spliterator.from accepts a PathBuilder", async () => {
 		const expected = await loadFixture(fixture)
@@ -39,6 +43,19 @@ describe("PathBuilder sources", () => {
 		const expected = await loadFixture(fixture)
 
 		const spliterator = await AsyncSpliterator.from(fixture, { delimiter: "\n" })
+		const decoder = new TextDecoder()
+		const lines: string[] = []
+
+		for await (const range of spliterator) {
+			lines.push(decoder.decode(range))
+		}
+
+		expect(lines).toEqual(expected.decodedLines.filter(Boolean))
+	})
+
+	test("AsyncSpliterator.from accepts a PathBuilder from another installation", async () => {
+		const expected = await loadFixture(fixture)
+		const spliterator = await AsyncSpliterator.from(foreignPathBuilder, { delimiter: "\n" })
 		const decoder = new TextDecoder()
 		const lines: string[] = []
 

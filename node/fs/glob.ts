@@ -9,8 +9,7 @@ import { glob as globNative, stat } from "node:fs/promises"
 import { join, relative, resolve as resolvePath } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import type { PathBuilderLike } from "path-ts"
-
+import type { PathBuilderLike } from "../../lib/internal/shared.js"
 import { AsyncSequence } from "../../lib/iterators/AsyncSequence.js"
 
 /**
@@ -171,8 +170,8 @@ function normalizeExtension(extension: FileExtension): string {
 
 async function* globEntries(pattern: GlobPatternInput, options: GlobOptions): AsyncGenerator<string | Dirent> {
 	const cwd = resolveGlobCwd(options.cwd)
-	const patterns = (Array.isArray(pattern) ? pattern : [pattern]).map(String)
-	const exclude = options.exclude?.map(String)
+	const patterns = (Array.isArray(pattern) ? pattern : [pattern]).map((value) => value.toString())
+	const exclude = options.exclude?.map((value) => value.toString())
 	const onlyFiles = options.onlyFiles ?? true
 
 	options.signal?.throwIfAborted()
@@ -236,5 +235,5 @@ function formatPatterns(patterns: readonly string[]): string {
 function resolveGlobCwd(cwd?: string | PathBuilderLike | URL): string {
 	if (!cwd) return process.cwd()
 
-	return resolvePath(cwd instanceof URL ? fileURLToPath(cwd) : String(cwd))
+	return resolvePath(cwd instanceof URL ? fileURLToPath(cwd) : cwd.toString())
 }

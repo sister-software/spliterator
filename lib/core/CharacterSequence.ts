@@ -4,9 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import type { PathBuilderLike } from "path-ts"
-
-import type { ByteRange } from "../internal/shared.js"
+import type { ByteRange, PathBuilderLike } from "../internal/shared.js"
 import {
 	loadWasmModule,
 	WASM_MAX_RESULTS,
