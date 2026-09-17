@@ -303,6 +303,14 @@ describe("laziness and closure", () => {
 		expect(state.closed).toBe(true)
 	})
 
+	test("take(Infinity) leaves a finite source unbounded", async () => {
+		const { iterable, state } = spySource(3)
+
+		expect(await AsyncSequence.from(iterable).take(Infinity).toArray()).toEqual([0, 1, 2])
+		expect(state.pulled).toBe(3)
+		expect(state.closed).toBe(false)
+	})
+
 	test("find short-circuits and closes the source", async () => {
 		const { iterable, state } = spySource(1000)
 

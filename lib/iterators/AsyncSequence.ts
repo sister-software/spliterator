@@ -403,7 +403,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	}
 
 	/**
-	 * Yield at most `limit` values, then close the underlying iterator.
+	 * Yield at most `limit` values, then close the underlying iterator. `Infinity` leaves the sequence unbounded.
 	 *
 	 * The close is what makes this safe on a file-backed source — `take(5)` over a 40GB file releases the handle rather
 	 * than leaving it open until GC.
@@ -411,8 +411,8 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	public take(limit: number): AsyncSequence<T> {
 		const normalized = Math.trunc(limit)
 
-		if (!Number.isFinite(normalized) || normalized < 0) {
-			throw new RangeError(`take(${limit}): limit must be a non-negative finite number`)
+		if (Number.isNaN(normalized) || normalized < 0) {
+			throw new RangeError(`take(${limit}): limit must be a non-negative number`)
 		}
 
 		return this.#derive<T>({ kind: OP_TAKE, limit: normalized })
@@ -490,6 +490,32 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 		}
 
 		return map
+	}
+
+	/**
+	 * Collect every remaining value into a `Set`. The callback receives `(value, counter)` and may return a promise.
+	 *
+	 * ```ts
+	 * const set = await AsyncSequence.from(["a", "b", "c"]).toSet((value) => {
+	 * 	return value.charCodeAt(0)
+	 * })
+	 *
+	 * for (const value of set) {
+	 * 	console.log(value) // 97, 98, 99
+	 * }
+	 * ```
+	 */
+	public async toSet<U>(fn: (value: T, counter: number) => U | PromiseLike<U>): Promise<Set<U>> {
+		const set = new Set<U>()
+
+		let counter = 0
+
+		for await (const value of this) {
+			const entry = await fn(value, counter++)
+			set.add(entry)
+		}
+
+		return set
 	}
 
 	/**
