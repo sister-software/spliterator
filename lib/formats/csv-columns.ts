@@ -128,7 +128,17 @@ export function splitRowColumns(
 
 	if (trim) {
 		for (let i = 0; i < columns.length; i++) {
-			let column = columns[i]!.trim()
+			const raw = columns[i]!
+			const length = raw.length
+
+			// Most cells have nothing to trim. Reading the two edge code units is far cheaper than the `trim` call
+			// that would find that out, and this loop runs once per cell of the file. A non-ASCII edge takes the call,
+			// because `trim` also strips the Unicode spaces.
+			if (length === 0 || (!mayNeedTrim(raw.charCodeAt(0)) && !mayNeedTrim(raw.charCodeAt(length - 1)))) {
+				continue
+			}
+
+			let column = raw.trim()
 
 			// Padding outside the quotes (` " Ada " `) is malformed under RFC 4180 but common. The edge-based unquote in
 			// the raw pass could not see the quotes, so unquote what trimming has exposed, then trim what was inside.
@@ -141,6 +151,14 @@ export function splitRowColumns(
 	}
 
 	return columns
+}
+
+/**
+ * Whether a code unit at a cell's edge could be something `trim` removes: ASCII whitespace, or anything non-ASCII,
+ * which is left to `trim` itself to judge.
+ */
+function mayNeedTrim(code: number): boolean {
+	return code <= 0x20 || code >= 0x80
 }
 
 function splitRowColumnsRaw(
