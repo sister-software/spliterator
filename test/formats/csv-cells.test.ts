@@ -110,6 +110,8 @@ describe("scanCsvCells parity with the row path", () => {
 		["empty rows dropped", "a\n\n\nb\n"],
 		["empty cells", ",,\n,a,\n"],
 		["trailing column delimiter", "a,b,\n"],
+		["trailing column delimiter at eof, no newline", "a,b,"],
+		["trailing column delimiter at eof after rows", "a,b\nc,"],
 		["crlf on", "a,b\r\nc,d\r\n"],
 		["crlf off", "a,b\r\nc,d\r\n", { crlf: false }],
 		["crlf-only line is empty", "a\r\n\r\nb\r\n"],

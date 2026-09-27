@@ -19,7 +19,7 @@ import { CharacterSequence, CSVSpliterator } from "../index.js"
 const REPS = 7
 const encoder = new TextEncoder()
 // Keeps the parsed rows observable so the engine cannot elide the work.
-let sink = 0
+const sink = { n: 0 }
 
 function csv(rows: number, quoted: boolean, unicode: boolean): Uint8Array {
 	const lines = ["id,name,city,state,zip"]
@@ -65,7 +65,13 @@ async function time(label: string, fn: () => Promise<unknown> | unknown): Promis
 
 function countRows(bytes: Uint8Array, init: object): void {
 	for (const row of CSVSpliterator.from(bytes, init as never) as Iterable<unknown>) {
-		sink += Array.isArray(row) ? row.length : Object.keys(row as object).length
+		sink.n += Array.isArray(row) ? row.length : Object.keys(row as object).length
+	}
+}
+
+async function countRowsAsync(path: string, columnScan: "auto" | "rows"): Promise<void> {
+	for await (const row of CSVSpliterator.fromAsync(path, { columnScan })) {
+		sink.n += Object.keys(row).length
 	}
 }
 
@@ -105,14 +111,19 @@ for (const [name, bytes] of Object.entries(fixtures)) {
 		}
 
 		await time(`async object  ${columnScan}`, async () => {
-			for await (const row of CSVSpliterator.fromAsync(path, { columnScan })) { sink += Object.keys(row).length }
+			for await (const row of CSVSpliterator.fromAsync(path, { columnScan })) {
+				sink.n += Object.keys(row).length
+			}
 		})
 
 		await time(`sync  first row only ${columnScan}`, () => firstRow(bytes, columnScan))
-		await time(`sync  array trim:false ${columnScan}`, () => countRows(bytes, { mode: "array", trim: false, columnScan }))
+
+		await time(`sync  array trim:false ${columnScan}`, () =>
+			countRows(bytes, { mode: "array", trim: false, columnScan })
+		)
 	}
 
 	console.log()
 }
 
-console.log(`checksum ${sink}`)
+console.log(`checksum ${sink.n}`)
