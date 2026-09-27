@@ -518,7 +518,7 @@ describe("parallelFilter", () => {
 	})
 
 	test("does not retain passed values on a long stream", async () => {
-		// Only meaningful under --expose-gc; otherwise the assertion is skipped and the long-stream path is still exercised.
+		// This is meaningful under --expose-gc. Without it, the assertion is skipped while the long-stream path still runs.
 		const gc = globalThis.gc
 		let collected = 0
 
@@ -561,7 +561,7 @@ describe("parallelFilter", () => {
 		expect(seen).toBe(1000)
 
 		if (gc) {
-			// 1500 payloads had passed through; with the window compacting, nearly all were unreachable.
+			// 1500 payloads had passed through. Window compaction made nearly all of them unreachable.
 			expect(collectedMidStream).toBeGreaterThan(1000)
 		}
 	})

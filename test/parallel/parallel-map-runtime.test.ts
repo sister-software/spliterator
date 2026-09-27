@@ -34,7 +34,7 @@ function fakeWorker<T, R>(fn: (item: T) => R, track?: { active: number; max: num
 				track.max = Math.max(track.max, track.active)
 			}
 
-			// A real (macrotask) delay so concurrent processing is observable, not collapsed into one
+			// A real (macrotask) delay makes concurrent processing observable rather than collapsed into one
 			// microtask flush.
 			await new Promise<void>((resolve) => {
 				setTimeout(resolve, 5)

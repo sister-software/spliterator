@@ -127,7 +127,7 @@ export abstract class Globerator {
 	 *
 	 * Unlike Node's {@linkcode globNative}, this yields only non-directory entries by default, resolves `cwd` to an
 	 * absolute path (including `Dirent.parentPath`), accepts {@linkcode PathBuilder}s, and returns an
-	 * {@linkcode AsyncSequence} for composable async iteration. Path results are relative to `cwd` by default; pass `{
+	 * {@linkcode AsyncSequence} for composable async iteration. Path results are relative to `cwd` by default. Pass `{
 	 * absolute: true }` for absolute paths.
 	 */
 	public static from(pattern: GlobPatternInput, options: GlobDirentOptions): AsyncSequence<Dirent>
@@ -141,7 +141,7 @@ export abstract class Globerator {
 	 * Lazily find files with one or more extensions.
 	 *
 	 * Extensions may include their leading dot, so `"json"` and `".json"` are equivalent. Searches descendants by
-	 * default; pass `recursive: false` to examine `cwd` itself only.
+	 * default. Pass `recursive: false` to examine `cwd` itself only.
 	 */
 	public static files(
 		extensions: FileExtension | readonly FileExtension[],

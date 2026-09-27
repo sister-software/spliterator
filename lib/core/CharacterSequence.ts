@@ -69,14 +69,14 @@ export function normalizeCharacterInput(input: CharacterSequenceInput): Uint8Arr
 		case "string":
 			return encoder.encode(input)
 		case "object":
-			// Typed arrays and buffers are adopted by reference where possible — a multi-megabyte
+			// Typed arrays and buffers are adopted by reference where possible. A multi-megabyte
 			// haystack must not be copied on the way in. `ArrayBuffer` and `DataView` are declared
 			// inputs and previously threw: neither carries `length`, and neither is iterable.
 			if (input instanceof Uint8Array) return input
 			if (ArrayBuffer.isView(input)) return new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
 			if (input instanceof ArrayBuffer) return new Uint8Array(input)
-			// A plain array-like (`number[]`) is NOT a Uint8Array — copy it rather than hand back
-			// something whose `search` would index a boxed array.
+			// A plain array-like (`number[]`) is a different type from Uint8Array. Copy it rather
+			// than returning a value whose `search` method would index a boxed array.
 			if (isArrayLike<number>(input)) return Uint8Array.from(input)
 			if (Symbol.iterator in input) return Uint8Array.from(input)
 			throw new TypeError(`Invalid delimiter type.`)
@@ -213,7 +213,7 @@ export class CharacterSequence extends Uint8Array {
 				const buffer = new Uint8Array(wasm.memory.buffer, 0, totalNeeded)
 				buffer.set(haystack.subarray(start, end), 0)
 				buffer.set(this, haystackLen)
-				// We just overwrote offset 0; any haystack search() cached there is now stale.
+				// Writing the new haystack invalidates the cached search() input.
 				CharacterSequence.#wasmHaystack = null
 
 				const count = wasm.findAllDelimiters(
@@ -232,8 +232,8 @@ export class CharacterSequence extends Uint8Array {
 					ranges.push([start + rv[i * 2]!, start + rv[i * 2 + 1]!])
 				}
 
-				// A full results buffer means the scan may have hit the cap and dropped
-				// trailing delimiters; fall back to the uncapped JS scan rather than truncate.
+				// A full results buffer may indicate that trailing delimiters were dropped.
+				// Use the uncapped JS scan instead of returning truncated results.
 				if (count < WASM_MAX_RESULTS) return ranges
 			}
 
@@ -328,9 +328,9 @@ export class CharacterSequence extends Uint8Array {
 			0,
 			windowLength,
 			0,
-			// A record may have opened before this window, and a start behind it cannot be expressed
-			// in window coordinates. The kernel is given zero and the first emitted range — the only
-			// one that can begin before the window — takes the carried absolute start below.
+			// A record may have opened before this window. Window coordinates cannot represent that
+			// start, so the kernel receives zero. The first emitted range receives the carried
+			// absolute start below.
 			0,
 			this[0]!,
 			quotePattern?.[0] ?? -1,
@@ -356,8 +356,8 @@ export class CharacterSequence extends Uint8Array {
 			ranges,
 			count,
 			scanCursor: windowStart + result[0]!,
-			// With nothing emitted the kernel echoes back the zero it was handed, which says nothing
-			// about where the open record began — the carried value is still the authority.
+			// When the kernel emits no range, it echoes the zero input instead of the open record's
+			// start. Keep the carried value in that case.
 			pendingSliceStart: count > 0 ? windowStart + result[1]! : state.pendingSliceStart,
 			insideQuotes: result[2] === 1,
 		}
@@ -366,8 +366,8 @@ export class CharacterSequence extends Uint8Array {
 	/**
 	 * Scan for two patterns simultaneously (delimiter + quote) for CSV parsing.
 	 *
-	 * Returns sorted MatchResult[] with patternId 0=delimiter, 1=quote. Uses WASM SIMD double-scan when available; JS
-	 * fallback otherwise.
+	 * Returns sorted MatchResult[] with patternId 0=delimiter and 1=quote. Uses WASM SIMD double-scan when available. The
+	 * JS scanner is the fallback.
 	 */
 	public searchMatches(
 		haystack: Uint8Array,
@@ -394,7 +394,7 @@ export class CharacterSequence extends Uint8Array {
 			buffer.set(haystack.subarray(start, end), 0)
 			buffer.set(this, haystackLen)
 			buffer.set(quotePattern, haystackLen + delimiterLen)
-			// We just overwrote offset 0; any haystack search() cached there is now stale.
+			// Writing the new haystack invalidates the cached search() input.
 			CharacterSequence.#wasmHaystack = null
 
 			const count = wasm.findAllMatches(
@@ -414,8 +414,8 @@ export class CharacterSequence extends Uint8Array {
 				matches.push({ offset: start + rv[i * 2]!, patternId: rv[i * 2 + 1]! })
 			}
 
-			// A full results buffer means the scan may have hit the cap and dropped
-			// trailing matches; fall back to the uncapped JS scan rather than truncate.
+			// A full results buffer may indicate that trailing matches were dropped.
+			// Use the uncapped JS scan instead of returning truncated results.
 			if (count < WASM_MAX_RESULTS) return matches
 		}
 
@@ -429,7 +429,7 @@ export class CharacterSequence extends Uint8Array {
 		//
 		// Each pattern's next hit is carried across iterations and re-searched only once the
 		// cursor has passed it. Re-searching both every iteration is quadratic: a `search` that
-		// finds nothing has scanned all the way to `end` to say so, and a source containing no
+		// finds no match after scanning to `end`, and a source containing no
 		// quote at all pays that whole scan once per delimiter. A `-1` is final for the rest of
 		// the range and must never be re-searched.
 		const matches: MatchResult[] = []
@@ -481,7 +481,7 @@ export class CharacterSequence extends Uint8Array {
 	constructor(input: CharacterSequenceInput = Delimiters.LineFeed) {
 		const bytes = normalizeCharacterInput(input)
 		super(bytes)
-		// `new Array(256).fill(…)` rather than `Array.from({length: 256}, …)`: same result, no
+		// `new Array(256).fill(…)` rather than `Array.from({length: 256}, …)` produces the same result without a
 		// per-entry callback, and this runs for every sequence constructed.
 		// oxlint-disable-next-line unicorn/no-new-array
 		this.#skipIndex = new Array<number>(256).fill(this.length)

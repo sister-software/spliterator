@@ -8,7 +8,7 @@ import { camelCase, capitalCase, snakeCase } from "change-case"
 import type { CamelCase, SnakeCase } from "type-fest"
 
 /**
- * Any character that is not a letter, a digit, or an underscore, in ANY script.
+ * Any character that is not a letter, a digit, or an underscore in any script.
  *
  * `\W` cannot serve here: it is `[^A-Za-z0-9_]` in JavaScript, with or without the `u` flag, so every character of a
  * non-Latin header is "non-word". A Korean CSV header (`영업상태명`) collapsed to a single `_`, and a file of them became
@@ -20,9 +20,9 @@ const NON_KEY_CHARACTER = /[^\p{L}\p{N}_]+/gu
 /**
  * Converts a name to snake_case, unless the name is already in all caps.
  *
- * A CASELESS SCRIPT TAKES THE ALL-CAPS BRANCH, because `toUpperCase()` is the identity on Korean, Japanese, Chinese,
- * Hebrew and Arabic. That is the right branch — those names have no case to convert and should survive as written — so
- * the branch preserves letters of every script and replaces only what cannot be a key.
+ * A caseless script takes the all-caps branch because `toUpperCase()` is the identity on Korean, Japanese, Chinese,
+ * Hebrew, and Arabic. Those names have no case to convert, so the branch preserves their letters and replaces only
+ * characters that cannot be keys.
  */
 export function smartSnakeCase<T extends string>(name: T): T extends Uppercase<T> ? T : SnakeCase<T> {
 	const normalizedName = name
@@ -74,9 +74,9 @@ export function smartCapitalCase(input: string): string {
  * Given an array of column names, normalize them to ensure they are unique and usable as object keys.
  *
  * Keys are LOWER CASE, where {@link smartSnakeCase} leaves an all-caps name as it found it. A column key is an
- * identifier a caller types, and one source's `LON,LAT,NUMBER` is another's `lon,lat,number` for the same data — a
- * reader that preserves the difference makes every consumer handle both spellings. `smartSnakeCase` keeps its own
- * contract for callers naming things other than columns.
+ * identifier a caller types. One source's `LON,LAT,NUMBER` is another's `lon,lat,number` for the same data. A reader
+ * that preserves the difference makes every consumer handle both spellings. `smartSnakeCase` keeps its own contract for
+ * callers naming things other than columns.
  */
 export function normalizeColumnNames(columnHeaders: Iterable<string>): string[] {
 	const columnInputCountMap = new Map<string, number>()

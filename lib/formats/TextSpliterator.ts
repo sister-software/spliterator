@@ -145,7 +145,7 @@ export abstract class TextSpliterator {
 	): AsyncSequence<string> {
 		const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
 
-		// Decoding is an op on the sequence, not a generator wrapped inside one. A wrapping generator adds an async frame
+		// Decoding is an op on the sequence rather than a generator wrapped inside one. A wrapping generator adds an async frame
 		// per row on top of the sequence's own, which measured 297ms against 279ms over 500k rows.
 		return AsyncSequence.from<Uint8Array>(() => openDelimitedRows(source, options)).map((row, rowCursor) => {
 			try {

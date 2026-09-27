@@ -119,7 +119,8 @@ test("CSVSpliterator: chains in object mode", () => {
 })
 
 test("CSVSpliterator: array mode still yields the same rows it always did", () => {
-	// Unquoted, so `String.prototype.split` is a fair oracle — the fixture's quoted commas are not.
+	// The rows are unquoted, so `String.prototype.split` is a fair oracle. The fixture's quoted commas are not part of this
+	// comparison.
 	const source = "a,b,c\n1,2,3\n4,5,6\n"
 
 	const rows = CSVSpliterator.from(source, { mode: "array", header: false }).toArray()

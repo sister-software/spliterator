@@ -94,7 +94,7 @@ test("set honors an append larger than twice the current capacity", ({ expect })
 })
 
 // Regression: `compress` reassigned `bytes` to a subarray, so the discarded prefix stayed inside the
-// same `ArrayBuffer` — addressable by nobody, freed by nothing until a `grow` happened to replace the
+// same `ArrayBuffer`. No live view could address the prefix, and the allocation remained until `grow` replaced the
 // allocation. Geometric growth removed most of those grows, which turned an incidental reclamation
 // into none at all: a 100MB quoted CSV field left 101.58MB stranded for the rest of the stream.
 // Compacting only when the stranded prefix outweighs the live bytes keeps the copy amortized O(1).
@@ -175,7 +175,7 @@ test("repeated append-and-consume cycles neither strand memory nor force regrowt
 test("a long tail after an oversized record right-sizes the buffer", ({ expect }) => {
 	const controller = new BufferController({ initialBufferSize: 1024 })
 
-	// A record accumulating across reads: nothing is consumed, so `compress(0)` keeps it all.
+	// A record accumulating across reads has no consumed prefix, so `compress(0)` keeps it all.
 	for (let i = 0; i < 8; i++) {
 		controller.set(new Uint8Array(32 * 1024).fill(5), controller.bytesWritten)
 		controller.compress(0)

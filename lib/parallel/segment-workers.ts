@@ -23,9 +23,9 @@ type WorkerMessage<R> = { type: "batch"; records: R[] } | { type: "done" } | { t
 
 /**
  * Drain a worker's batched messages into an async iterator. Listeners attach **eagerly** (messages posted before
- * iteration starts are buffered, not lost) and draining uses a `batches[] + head` pointer (no `Array.shift()`).
- * `onBatchConsumed` fires once per batch after its records are yielded — the ack hook for backpressure. An `error`
- * message or worker `error` rejects the iterator.
+ * iteration starts are buffered for later consumption) and draining uses a `batches[] + head` pointer (no
+ * `Array.shift()`). `onBatchConsumed` fires once per batch after its records are yielded. It acknowledges backpressure.
+ * An `error` message or worker `error` rejects the iterator.
  */
 export function workerToIterable<R>(worker: MinimalWorker, onBatchConsumed: () => void): AsyncIterableIterator<R> {
 	const batches: R[][] = []
@@ -96,7 +96,7 @@ export interface AsManyWorkersOptions {
 	 */
 	delimiter?: CharacterSequenceInput
 	/**
-	 * Desired number of segments/workers. Clamped to ≥ 1; fewer may run.
+	 * Desired number of segments/workers. The value is clamped to ≥ 1, and fewer may run.
 	 */
 	concurrency: number
 	/**
@@ -163,7 +163,7 @@ function leaseAsWorker(lease: WorkerLease): MinimalWorker {
 /**
  * Spawn one worker per delimiter-aligned segment, each running the `worker` handler module over its own handle, and
  * merge their results into a single async iterator. Results interleave across segments. Sends an `ack` per consumed
- * batch (backpressure); terminates all workers on completion, error, or early return.
+ * batch (backpressure). It terminates all workers on completion, error, or early return.
  */
 export async function* runSegmentWorkers<R>(
 	source: AsyncDataResource,

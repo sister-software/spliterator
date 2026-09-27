@@ -55,7 +55,7 @@ export interface CSVSpliteratorInit extends SpliteratorInit, RowSpliteratorInit<
 	columnDelimiter?: CharacterSequenceInput
 
 	/**
-	 * Whether to treat double-quoted regions as opaque. A delimiter inside `"…"` does not split; wrapping quotes are
+	 * Whether to treat double-quoted regions as opaque. A delimiter inside `"…"` does not split. Wrapping quotes are
 	 * stripped and doubled quotes (`""`) unescape to `"`.
 	 *
 	 * @default true
@@ -142,7 +142,7 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
  *
  * **Performance:** the SIMD delimiter scan wins when scanning dominates — many rows, a few columns pulled out cheaply,
  * streaming to bound memory. When per-row work is heavy (a full `JSON.parse`, expensive transforms) it can dominate the
- * scan and erase the advantage; benchmark against a mature native parser before swapping an existing loop for speed.
+ * scan and erase the advantage. Benchmark against a mature native parser before swapping an existing loop for speed.
  * See {@link JSONSpliterator} for the measured case where per-row `JSON.parse` makes the streamed path a net loss.
  *
  * @see {@linkcode CSVSpliterator.from} for synchronous usage.
@@ -347,8 +347,8 @@ export abstract class CSVSpliterator {
 			const rows = await openDelimitedRows(source, { ...rowInit, crlf, enableQuoteHandling })
 
 			if (header) {
-				// Both engines return `this` from their iterator method, so consuming the header row here advances the very
-				// cursor the row ops will go on to read — returning `rows` afterwards resumes at row two, not row one.
+				// Both engines return `this` from their iterator method. Consuming the header row here advances the cursor the
+				// row ops will read. Returning `rows` afterwards resumes at row two rather than row one.
 				const iterator = Symbol.asyncIterator in rows ? rows[Symbol.asyncIterator]() : rows[Symbol.iterator]()
 				const result = await iterator.next()
 

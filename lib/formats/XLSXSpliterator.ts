@@ -20,8 +20,8 @@ import {
 } from "./row-emitters.js"
 
 /**
- * A cell value as parsed from an XLSX sheet. Unlike CSV columns, XLSX cells arrive typed — numbers, booleans, and dates
- * are real values, not strings — and an empty cell is `null`.
+ * A cell value as parsed from an XLSX sheet. XLSX cells arrive typed: numbers, booleans, and dates are values rather
+ * than strings. An empty cell is `null`.
  */
 export type XLSXCellValue = string | number | boolean | Date | null
 
@@ -88,7 +88,7 @@ export interface XLSXWriteHandle {
 }
 
 /**
- * Wrap the optional peer dependency import so a missing module names the package to install.
+ * Wrap the optional peer dependency import so a missing module identifies the package to install.
  */
 async function importVendor<T>(packageName: string, importer: () => Promise<T>): Promise<T> {
 	try {
@@ -293,7 +293,7 @@ async function materializeSheetData(
 		const record = row as Readonly<Record<string, XLSXCellValue>>
 
 		if (!keys) {
-			// The header is derived from the first record's keys; later records are read in that order.
+			// The header comes from the first record's keys. Later records use that order.
 			keys = Object.keys(record)
 
 			if (init.header !== false) {

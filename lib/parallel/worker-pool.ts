@@ -19,9 +19,9 @@ export interface PoolWorkerLike {
 /**
  * An exclusive hold on a pooled worker for the duration of one unit of work.
  *
- * Listener lifetime belongs to the lease, not the caller: handlers registered here are detached on {@linkcode release},
- * so a worker can serve many leases without the previous one's handlers still firing. Messages are matched on
- * {@linkcode id}, so a batch posted just before a release cannot be delivered to the next lease.
+ * Listener lifetime belongs to the lease rather than the caller. Handlers registered here are detached on
+ * {@linkcode release}, so a worker can serve many leases without handlers from the previous lease firing. Messages are
+ * matched on {@linkcode id}, so a batch posted just before a release cannot be delivered to the next lease.
  */
 export interface WorkerLease {
 	/**
@@ -43,7 +43,7 @@ export interface WorkerPoolOptions {
 	/**
 	 * Maximum warm workers. Acquiring past this queues rather than spawning.
 	 *
-	 * Size it for the work, not the core count — the guidance on `parallelMapWorkers.concurrency` applies here too:
+	 * Size it for the work rather than the core count. The guidance on `parallelMapWorkers.concurrency` applies here too:
 	 * handlers that are I/O- or memory-bound peak around 2–3 and degrade past that.
 	 */
 	size: number
@@ -55,7 +55,7 @@ export interface WorkerPoolOptions {
 
 	/**
 	 * Override worker construction. Defaults to spawning the pooled entry on a `node:worker_threads` Worker, imported
-	 * dynamically so the module stays isomorphic; tests inject fakes.
+	 * dynamically so the module stays isomorphic. Tests inject fakes.
 	 */
 	createWorker?: () => PoolWorkerLike | Promise<PoolWorkerLike>
 
@@ -85,13 +85,13 @@ interface PooledEntry {
  * a small `asManyWorkers` call — and the handler module's top-level initialisation (loading a model, opening a
  * connection) is usually far more expensive still. Both are paid once per worker here instead of once per call.
  *
- * **The handler module therefore outlives a single call.** A pooled worker imports it once and keeps it, so top-level
- * state persists across every call routed through that worker. That is the reason to want a pool, and it is a real
- * difference from the unpooled path, where each call gets a freshly imported module. Handlers with per-call state must
- * not assume they start clean.
+ * **The handler module outlives a single call.** A pooled worker imports it once and keeps it, so top-level state
+ * persists across every call routed through that worker. That is the reason to want a pool, and it is a real difference
+ * from the unpooled path, where each call gets a freshly imported module. Handlers with per-call state must not assume
+ * they start clean.
  *
- * Ownership is explicit: nothing is shared implicitly and nothing is kept warm behind the caller's back. Dispose it
- * when finished, or bind it with `await using`.
+ * Ownership is explicit. The pool shares no state implicitly and keeps no worker warm behind the caller's back. Dispose
+ * it when finished, or bind it with `await using`.
  *
  * @example
  * 	;```ts
@@ -175,8 +175,8 @@ export class WorkerPool implements AsyncDisposable {
 	}
 
 	/**
-	 * Terminate every worker. Outstanding leases are awaited first — a worker is never pulled out from under work in
-	 * flight — after which further acquires throw.
+	 * Terminate every worker. Outstanding leases are awaited first, so a worker remains available until its work
+	 * finishes. Further acquires throw after disposal.
 	 */
 	public dispose(): Promise<void> {
 		this.#disposed = true
@@ -243,12 +243,12 @@ export class WorkerPool implements AsyncDisposable {
 		if (entry.broken) {
 			this.#all.delete(entry)
 
-			// A waiter must never be handed the worker that just died; spawn its replacement instead.
+			// A waiter must never receive the worker that just died. Spawn its replacement instead.
 			if (this.#waiting.length && this.#all.size < this.#size) {
 				const waiter = this.#waiting.shift()!
 
 				void this.#spawn().then(waiter, () => {
-					// Spawning failed; put the waiter back so a later release can satisfy it.
+					// Spawning failed. Put the waiter back so a later release can satisfy it.
 					this.#waiting.unshift(waiter)
 				})
 			}
@@ -286,7 +286,7 @@ export class WorkerPool implements AsyncDisposable {
 		const errorListener = (error: Error): void => {
 			if (released) return
 
-			// A worker that throws is not safe to reuse — its module state is unknown.
+			// A worker that throws is unsafe to reuse because its module state is unknown.
 			entry.broken = true
 			void entry.worker.terminate()
 

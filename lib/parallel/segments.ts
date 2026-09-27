@@ -13,7 +13,7 @@ export interface SegmentOptions {
 	 */
 	delimiter?: CharacterSequenceInput
 	/**
-	 * Desired number of segments. Clamped to ≥ 1; the result may be fewer.
+	 * Desired number of segments. The value is clamped to ≥ 1, and the result may contain fewer segments.
 	 */
 	concurrency: number
 	/**
@@ -24,7 +24,7 @@ export interface SegmentOptions {
 
 /**
  * Divide `source` into up to `concurrency` delimiter-aligned byte ranges. Each internal boundary is placed immediately
- * after the first delimiter at or past the ideal cut, so concatenating each segment's records reproduces the file
+ * after the first delimiter at or past the ideal boundary, so concatenating each segment's records reproduces the file
  * exactly — no record is split or duplicated.
  *
  * A probe window with no delimiter (a record longer than `probeSize`) collapses that boundary, so the result may have

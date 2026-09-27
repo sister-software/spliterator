@@ -28,7 +28,7 @@ async function main(): Promise<void> {
 	const data = workerData as WorkerData
 	const port = parentPort!
 
-	// Ack backpressure: the parent posts `"ack"` per consumed batch; we track outstanding batches.
+	// The parent posts one `"ack"` per consumed batch. Track the outstanding batches.
 	let acked = 0
 	let posted = 0
 	let wakeAck: (() => void) | undefined

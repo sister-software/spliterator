@@ -40,7 +40,7 @@ test("Asynchronous comment and blank rows are skipped", async ({ expect }) => {
 })
 
 // The adaptive source parses anything at or below `bulkThreshold` with the synchronous engine and
-// streams the rest. Both reach the same filter, so both are asserted — a fixture this small would
+// streams the rest. Both reach the same filter, so both are asserted. A fixture this small would
 // otherwise only ever exercise the bulk path.
 test("Streaming path skips comment and blank rows", async ({ expect }) => {
 	const fixturePath = fixturesDirectory("commented.jsonl")
@@ -88,8 +88,8 @@ test("Whitespace-only rows are skipped", ({ expect }) => {
 	).toMatchObject(["a-1", "a-2"])
 })
 
-// The prefix describes the start of a row, not a substring of it. Fixture row `a-4` carries `//`
-// inside a string value; a naive `includes` would drop it.
+// The prefix describes the start of a row rather than a substring of it. Fixture row `a-4` carries `//`
+// inside a string value. A naive `includes` call would drop it.
 test("Comment prefix inside a value is not a comment", async ({ expect }) => {
 	const fixture = await loadFixture(fixturesDirectory("commented.jsonl"))
 

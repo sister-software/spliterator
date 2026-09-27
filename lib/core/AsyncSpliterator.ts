@@ -42,7 +42,7 @@ export interface SpliteratorInit {
 	position?: number
 
 	/**
-	 * Whether to drop empty slices, so a run of repeated delimiters yields nothing between them.
+	 * Whether to drop empty slices, so a run of repeated delimiters emits no intervening slices.
 	 *
 	 * Setting this to `false` emits those empties and matches the behavior of `String.prototype.split`.
 	 *
@@ -69,15 +69,15 @@ export interface SpliteratorInit {
 	take?: number
 
 	/**
-	 * Enable quote-aware splitting. A delimiter inside a double-quoted region does not split; emitted slices retain their
+	 * Enable quote-aware splitting. A delimiter inside a double-quoted region does not split. Emitted slices retain their
 	 * quotes exactly as they appeared in the source.
 	 *
 	 * This is only splitting behavior. Decoding, stripping wrapping quotes, and unescaping doubled quotes are left to the
 	 * caller.
 	 *
-	 * The asynchronous engine requires a single-byte delimiter for this mode (every {@linkcode Delimiters} entry
-	 * qualifies) — a multi-byte delimiter straddling a chunk boundary cannot be rescanned without re-toggling quote
-	 * state.
+	 * The asynchronous engine requires a single-byte delimiter for this mode. Every {@linkcode Delimiters} entry
+	 * qualifies. A multi-byte delimiter that straddles a chunk boundary would require the scanner to toggle quote state
+	 * again while rescanning the boundary.
 	 *
 	 * @default false
 	 */
@@ -86,9 +86,9 @@ export interface SpliteratorInit {
 	/**
 	 * Whether to treat a carriage return immediately preceding a delimiter as part of the delimiter — i.e. CRLF
 	 * normalization when splitting on `\n`, matching `node:readline`'s `crlfDelay: Infinity`. Only a `\r` directly before
-	 * an actual delimiter match is trimmed; a trailing `\r` at end-of-input is preserved.
+	 * an actual delimiter match is trimmed. A trailing `\r` at end-of-input is preserved.
 	 *
-	 * {@linkcode CSVSpliterator} defaults this to `true` for row splitting (RFC 4180 mandates CRLF row terminators);
+	 * {@linkcode CSVSpliterator} defaults this to `true` for row splitting. RFC 4180 mandates CRLF row terminators.
 	 * everywhere else the default is `false`.
 	 *
 	 * @default false
@@ -310,9 +310,9 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	/**
 	 * A queue of index tuples marking the start and end of delimiter positions.
 	 *
-	 * Note that indices are relative to the buffer, not the file.
+	 * Indices use buffer coordinates rather than file coordinates.
 	 *
-	 * This means that the start index is always 0, and the end index is the byte length of the buffer.
+	 * The start index is always 0, and the end index is the buffer's byte length.
 	 */
 	readonly #indices = new IndexQueue()
 
@@ -597,7 +597,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 		try {
 			await this.#chunkReader.return?.()
 		} catch {
-			// The reader may already be closed; ignore.
+			// The reader may already be closed. Closing it again has no work to do.
 		}
 	}
 
@@ -776,7 +776,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 
 		return Promise.all(
 			segments.map(async ([start, end]) => {
-				// `end` is exclusive here; createChunkIterator's `end` is inclusive.
+				// `end` is exclusive here. createChunkIterator's `end` is inclusive.
 				const chunkIterator = await createChunkIterator(source, { start, end: end - 1 })
 
 				return new AsyncSpliterator(chunkIterator, { delimiter: options.delimiter, autoDispose: true })

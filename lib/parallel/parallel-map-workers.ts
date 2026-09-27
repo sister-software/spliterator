@@ -46,7 +46,7 @@ export interface ParallelMapWorkersOptions {
 	 *
 	 * Effective concurrency is clamped to the pool's size — asking for more leases than the pool can ever hand out would
 	 * wait forever. The handler module is imported once per worker rather than once per call, so its top-level state
-	 * persists across calls; that is usually the point, since loading it is the expensive part.
+	 * persists across calls. That persistence is usually the point because loading it is the expensive part.
 	 */
 	pool?: WorkerPool
 }
@@ -128,8 +128,8 @@ function workerHandle<T, R>(worker: Worker): PoolWorker<T, R> {
 
 /**
  * Map an async (or sync) iterable through a pool of worker threads. Main pulls items from `source`, batches them, and
- * dispatches each batch to an idle worker running the `worker` handler module; results stream back as a single merged
- * async iterator in **completion order** (not input order). A handler returning `undefined` drops that item; a
+ * dispatches each batch to an idle worker running the `worker` handler module. Results stream back as a single merged
+ * async iterator in **completion order** rather than input order. A handler returning `undefined` drops that item. A
  * `Uint8Array` is transferred zero-copy.
  *
  * **When it pays (measure — don't assume).** Threading only wins when per-item work is heavy relative to the ~µs
@@ -138,10 +138,10 @@ function workerHandle<T, R>(worker: Worker): PoolWorker<T, R> {
  * per-row work — model inference, geocoding, crypto/image ops — is where threads win. If the per-row cost isn't clearly
  * milliseconds, benchmark against the single-threaded version before adopting.
  *
- * **Concurrency is not core count.** Heavy work that is I/O- or memory-bound (random reads into one large on-disk DB,
- * anything sharing memory bandwidth) peaks _low_ — often ~2–3 workers — and then _degrades_, because the workers
- * contend for the shared resource, not the CPU. Start small and sweep; don't reach for `availableParallelism()`. Only
- * CPU-bound per-row work (pure compute) scales out toward the core count.
+ * **Concurrency is not core count.** Heavy work that is I/O- or memory-bound, such as random reads into one large
+ * on-disk DB, anything sharing memory bandwidth) peaks _low_ — often ~2–3 workers — and then _degrades_, because the
+ * workers contend for the shared resource rather than the CPU. Start small and sweep. Do not reach for
+ * `availableParallelism()`. Only CPU-bound per-row work (pure compute) scales out toward the core count.
  *
  * All workers are terminated on completion, error, or early `return()`.
  *

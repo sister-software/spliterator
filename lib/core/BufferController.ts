@@ -7,11 +7,11 @@
 /**
  * Compressions between right-sizing evaluations.
  *
- * Right-sizing on every compression is far worse than the allocation it reclaims — on a fixture of twenty 5MB records
- * it caused 20 shrinks and 121 reallocations against a 7-reallocation baseline, copying 165MB instead of 8.3MB —
- * because a stream still producing large records needs the capacity it just gave back. Evaluating over a window instead
- * means a shrink requires the buffer to have been oversized for the whole window, which such a stream never is.
- * Behaviour is flat from 32 to 128 (measured); 64 sits in the middle of that plateau rather than on an edge.
+ * Right-sizing on every compression costs more than the reclaimed allocation. A fixture of twenty 5MB records caused 20
+ * shrinks and 121 reallocations against a 7-reallocation baseline. It copied 165MB instead of 8.3MB because the stream
+ * still produced large records and needed the returned capacity. A windowed evaluation shrinks only after the buffer
+ * has remained oversized for the whole window. Behaviour is flat from 32 to 128 (measured); 64 sits in the middle of
+ * that plateau rather than on an edge.
  */
 const SHRINK_EVALUATION_INTERVAL = 64
 
@@ -94,16 +94,15 @@ export class BufferController {
 	 * `bytesWritten` is rebased onto the new window so it always reflects the count of valid bytes present after
 	 * compression. Bytes outside the kept window are dropped from the count even if the underlying allocation is larger.
 	 *
-	 * Cheap compressions leave a view, which strands the discarded prefix inside the same `ArrayBuffer` — addressable by
-	 * nobody and freed by nothing. Once that prefix outweighs what is still live, the live bytes are slid down to offset
-	 * zero instead, reclaiming the whole allocation as usable capacity. Sliding requires at least `bytesWritten` bytes to
-	 * have been consumed since the last slide, so the copy is amortized O(1) per byte streamed — this is not the "copy on
-	 * every fill cycle" that kept the view unconditional before.
+	 * Cheap compressions leave a view, which strands the discarded prefix inside the same `ArrayBuffer`. No live view can
+	 * address that prefix. Once the prefix outweighs the live bytes, the live bytes are slid down to offset zero instead,
+	 * reclaiming the whole allocation as usable capacity. Sliding requires at least `bytesWritten` bytes to have been
+	 * consumed since the last slide, so the copy is amortized O(1) per byte streamed. This avoids copying on every fill
+	 * cycle.
 	 *
-	 * Leaving it unconditional had grown costly: stranded bytes consume capacity, so the buffer had to keep re-growing.
-	 * Streaming a 1M-row CSV reallocated **788 times against 2** once compaction was added, and a 100MB quoted field
-	 * stopped leaving **101.58MB** stranded for the remainder of the stream. Throughput improved slightly either way, so
-	 * this is not a memory-for-speed trade.
+	 * An unconditional view consumed capacity and forced repeated growth. Streaming a 1M-row CSV reallocated **788 times
+	 * against 2** once compaction was added, and a 100MB quoted field stopped leaving **101.58MB** stranded for the
+	 * remainder of the stream. Throughput improved slightly either way, so this is not a memory-for-speed trade.
 	 *
 	 * @param start - The starting byte index of which bytes to keep.
 	 * @param end - The ending byte index of which bytes to keep. Defaults to the current buffer length. Values past the
@@ -137,12 +136,12 @@ export class BufferController {
 	}
 
 	/**
-	 * Hand back an allocation that a past record forced open and that nothing since has needed.
+	 * Return capacity that a past record required when later records no longer need it.
 	 *
 	 * Compaction reclaims a stranded prefix but cannot shrink, so without this a single huge record leaves its buffer
 	 * resident for the rest of the stream. Evaluated once per {@linkcode SHRINK_EVALUATION_INTERVAL} compressions against
 	 * the window's peak, so this cannot churn against a stream that keeps producing large records — and a short tail
-	 * never reaches an evaluation, which is correct, since a stream about to end has nothing to reclaim for.
+	 * never reaches an evaluation because the stream is about to end and has no later allocation to reclaim.
 	 */
 	#evaluateCapacity(): void {
 		if (this.bytesWritten > this.#peakByteLength) {
@@ -223,7 +222,7 @@ export class BufferController {
 			//
 			// Doubling rather than a gentler 1.5×, and uncapped: a sweep at 1/10/50/100MB found 1.5×
 			// no faster and, at 100MB, *worse* on peak RSS (396MB against 354MB) despite holding less
-			// capacity. Peak memory here is dominated by garbage from discarded buffers, not by the
+			// capacity. Peak memory here is dominated by garbage from discarded buffers rather than the
 			// final allocation, so the strategy that reallocates least also peaks lowest.
 			this.grow(Math.max(nextLength, this.bytes.length * 2))
 		}

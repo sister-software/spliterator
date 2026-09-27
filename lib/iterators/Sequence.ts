@@ -11,8 +11,8 @@ import { AsyncSequence } from "./AsyncSequence.js"
 /**
  * A chainable operation in a fused pipeline.
  *
- * Ops are **descriptors**, not closures over iteration state — `take`/`drop` counters live in the iterator, not here,
- * so a sequence can describe its chain before anyone pulls from it.
+ * Ops are **descriptors** rather than closures over iteration state. `take` and `drop` counters live in the iterator,
+ * rather than here, so a sequence can describe its chain before anyone pulls from it.
  */
 type Op =
 	| { kind: typeof OP_MAP; fn: (value: any, counter: number) => unknown }
@@ -29,7 +29,7 @@ const OP_DROP = 3
  * What a synchronous sequence can be built over.
  *
  * The thunk form defers construction until the first pull, which is what lets a `from` that would otherwise open a file
- * return a sequence immediately — the caller chains, and nothing is read until something iterates.
+ * return a sequence immediately. The caller can chain operations before iteration reads any data.
  */
 export type SyncSequenceSource<T> = Iterable<T> | (() => Iterable<T>)
 
@@ -99,12 +99,12 @@ function* batchValues<T>(source: Iterable<T>, size: number): Generator<T[]> {
  *
  * [helpers]: https://github.com/tc39/proposal-iterator-helpers
  *
- * **Chain depth is nearly free.** A chain is an op list plus a source, not nested generators, so only the op loop grows
- * as operators stack. Only {@linkcode flatMap} and {@linkcode chunks} break fusion, because they need inner-iterator
- * state.
+ * **Chain depth is nearly free.** A chain is an op list plus a source rather than nested generators. Only the op loop
+ * grows as operators stack. Only {@linkcode flatMap} and {@linkcode chunks} break fusion, because they need
+ * inner-iterator state.
  *
- * **Nothing is materialized implicitly.** Every operator stays lazy; only the `to*` collectors and `toSorted` read the
- * sequence into memory, and they say so.
+ * **Operators stay lazy.** Only the `to*` collectors and `toSorted` read the sequence into memory, and their names make
+ * that behavior explicit.
  *
  * Single-shot, like the iterators the proposal specifies: iterating consumes the source.
  */
@@ -113,7 +113,7 @@ export class Sequence<T> implements IterableIterator<T>, Disposable {
 	readonly #ops: readonly Op[]
 
 	/**
-	 * Indices of `take` ops, precomputed so the exhaustion pre-check costs nothing when there are none.
+	 * Indices of `take` ops, precomputed so the exhaustion pre-check does no scan when the chain has none.
 	 */
 	readonly #takeIndices: readonly number[]
 
@@ -466,8 +466,7 @@ export class Sequence<T> implements IterableIterator<T>, Disposable {
 		const counters = this.#counters
 		const budgets = this.#budgets
 
-		// A satisfied `take` must close the source WITHOUT pulling again — the whole point of `take(5)` on a huge file is
-		// that the sixth row is never read.
+		// A satisfied `take` closes the source before pulling again. `take(5)` must not read the sixth row of a huge file.
 		for (const index of this.#takeIndices) {
 			if (budgets[index]! <= 0) return this.#finish()
 		}
@@ -545,9 +544,8 @@ export class Sequence<T> implements IterableIterator<T>, Disposable {
 
 		this.#done = true
 
-		// An eager source may already hold a resource that no pull ever touched, so closing has to reach it even along
-		// paths like `take(0)`. A thunk source that was never invoked has nothing open to release, and invoking it here
-		// would open a file purely to close it.
+		// An eager source may hold a resource before the first pull, so closing reaches it even for `take(0)`. A thunk that
+		// was never invoked has no resource to release. Invoking it here would open a file only to close it.
 		const source = this.#source
 
 		const upstream = this.#upstream ?? (typeof source === "function" ? null : source[Symbol.iterator]())

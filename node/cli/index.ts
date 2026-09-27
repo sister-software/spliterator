@@ -53,7 +53,7 @@ try {
 			await iterate.run(argv)
 	}
 } catch (error) {
-	// `parseArgs` rejects unknown or malformed flags — report those as usage errors, not crashes.
+	// `parseArgs` rejects unknown or malformed flags. Report those errors as usage errors.
 	if (error instanceof Error && String((error as NodeJS.ErrnoException).code).startsWith("ERR_PARSE_ARGS")) {
 		usageError(error.message)
 	}

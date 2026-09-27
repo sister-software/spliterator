@@ -3,10 +3,10 @@
  * @license MIT
  * @author Teffen Ellis, et al.
  *
- * `AsyncDataResource` includes `PathBuilderLike`, but a `PathBuilder` is callable — `typeof` is
- * `"function"` — so every `typeof === "object"` guard in the dispatch chain missed it and the input
- * fell through to be read as bytes. `yarn demo` had been failing on this with "Invalid delimiter
- * type". These cover each entry point that accepts a resource, not just the one the demo hit.
+ * `AsyncDataResource` includes `PathBuilderLike`, while a `PathBuilder` is callable. `typeof` is
+ * `"function"`, so every `typeof === "object"` guard in the dispatch chain sent the input down the wrong branch.
+ * The input fell through to byte parsing. `yarn demo` had been failing on this with "Invalid delimiter type".
+ * These tests cover every entry point that accepts a resource, including the demo's entry point.
  */
 
 import { AsyncSpliterator, CSVSpliterator, JSONSpliterator, Spliterator, TextSpliterator } from "spliterator"
@@ -135,8 +135,8 @@ describe("PathBuilder sources", () => {
 	})
 
 	// `openDelimitedRows` *catches* a `readFileSize` failure and falls back to streaming, so before
-	// this the adaptive bulk path was silently disabled for every PathBuilder source — the parse
-	// still produced correct rows, which is why nothing caught it.
+	// this the adaptive bulk path was silently disabled for every PathBuilder source. The parse
+	// still produced correct rows, so the error did not affect the returned data.
 	test("readFileSize accepts a PathBuilder, so the bulk path is not silently skipped", async () => {
 		const size = await readFileSize(fixture)
 		const expected = await loadFixture(fixture)

@@ -80,7 +80,7 @@ export function isFileHandleLike(input: unknown): input is FileHandleLike {
  * unreliable, so its brand symbol cannot be probed structurally, and `path-ts` cannot be imported for the real
  * `instanceof` check: it statically imports `node:path`, which would cost this layer its isomorphism.
  *
- * Callability carries the test on its own, since nothing else accepted as a data resource is a function. The `toString`
+ * Callability carries the test on its own because no other accepted data resource is a function. The `toString`
  * comparison is what keeps an ordinary function from being mistaken for a path.
  */
 export function isPathBuilderLike(input: unknown): input is PathBuilderLike {

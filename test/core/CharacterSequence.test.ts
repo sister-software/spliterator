@@ -71,7 +71,7 @@ describe("CharacterSequence.searchMatches (JS fallback)", () => {
 	test("searches for an absent pattern once, not once per match", () => {
 		// Each pattern's next hit is carried between iterations, and a `-1` is final for the rest of
 		// the range. Re-searching both patterns every iteration was quadratic: a search that finds
-		// nothing has scanned all the way to `end` to say so, so a source containing no quote paid
+		// no match has scanned all the way to `end`, so a source containing no quote paid
 		// that whole scan once per delimiter.
 		const comma = new CharacterSequence(Delimiters.Comma)
 		const quote = new CharacterSequence('"')

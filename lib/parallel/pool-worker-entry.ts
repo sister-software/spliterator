@@ -52,7 +52,7 @@ type Incoming = SegmentLease | MapLease | ItemsMessage | AckMessage
 const port = parentPort!
 
 /**
- * Resolved handler exports, keyed by module URL. The ESM loader already caches the module; this caches the export
+ * Resolved handler exports, keyed by module URL. The ESM loader already caches the module. This caches the export
  * lookup so a lease does not re-await an import it has already resolved.
  */
 const handlers = new Map<string, Promise<unknown>>()
@@ -200,5 +200,5 @@ port.on("message", (raw: unknown) => {
 	}
 })
 
-// Referenced so bundlers keep the construction-time payload wired; the pool forwards it as `userData`.
+// Reference this value so bundlers keep the construction-time payload wired. The pool forwards it as `userData`.
 void workerData

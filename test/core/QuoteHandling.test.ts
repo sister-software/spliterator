@@ -14,8 +14,8 @@
  *   Contract under test:
  *
  *   - `Spliterator`/`AsyncSpliterator` + `enableQuoteHandling`: delimiters inside double-quoted
- *       regions do not split; emitted slices keep their quotes verbatim.
- *   - `CSVSpliterator` + `enableQuoteHandling`: quote-aware rows AND columns, wrapping quotes
+ *       regions do not split. Emitted slices keep their quotes verbatim.
+ *   - `CSVSpliterator` + `enableQuoteHandling`: quote-aware rows and columns. Wrapping quotes are
  *       stripped, doubled quotes unescaped, empty fields preserved.
  *   - `crlf`: a `\r` immediately preceding a delimiter is treated as part of the delimiter.
  *       Default `false` at the core, default `true` for `CSVSpliterator` rows (RFC 4180).
@@ -151,9 +151,9 @@ test("CSV: empty fields preserved under quote handling", ({ expect }) => {
 //#region Column-split fast path
 
 /**
- * `splitRowColumns` decodes the row ONCE and splits the string, and takes `String.prototype.split` outright for a row
- * containing no `"` — skipping both the quote walk and the unquote pass. These pin the invariant that makes that legal:
- * the two paths must agree on every row where both could run.
+ * `splitRowColumns` decodes the row once and splits the string. It uses `String.prototype.split` for a row containing
+ * no `"` — skipping both the quote walk and the unquote pass. These pin the invariant that makes that legal: the two
+ * paths must agree on every row where both could run.
  */
 
 test("CSV fast path: a quote-free row splits identically with and without quote handling", ({ expect }) => {
@@ -171,8 +171,8 @@ test("CSV fast path: a quote-free row splits identically with and without quote 
 	])
 })
 
-test("CSV fast path: a quote in ANY column pushes the whole row onto the walk", ({ expect }) => {
-	// The last column carries the quote; the earlier columns must still split exactly as they would have.
+test("CSV fast path: a quote in any column pushes the whole row onto the walk", ({ expect }) => {
+	// The last column carries the quote. The earlier columns must still split exactly as they would have.
 	const source = encoder.encode('h1,h2,h3\na,b,"c,d"\n')
 	const rows = Array.from(CSVSpliterator.from(source, { mode: "array", enableQuoteHandling: true }))
 
@@ -180,9 +180,8 @@ test("CSV fast path: a quote in ANY column pushes the whole row onto the walk", 
 })
 
 test("CSV fast path: an unmatched quote opens a region that runs to EOF, as it did before", ({ expect }) => {
-	// Malformed CSV — RFC 4180 gives no answer for a lone `"` mid-field, and the ROW splitter opens a quoted region on
-	// it just as the column splitter does, so the row never terminates at the newline. Pinned not because the output is
-	// desirable but because it is UNCHANGED: the decode-once column path must not quietly re-interpret malformed input.
+	// Malformed CSV has no RFC 4180 rule for a lone `"` mid-field. The row splitter opens a quoted region on it just as
+	// the column splitter does, so the row continues through the newline. This test preserves that interpretation.
 	const source = encoder.encode('h1,h2\n5" pipe,b\n')
 	const rows = Array.from(CSVSpliterator.from(source, { mode: "array", enableQuoteHandling: true }))
 
@@ -203,8 +202,8 @@ test("CSV fast path: multi-character delimiters split on both paths", ({ expect 
 })
 
 test("CSV fast path: a non-UTF-8 delimiter falls back to the byte scan", ({ expect }) => {
-	// 0xFF is not valid UTF-8, so it cannot round-trip to a string — the string split would search for U+FFFD and
-	// match the wrong thing. That delimiter must keep the byte path.
+	// 0xFF is not valid UTF-8, so it cannot round-trip to a string. String splitting would search for U+FFFD and match
+	// the wrong value. This delimiter must keep the byte path.
 	const delimiter = new Uint8Array([0xff])
 
 	const source = new Uint8Array([
@@ -236,7 +235,7 @@ test("CSV: quoted header columns", ({ expect }) => {
 	const source = encoder.encode('"h,1",h2\na,b\n')
 	const rows = Array.from(CSVSpliterator.from(source, { mode: "object", enableQuoteHandling: true }))
 
-	// Object mode normalizes keys by default, so the comma the quotes protected becomes an underscore.
+	// Object mode normalizes keys by default. The comma enclosed by the quotes becomes an underscore.
 	expect(rows).toEqual([{ h_1: "a", h2: "b" }])
 })
 

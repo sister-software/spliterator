@@ -14,8 +14,8 @@ const encoder = new TextEncoder()
 /**
  * One or more line-comment prefixes.
  *
- * Prefixes are **text**, not byte sequences — a `string[]` is always a list of prefixes, never a single prefix given as
- * bytes. That ambiguity is the reason this is narrower than `CharacterSequenceInput`.
+ * Prefixes are **text**, not byte sequences. A `string[]` is always a list of prefixes, never a single prefix encoded
+ * as bytes. This distinction makes the type narrower than `CharacterSequenceInput`.
  */
 export type CommentInput = string | readonly string[]
 
@@ -47,7 +47,7 @@ export function createCommentFilter(comment: CommentInput | undefined): RowPredi
 	if (comment === undefined) return null
 
 	// An empty prefix would match every row, so it is dropped rather than honored. Passing `comment`
-	// at all still opts into whitespace-only skipping, even if nothing survives here.
+	// at all still opts into whitespace-only skipping, even when the list contains no prefixes.
 	const prefixes = (typeof comment === "string" ? [comment] : comment)
 		.map((prefix) => encoder.encode(prefix))
 		.filter((prefix) => prefix.length > 0)

@@ -23,8 +23,8 @@ const csvPath = fixturesDirectory("carvel.csv").toString()
 const textPath = fixturesDirectory("phonetic-single-spaced.txt").toString()
 
 /**
- * `bulkThreshold: 0` forces streaming; the default reads these fixtures whole. Anything the two disagree on is a bug in
- * one of the two engines, so every case below is asserted as a pair.
+ * `bulkThreshold: 0` forces streaming. The default reads these fixtures whole. Any disagreement between the two is a
+ * bug in one of the two engines, so every case below is asserted as a pair.
  */
 const STREAMING = { bulkThreshold: 0 } as const
 const BULK = { bulkThreshold: 64 * 1024 * 1024 } as const
@@ -76,7 +76,7 @@ describe("parity between the bulk and streaming engines", () => {
 
 		expect(bulked).toEqual(streamed)
 		expect(bulked.length).toBeGreaterThan(0)
-		// The header must be consumed, not emitted as a row.
+		// The header must be consumed instead of emitted as a row.
 		expect(Object.keys(bulked[0] as object).length).toBeGreaterThan(1)
 	})
 

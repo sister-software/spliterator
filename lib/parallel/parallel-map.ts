@@ -7,12 +7,11 @@
 import { AsyncSequence, type ParallelMapSequenceOptions } from "../iterators/AsyncSequence.js"
 
 /**
- * Map an iterable through a callback with up to `concurrency` calls in flight, yielding in **completion order** — not
- * input order.
+ * Map an iterable through a callback with up to `concurrency` calls in flight. Values are yielded in **completion
+ * order** rather than input order.
  *
  * The callback is a closure, so every call runs on the caller's thread. This overlaps _latency_ — file reads, network
- * round-trips, anything that spends its time waiting — and does nothing for CPU-bound work, which still occupies the
- * one thread it always did.
+ * round-trips, and other waiting work. It does not improve CPU-bound work, which still occupies the caller's thread.
  *
  * **Concurrency is not core count.** Work that contends for a shared resource (one disk, one socket pool, one on-disk
  * database) peaks _low_ — often ~2–3 — and then degrades. Sweep it.

@@ -218,7 +218,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	/**
 	 * A queue of index tuples marking the start and end of delimiter positions.
 	 *
-	 * Note that indices are relative to the buffer, not the file.
+	 * Indices are relative to the buffer rather than the file.
 	 *
 	 * This means that the start index is always 0, and the end index is the byte length of the buffer.
 	 */
@@ -342,7 +342,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 		if (this.#readPosition < sourceByteLength) {
 			this.#indices.enqueue([this.#readPosition, sourceByteLength])
 		} else if (this.#yieldCount === 0 && lastByteRange === undefined) {
-			// Nothing was ever found or yielded (e.g. an empty source) — emit the whole buffer as
+			// The scan found and yielded no range, such as for an empty source. Emit the whole buffer as
 			// a single field. A run of all-empty fields that `skipEmpty` dropped has a defined
 			// `lastByteRange`, so it falls through to the trailing-delimiter case instead of
 			// resurfacing the entire delimiter run as one (non-empty) row.

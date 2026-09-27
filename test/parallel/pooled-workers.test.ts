@@ -3,8 +3,8 @@
  * @license MIT
  * @author Teffen Ellis, et al.
  *
- * The pooled path with real threads. `worker-pool.test.ts` covers the pool's mechanics against fakes;
- * this is the only place the pooled wire protocol actually runs in a worker.
+ * The pooled path with real threads. `worker-pool.test.ts` covers the pool's mechanics against fakes.
+ * this is the only place where the pooled wire protocol runs in a worker.
  */
 
 import { mkdtempSync, writeFileSync } from "node:fs"
@@ -42,9 +42,9 @@ async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
 }
 
 /**
- * Collect while watching the pool. `peakLeased` is the assertion that binds these tests to the pooled path — every
- * other expectation here is equally satisfied by spawn-per-call, as a mutation that ignored the pool proved by leaving
- * 9 of 10 green.
+ * Collect while watching the pool. `peakLeased` verifies that these tests use the pooled path. A spawn-per-call
+ * implementation satisfies every other expectation, as a mutation that ignored the pool showed by leaving 9 of 10
+ * green.
  */
 async function collectWatching<T>(
 	pool: WorkerPool,
@@ -109,7 +109,7 @@ describe("pooled asManyWorkers", () => {
 		expect(second.toSorted(), "Second call correct on reused workers").toEqual(oracle)
 	})
 
-	// The headline reason to pool: a handler's top-level initialisation is paid once per worker, not
+	// The main reason to pool is that a handler's top-level initialisation is paid once per worker, rather than
 	// once per call. The observable consequence is that its state survives between calls.
 	test("handler module state persists across calls", async () => {
 		await using pool = new WorkerPool({ size: 1 })

@@ -15,8 +15,8 @@ const encoder = new TextEncoder()
 
 describe("WASM SIMD scanner", () => {
 	beforeAll(async () => {
-		// The module loads asynchronously; without awaiting it the synchronous
-		// engine would never see it and every test below would silently run on
+		// The module loads asynchronously. Awaiting it lets the synchronous
+		// engine use it, so the tests exercise the SIMD implementation rather than
 		// the JS fallback, defeating the purpose of the suite.
 		const ready = await CharacterSequence.whenReady()
 
@@ -161,7 +161,7 @@ describe("WASM SIMD scanner", () => {
 		expect(crlf.search(rows, 0)).toBe(100)
 		// ...then clobber the shared WASM memory with an unrelated searchAll...
 		comma.searchAll(columns)
-		// ...the next search on `rows` must still read its own bytes, not the leftovers.
+		// ...the next search on `rows` must still read its own bytes rather than leftovers.
 		expect(crlf.search(rows, 102)).toBe(3000)
 	})
 
@@ -255,7 +255,7 @@ describe("WASM SIMD scanner", () => {
 			state = scan!
 		}
 
-		// scanRanges emits completed delimiter-terminated ranges; EOF tail handling belongs to Spliterator.
+		// scanRanges emits completed delimiter-terminated ranges. Spliterator handles the EOF tail.
 		expect(ranges).toEqual(referenceRanges(buf, comma).slice(0, -1))
 		expect(state.pendingSliceStart).toBe(buf.length)
 	})

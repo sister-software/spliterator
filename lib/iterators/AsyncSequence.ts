@@ -6,14 +6,14 @@
 
 import { ReadableStream, type ReadableWritablePair, type StreamPipeOptions } from "node:stream/web"
 
-// Type-only, so the `{@linkcode}` references below resolve; erased at compile, so core stays isomorphic.
+// This type-only import resolves the `{@linkcode}` references and is erased at compile time.
 import type { fsConcurrency } from "spliterator/node/fs"
 
 /**
  * A chainable operation in a fused pipeline.
  *
- * Ops are **descriptors**, not closures over iteration state — `take`/`drop` counters live in the iterator, not here,
- * so a sequence can describe its chain before anyone pulls from it.
+ * Ops are **descriptors** rather than closures over iteration state. `take` and `drop` counters live in the iterator,
+ * rather than here, so a sequence can describe its chain before anyone pulls from it.
  */
 type Op =
 	| { kind: typeof OP_MAP; fn: (value: any, counter: number) => unknown }
@@ -130,8 +130,8 @@ let defaultConcurrencyPromise: Promise<number> | undefined
 
 /**
  * Validate a caller-supplied `concurrency` at construction, like {@linkcode AsyncSequence.take} and
- * {@linkcode AsyncSequence.chunks} do: `NaN` would otherwise dispatch nothing and yield an empty sequence. Values below
- * 1 clamp to 1; `Infinity` is unbounded.
+ * {@linkcode AsyncSequence.chunks} do: `NaN` would otherwise start no callbacks and yield an empty sequence. Values
+ * below 1 clamp to 1; `Infinity` is unbounded.
  */
 function normalizeConcurrency(concurrency: number | undefined): number | undefined {
 	if (concurrency === undefined) return undefined
@@ -151,8 +151,8 @@ async function* mapValuesConcurrently<T, U>(
 ): AsyncGenerator<U> {
 	const limit = concurrency ?? (await defaultConcurrency())
 	const upstream = source[Symbol.asyncIterator]()
-	// Slots key this map, not items: a source may repeat a value (a list of file paths routinely does), and two `===`
-	// equal keys would collapse into one entry, losing a result and deleting the wrong dispatch.
+	// Slots identify callbacks rather than values. A source may repeat a value, and equal values would otherwise
+	// collapse into one entry, losing a result and deleting the wrong dispatch.
 	const inflight = new Map<number, Promise<{ slot: number; value: U }>>()
 	let slot = 0
 	let exhausted = false
@@ -175,8 +175,8 @@ async function* mapValuesConcurrently<T, U>(
 
 				const pending = Promise.resolve(produced).then((value) => ({ slot: current, value }))
 
-				// A callback that rejects while this loop is parked on a slow `upstream.next()` would otherwise be an
-				// unhandled rejection; the race below still rethrows it.
+				// A callback can reject while this loop waits on a slow `upstream.next()`. Attach a rejection handler here.
+				// The race below still rethrows the error.
 				pending.then(undefined, noop)
 				inflight.set(current, pending)
 			}
@@ -227,8 +227,7 @@ async function* filterValuesConcurrently<T>(
 
 				const verdict = fn(result.value, counter++)
 
-				// A predicate that rejects before its turn would otherwise be an unhandled rejection; it is still
-				// rethrown below when the window reaches it.
+				// A predicate can reject before its turn. Attach a handler here. The window rethrows the error when it reaches it.
 				if (isThenable(verdict)) {
 					Promise.resolve(verdict).then(undefined, noop)
 				}
@@ -266,14 +265,14 @@ export interface ParallelMapSequenceOptions {
 	 * threadpool size in Node ({@linkcode fsConcurrency} from `spliterator/node/fs`, 4 unless `UV_THREADPOOL_SIZE` says
 	 * otherwise), and 4 elsewhere.
 	 *
-	 * For I/O-bound work this peaks **low** — often ~2–3 — and then _degrades_ as callers contend for the same disk or
-	 * socket. Sweep it rather than reaching for `availableParallelism()`, which counts CPUs and says nothing about I/O.
+	 * For I/O-bound work this peaks **low**, often at ~2–3, and then _degrades_ as callers contend for the same disk or
+	 * socket. Sweep it rather than reaching for `availableParallelism()`, which counts CPUs and does not measure I/O.
 	 */
 	concurrency?: number
 
 	/**
-	 * Abort signal. When aborted, iteration stops after the currently-yielded value; in-flight callbacks are allowed to
-	 * settle so none reject unobserved.
+	 * Abort signal. When aborted, iteration stops after the currently-yielded value. In-flight callbacks are allowed to
+	 * settle so every rejection is observed.
 	 */
 	signal?: AbortSignal
 }
@@ -282,25 +281,26 @@ export interface ParallelMapSequenceOptions {
  * A lazy, chainable async iterator.
  *
  * The core methods (`map`, `filter`, `take`, `drop`, `flatMap`, `reduce`, `toArray`, `forEach`, `some`, `every`,
- * `find`) match the [async iterator helpers proposal][proposal] in name, arity, and semantics — including the `counter`
- * second argument handed to every callback. Callbacks may return promises. Code written against this keeps working
- * verbatim if the proposal ever ships natively.
+ * `find`) match the [async iterator helpers proposal][proposal] in name, arity, and semantics. This includes the
+ * `counter` second argument handed to every callback. Callbacks may return promises. Code written against this keeps
+ * working verbatim if the proposal ever ships natively.
  *
  * [proposal]: https://github.com/tc39/proposal-async-iterator-helpers
  *
- * **Chain depth is nearly free.** A chain is an op list plus a source, not nested generators, so one async boundary is
- * paid per item no matter how many operators you stack; only the op loop grows. Measured on Node 26 over 2M items:
- * ~5.4M items/s at three operators and ~4.9M/s at six, against ~2.3M/s for the equivalent nested-generator
- * implementation, where each operator adds a microtask hop. Doubling the operator count costs ~10% here and would cost
- * ~2× there. Only {@linkcode flatMap}, {@linkcode chunks}, {@linkcode parallelMap}, and {@linkcode parallelFilter}
- * break fusion, because they need inner-iterator state.
+ * **Chain depth is nearly free.** A chain is an op list plus a source rather than nested generators. It pays one async
+ * boundary per item regardless of operator count. Only the op loop grows. Measured on Node 26 over 2M items: ~5.4M
+ * items/s at three operators and ~4.9M/s at six, against ~2.3M/s for the equivalent nested-generator implementation,
+ * where each operator adds a microtask hop. Doubling the operator count costs ~10% here and would cost ~2× there. Only
+ * {@linkcode flatMap}, {@linkcode chunks}, {@linkcode parallelMap}, and {@linkcode parallelFilter} break fusion,
+ * because they need inner-iterator state.
  *
  * Callback results are awaited **only when thenable**, so synchronous callbacks — the common case — cost no microtask
- * hop at all.
+ * hop.
  *
  * **When not to reach for this.** Wrapping costs ~1.9× a bare async generator (~10.3M/s), one extra async frame per
- * item. On parsed rows (`JSON.parse` at ~1–3µs) that is 3–8%, invisible. On raw {@linkcode Uint8Array} ranges with no
- * per-row parse it is most of the cost — iterate the {@linkcode AsyncSpliterator} directly there.
+ * item. On parsed rows (`JSON.parse` at ~1–3µs) that is 3–8%, which is small beside parsing. On raw
+ * {@linkcode Uint8Array} ranges with no per-row parse it is most of the cost — iterate the {@linkcode AsyncSpliterator}
+ * directly there.
  *
  * Single-shot, like the iterators the proposal specifies: iterating consumes the source.
  */
@@ -309,7 +309,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	readonly #ops: readonly Op[]
 
 	/**
-	 * Indices of `take` ops, precomputed so the exhaustion pre-check costs nothing when there are none.
+	 * Indices of `take` ops, precomputed so the exhaustion pre-check does no scan when the chain has none.
 	 */
 	readonly #takeIndices: readonly number[]
 
@@ -435,8 +435,8 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	 * Map each value to an iterable and flatten one level.
 	 *
 	 * **Fusion barrier.** Unlike the other operators this needs inner-iterator state, so it starts a fresh fused segment
-	 * rather than joining the current op list. Stacking `flatMap` costs one async boundary each; stacking
-	 * `map`/`filter`/`take`/`drop` costs nothing.
+	 * rather than joining the current op list. Stacking `flatMap` costs one async boundary each. Stacking
+	 * `map`/`filter`/`take`/`drop` adds no boundary.
 	 */
 	public flatMap<U>(
 		fn: (value: T, counter: number) => AsyncIterable<U> | Iterable<U> | PromiseLike<AsyncIterable<U> | Iterable<U>>
@@ -632,7 +632,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	 * Distinct from {@linkcode take}, which yields the first `size` _values_. Named for the [iterator chunking
 	 * proposal](https://github.com/tc39/proposal-iterator-chunking).
 	 *
-	 * **Fusion barrier**, like {@linkcode flatMap}.
+	 * This operation is a **fusion barrier**, like {@linkcode flatMap}.
 	 */
 	public chunks(size: number): AsyncSequence<T[]> {
 		const normalized = Math.trunc(size)
@@ -649,8 +649,8 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	 * input order. When only membership changes and order must survive, use {@linkcode parallelFilter}.
 	 *
 	 * The callback is a closure, so it runs on the caller's thread. This overlaps _latency_ (file reads, network) and
-	 * does nothing for CPU-bound work; for that, cross a thread boundary with `parallelMapWorkers` or
-	 * `AsyncSpliterator.asManyWorkers`, which take a module path precisely because a closure cannot.
+	 * does not improve CPU-bound work. Use `parallelMapWorkers` or `AsyncSpliterator.asManyWorkers`, which take a module
+	 * path precisely because a closure cannot.
 	 *
 	 * **Fusion barrier**, like {@linkcode flatMap}.
 	 */
@@ -667,14 +667,14 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	 * Keep values the predicate accepts, with up to `concurrency` predicate calls in flight. The predicate's result is
 	 * truthiness-tested, like {@linkcode filter}.
 	 *
-	 * Unlike {@linkcode parallelMap}, this yields in **input order**: a filter emits the input itself, so nothing is
+	 * Unlike {@linkcode parallelMap}, this yields in **input order**. A filter emits the input itself, so no value is
 	 * gained by emitting early, and a stable order keeps results reproducible (a list of existing paths, for one). The
 	 * price is head-of-line blocking: dispatch runs at most `concurrency` predicates ahead of the oldest unsettled one,
-	 * so a slow predicate stalls the window behind it. That keeps memory bounded, which is the trade this module makes;
-	 * use `parallelMap` when throughput under uneven latency matters more than order.
+	 * so a slow predicate stalls the window behind it. That keeps memory bounded. Use `parallelMap` when throughput under
+	 * uneven latency matters more than order.
 	 *
 	 * Same caveats as {@linkcode parallelMap}: the predicate is a closure on the caller's thread, so this overlaps I/O
-	 * latency, not CPU work — cross a thread boundary with `parallelMapWorkers` for CPU work. **Fusion barrier**, like
+	 * latency rather than CPU work. Use `parallelMapWorkers` for CPU work. This operation is a **fusion barrier**, like
 	 * {@linkcode flatMap}.
 	 */
 	public parallelFilter<S extends T>(
@@ -738,8 +738,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 		const counters = this.#counters
 		const budgets = this.#budgets
 
-		// A satisfied `take` must close the source WITHOUT pulling again — the whole point of `take(5)` on a huge file is
-		// that the sixth row is never read.
+		// A satisfied `take` closes the source before pulling again. `take(5)` must not read the sixth row of a huge file.
 		for (const index of this.#takeIndices) {
 			if (budgets[index]! <= 0) return this.#finish()
 		}
@@ -823,9 +822,8 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 
 		this.#done = true
 
-		// An eager source may already hold a resource that no pull ever touched, so closing has to reach it even along
-		// paths like `take(0)`. A thunk source that was never invoked has nothing open to release, and invoking it here
-		// would open a file purely to close it.
+		// An eager source may hold a resource before the first pull, so closing reaches it even for `take(0)`. A thunk that
+		// was never invoked has no resource to release. Invoking it here would open a file only to close it.
 		const source = this.#source
 
 		const upstream =

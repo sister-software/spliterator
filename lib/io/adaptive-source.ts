@@ -11,12 +11,13 @@ import type { AsyncChunkIterator, AsyncDataResource } from "../internal/shared.j
 /**
  * Byte length at or below which a source is read whole and parsed synchronously.
  *
- * What this buys is **fixed setup cost** — opening a handle and standing up a read stream, ~100µs — not throughput, so
- * the win decays as the source grows and the threshold marks where it stops being measurable. End-to-end against the
- * streaming path (Node 26, min of 200 runs, two independent sweeps): ~1.85× at 635B, ~1.45× at 6.5KB, ~1.4× at 125KiB.
- * At 253KiB and above the two runs disagreed on which was faster, so there is nothing reliable left to win.
+ * This threshold targets **fixed setup cost**. Opening a handle and standing up a read stream takes ~100µs. The benefit
+ * declines as the source grows, and the threshold marks where the difference stops being measurable. End-to-end against
+ * the streaming path (Node 26, min of 200 runs, two independent sweeps): ~1.85× at 635B, ~1.45× at 6.5KB, ~1.4× at
+ * 125KiB. At 253KiB and above the two runs disagreed on which was faster, so the measurement does not support a larger
+ * threshold.
  *
- * Raising this does not recover the much larger gap a raw synchronous parse shows (~1.6× even at 1GiB); that gap is
+ * Raising this does not recover the much larger gap a raw synchronous parse shows (~1.6× even at 1GiB). That gap is
  * eaten by the per-row cost of the sequence itself, which both paths pay. It only trades resident memory — a 1GiB
  * source costs ~105MB streamed against ~1121MB read whole — for a difference that no longer measures.
  */
@@ -27,8 +28,8 @@ export interface AdaptiveSourceInit extends AsyncSpliteratorInit {
 	 * Byte length at or below which the whole source is read into memory and parsed synchronously, trading resident
 	 * memory for speed.
 	 *
-	 * Raising it buys nothing measurable and costs memory linearly — the advantage is gone by ~256KiB. Set `0` to always
-	 * stream, which is what you want when a bounded footprint is the reason you reached for this library.
+	 * Raising it produced no measurable gain and costs memory linearly. Measurements show no gain by ~256KiB. Set `0` to
+	 * always stream, which is what you want when a bounded footprint is the reason you reached for this library.
 	 *
 	 * @default 128 KiB ({@linkcode DEFAULT_BULK_THRESHOLD})
 	 */
@@ -58,7 +59,7 @@ async function bulk(bytes: Uint8Array, init: AdaptiveSourceInit): Promise<Iterab
 
 /**
  * Take the delimited rows of `source`, reading it whole when it is small enough to be worth the memory and streaming it
- * otherwise. Returns a sync iterable in the first case and an async one in the second; both satisfy
+ * otherwise. It returns a sync iterable in the first case and an async one in the second. Both satisfy
  * {@linkcode AsyncSequence}.
  */
 export async function openDelimitedRows(

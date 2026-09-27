@@ -6,8 +6,8 @@
 
 /**
  * Merge several async iterables, pulling from **all of them concurrently** and yielding each value as soon as it
- * arrives (completion order, not source order). An error from any source rejects; remaining sources are returned
- * (cancelled) on completion, error, or early break.
+ * arrives in completion order. An error from any source rejects the merge. The merge returns the remaining sources on
+ * completion, error, or early break.
  */
 export async function* mergeAsyncIterators<R>(sources: Array<AsyncIterable<R>>): AsyncIterableIterator<R> {
 	const advance = (it: AsyncIterator<R>) => it.next().then((result) => ({ it, result }))

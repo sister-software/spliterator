@@ -64,10 +64,9 @@ function delimiterAsString(columnDelimiter: CharacterSequence): string | null {
 /**
  * Split one decoded row on `delimiter`, honouring double quotes.
  *
- * Callers MUST have established that `line` contains a quote — {@linkcode splitRowColumns} does, and takes
- * `String.prototype.split` when it does not. That split is not merely the cheaper branch: a quote-free row also cannot
- * have a quoted field, so it needs no unquote pass either, and hoisting the check lets the caller skip both. On a
- * 12-column FCC availability file 96% of rows take that path.
+ * Callers must establish that `line` contains a quote. {@linkcode splitRowColumns} does so and uses
+ * `String.prototype.split` otherwise. A quote-free row cannot have a quoted field, so it needs no unquote pass. The
+ * hoisted check lets the caller skip both operations. On a 12-column FCC availability file 96% of rows take that path.
  */
 function splitQuotedString(line: string, delimiter: string): string[] {
 	const columns: string[] = []
@@ -98,22 +97,22 @@ function splitQuotedString(line: string, delimiter: string): string[] {
  * Split one row's bytes into decoded column strings.
  *
  * Without quote handling this is a plain delimiter scan. With it, a column delimiter inside a double-quoted region does
- * not split, and each field is unquoted/unescaped via {@linkcode decodeColumn}. Empty columns are always preserved — a
+ * not split, and each field is unquoted/unescaped via {@linkcode decodeColumn}. Empty columns are always preserved. A
  * 30-column row must stay 30 columns regardless of the caller's row-level `skipEmpty`.
  *
- * ## Decode the row ONCE
+ * ## Decode the row once
  *
- * The byte-scan path below decodes per COLUMN, and `TextDecoder.decode`'s per-call overhead dominates at column sizes.
+ * The byte-scan path below decodes per column, and `TextDecoder.decode`'s per-call overhead dominates at column sizes.
  * Measured on a real 12-column, ~110-byte CSV row, 2,000,000 iterations:
  *
- *     scan only, no decode                    370 ns/row
+ *     scan only, without decoding             370 ns/row
  *     one decode of the whole row              51 ns/row
  *     scan + twelve per-column decodes      1,234 ns/row   <- the old path
  *     one decode + quote-aware string split   307 ns/row   <- this path
  *
- * Twelve small decodes cost 864 ns/row over the scan they sit on; one decode of the same bytes costs 51. So the string
- * path is not merely cheaper than decoding per column — it is cheaper than the byte scan alone, because `String`'s
- * split and `startsWith` are intrinsics while the scan runs a generator per row.
+ * Twelve small decodes cost 864 ns/row over the scan they sit on. One decode of the same bytes costs 51. The string
+ * path is cheaper than decoding per column. It is also cheaper than the byte scan alone because `String`'s split and
+ * `startsWith` are intrinsics while the scan runs a generator per row.
  *
  * The SIMD scanner does not apply here either way: it engages at `WASM_THRESHOLD`, and a single row is far below it.
  * Row-level splitting, whose haystack is the whole buffer, is where that path earns its keep.
@@ -129,8 +128,8 @@ export function splitRowColumns(
 	if (delimiter !== null) {
 		const line = decoder.decode(row)
 
-		// A row with no quote in it cannot split differently under quote handling, and cannot hold a quoted field
-		// either — so BOTH the walk and the unquote pass are skipped, not just the walk.
+		// A row without a quote cannot split differently under quote handling and cannot hold a quoted field. Skip both
+		// the walk and the unquote pass.
 		if (!enableQuoteHandling || line.indexOf('"') === -1) return line.split(delimiter)
 
 		const columns = splitQuotedString(line, delimiter)
