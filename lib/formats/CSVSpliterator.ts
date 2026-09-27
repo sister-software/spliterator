@@ -144,6 +144,10 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 		byteLength: bytes.byteLength,
 	})
 
+	// Nothing to yield and no header to read: skip the whole-source decode the fast path would otherwise do first. The row
+	// path, which stops after one row here, would yield nothing either.
+	if (plan && take <= 0 && !header) return
+
 	// The scanner loads asynchronously; a synchronous caller sees it only if something awaited `whenReady()` first.
 	const text = plan && CharacterSequence.hasScanner() ? decodeForCellScan(bytes) : null
 

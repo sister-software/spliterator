@@ -440,6 +440,25 @@ describe("columnScan", () => {
 		spy.mockRestore()
 	})
 
+	test("the take: 0 option without a header neither decodes nor scans", async ({ expect }) => {
+		await CharacterSequence.whenReady()
+
+		const scan = vi.spyOn(CharacterSequence, "scanCells")
+		const decode = vi.spyOn(TextDecoder.prototype, "decode")
+
+		try {
+			for (const drop of [0, 1]) {
+				expect(CSVSpliterator.from("a,b\n1,2\n", { header: false, mode: "array", take: 0, drop }).toArray()).toEqual([])
+			}
+
+			expect(scan).not.toHaveBeenCalled()
+			expect(decode).not.toHaveBeenCalled()
+		} finally {
+			scan.mockRestore()
+			decode.mockRestore()
+		}
+	})
+
 	test("a header normalization failure propagates once and is not retried on the row path", async ({ expect }) => {
 		await CharacterSequence.whenReady()
 
