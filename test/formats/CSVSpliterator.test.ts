@@ -277,10 +277,10 @@ test("a column delimiter that does not round-trip through UTF-8 takes the byte p
 		return out
 	}
 
-	const source = new Uint8Array([...row("a", "", '"x\xFF y"', ""), 0x0a, ...row("1", "2", "3", "4"), 0x0a])
+	const source = new Uint8Array([...row("a", "", '"x\u00FF y"', ""), 0x0a, ...row("1", "2", "3", "4"), 0x0a])
 
 	expect(CSVSpliterator.from(source, { columnDelimiter: delimiter, header: false, mode: "array" }).toArray()).toEqual([
-		["a", "", "x\xFF y", ""],
+		["a", "", "x\u00FF y", ""],
 		["1", "2", "3", "4"],
 	])
 
@@ -292,7 +292,7 @@ test("a column delimiter that does not round-trip through UTF-8 takes the byte p
 			enableQuoteHandling: false,
 		}).toArray()
 	).toEqual([
-		["a", "", '"x\xFF y"', ""],
+		["a", "", '"x\u00FF y"', ""],
 		["1", "2", "3", "4"],
 	])
 })
