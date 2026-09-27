@@ -40,6 +40,7 @@ Inputs the spec implies but no task's tests would otherwise exercise, most likel
 ### Task 1: Kernel export `scan_csv_cells`
 
 **Files:**
+
 - Modify: `wasm/src/lib.rs` (append after `write_range_scan_state`, ~line 302)
 - Modify: `lib/core/wasm_module.ts` (types + `loadWasmModule` exports)
 - Generated: `lib/core/wasm_base64.ts` via `wasm/build.sh`
@@ -47,6 +48,7 @@ Inputs the spec implies but no task's tests would otherwise exercise, most likel
 - Test: `test/core/wasm.test.ts`
 
 **Interfaces:**
+
 - Consumes: the existing SIMD helpers and memory layout in `lib.rs`; `WasmDelimiterScanner` in `wasm_module.ts`.
 - Produces: kernel export `scan_csv_cells(ho, hl, rowDelimiter, columnDelimiter, quote, crlf, insideQuotes, cellStartUnits, cellHasQuote, previousByte, ro, mc) -> count`; TypeScript type `WasmScanCsvCells`; `WasmDelimiterScanner.scanCsvCells`; constants `CELL_RESULT_HEADER = 5`, `CELL_RESULT_STRIDE = 3`, flags `CELL_FLAG_ROW_END = 1`, `CELL_FLAG_HAS_QUOTE = 2` exported from `wasm_module.ts`.
 
@@ -57,7 +59,13 @@ The kernel is reachable only through the loaded module, which `CharacterSequence
 Add to `test/core/wasm.test.ts`, inside the existing `describe("WASM SIMD scanner", ...)`:
 
 ```ts
-import { CELL_FLAG_HAS_QUOTE, CELL_FLAG_ROW_END, CELL_RESULT_HEADER, CELL_RESULT_STRIDE, loadWasmModule } from "../../out/lib/core/wasm_module.js"
+import {
+	CELL_FLAG_HAS_QUOTE,
+	CELL_FLAG_ROW_END,
+	CELL_RESULT_HEADER,
+	CELL_RESULT_STRIDE,
+	loadWasmModule,
+} from "../../out/lib/core/wasm_module.js"
 
 describe("scan_csv_cells", () => {
 	/**
@@ -82,11 +90,25 @@ describe("scan_csv_cells", () => {
 		const resultsOffset = Math.ceil(bytes.length / 4) * 4
 		const needed = resultsOffset + (CELL_RESULT_HEADER + maxCells * CELL_RESULT_STRIDE) * 4
 
-		if (needed > wasm.memory.buffer.byteLength) wasm.memory.grow(Math.ceil((needed - wasm.memory.buffer.byteLength) / 65_536))
+		if (needed > wasm.memory.buffer.byteLength)
+			wasm.memory.grow(Math.ceil((needed - wasm.memory.buffer.byteLength) / 65_536))
 
 		new Uint8Array(wasm.memory.buffer, 0, bytes.length).set(bytes)
 
-		const count = wasm.scanCsvCells(0, bytes.length, 0x0a, 0x2c, quote, crlf, insideQuotes, cellStartUnits, cellHasQuote, previousByte, resultsOffset, maxCells)
+		const count = wasm.scanCsvCells(
+			0,
+			bytes.length,
+			0x0a,
+			0x2c,
+			quote,
+			crlf,
+			insideQuotes,
+			cellStartUnits,
+			cellHasQuote,
+			previousByte,
+			resultsOffset,
+			maxCells
+		)
 		const block = new Int32Array(wasm.memory.buffer, resultsOffset, CELL_RESULT_HEADER + count * CELL_RESULT_STRIDE)
 		const cells: Array<[number, number, number]> = []
 
@@ -96,7 +118,14 @@ describe("scan_csv_cells", () => {
 			cells.push([block[base]!, block[base + 1]!, block[base + 2]!])
 		}
 
-		return { cursor: block[0]!, units: block[1]!, insideQuotes: block[2]!, cellStartUnits: block[3]!, cellHasQuote: block[4]!, cells }
+		return {
+			cursor: block[0]!,
+			units: block[1]!,
+			insideQuotes: block[2]!,
+			cellStartUnits: block[3]!,
+			cellHasQuote: block[4]!,
+			cells,
+		}
 	}
 
 	test("emits cells with row-end flags and leaves the tail open", async () => {
@@ -543,10 +572,12 @@ git commit -m "WASM: scan_csv_cells, a resumable single-pass CSV cell scan in UT
 ### Task 2: `CharacterSequence.scanCells` wrapper
 
 **Files:**
+
 - Modify: `lib/core/CharacterSequence.ts` (add a static method after `scanRanges`)
 - Test: `test/core/wasm.test.ts`
 
 **Interfaces:**
+
 - Consumes: `WasmDelimiterScanner.scanCsvCells`, `CELL_RESULT_*`, `WasmCellScanResult` (Task 1); private helpers `ensureWasmCapacity`, `alignTo4`, `CharacterSequence.#wasmScanner`, `#ensureWasm`, `#wasmHaystack`.
 - Produces:
 
@@ -586,7 +617,13 @@ describe("CharacterSequence.scanCells", () => {
 		const first = CharacterSequence.scanCells(bytes, initial, 5, options)!
 
 		expect(Array.from(first.cells)).toEqual([0, 1, 0, 2, 3, CELL_FLAG_ROW_END])
-		expect(first).toMatchObject({ scanCursor: 5, units: 4, insideQuotes: false, cellStartUnits: 4, cellHasQuote: false })
+		expect(first).toMatchObject({
+			scanCursor: 5,
+			units: 4,
+			insideQuotes: false,
+			cellStartUnits: 4,
+			cellHasQuote: false,
+		})
 
 		const second = CharacterSequence.scanCells(bytes, first, bytes.length, options)!
 
@@ -636,7 +673,14 @@ describe("CharacterSequence.scanCells", () => {
 	})
 
 	test("returns null for an empty window", () => {
-		expect(CharacterSequence.scanCells(encoder.encode("a"), { ...initial, scanCursor: 1, units: 1, cellStartUnits: 1 }, 1, options)).toBeNull()
+		expect(
+			CharacterSequence.scanCells(
+				encoder.encode("a"),
+				{ ...initial, scanCursor: 1, units: 1, cellStartUnits: 1 },
+				1,
+				options
+			)
+		).toBeNull()
 	})
 })
 ```
@@ -752,11 +796,13 @@ git commit -m "CharacterSequence.scanCells: owned, rebased batches from the CSV 
 ### Task 3: `scanCsvCells` row generator with a String oracle
 
 **Files:**
+
 - Create: `lib/formats/csv-cells.ts`
 - Modify: `lib/formats/csv-columns.ts` (export the shared cell normalizer; `splitRowColumns` uses it)
 - Test: `test/formats/csv-cells.test.ts`
 
 **Interfaces:**
+
 - Consumes: `CharacterSequence.scanCells`, `CellScanState`, `CellScanOptions` (Task 2); `CELL_FLAG_*`, `CELL_RESULT_STRIDE` (Task 1).
 - Produces:
 
@@ -837,7 +883,16 @@ function fast(text: string, opts: Case = {}, windowSize = 7, maxCells = 3): stri
 	const decoded = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)
 
 	return Array.from(
-		scanCsvCells(bytes, decoded, { rowDelimiter: 0x0a, columnDelimiter, enableQuoteHandling, crlf, trim, skipEmpty, windowSize, maxCells })
+		scanCsvCells(bytes, decoded, {
+			rowDelimiter: 0x0a,
+			columnDelimiter,
+			enableQuoteHandling,
+			crlf,
+			trim,
+			skipEmpty,
+			windowSize,
+			maxCells,
+		})
 	)
 }
 
@@ -915,7 +970,9 @@ describe("scanCsvCells parity with the row path", () => {
 
 		for (const crlf of [true, false]) {
 			for (let windowSize = 1; windowSize <= text.length + 1; windowSize++) {
-				expect(fast(text, { crlf }, windowSize, 2), `crlf ${crlf} window ${windowSize}`).toEqual(reference(text, { crlf }))
+				expect(fast(text, { crlf }, windowSize, 2), `crlf ${crlf} window ${windowSize}`).toEqual(
+					reference(text, { crlf })
+				)
 			}
 		}
 	})
@@ -1152,7 +1209,6 @@ export function* scanCsvCells(source: Uint8Array, text: string, init: CsvCellSca
 		yield [""]
 	}
 }
-
 ```
 
 One subtlety in the emptiness test: `cellEnd` is already CRLF-trimmed by the kernel, and `rowStart` is the untrimmed start, so `a\r\n` gives `cellEnd === rowStart + 1`, not empty, and `\r\n` alone gives `cellEnd === rowStart`, empty, exactly as the row path's byte range would be.
@@ -1179,11 +1235,13 @@ git commit -m "csv-cells: rows from one decode and one kernel pass, parity-teste
 ### Task 4: Eligibility and the sync path (`columnScan` option, `CSVSpliterator.from`)
 
 **Files:**
+
 - Modify: `lib/formats/CSVSpliterator.ts` (option, `splitRows`)
 - Modify: `lib/formats/csv-cells.ts` (add `cellScanEligibility`)
 - Test: `test/formats/CSVSpliterator.test.ts`
 
 **Interfaces:**
+
 - Consumes: `scanCsvCells`, `CsvCellScanInit` (Task 3); `CharacterSequence.scanCells` (Task 2); `normalizeCharacterInput`.
 - Produces:
 
@@ -1262,7 +1320,12 @@ describe("columnScan", () => {
 				columnScan,
 				drop: 1,
 				take: 2,
-				transformers: { age: (v) => { calls[columnScan]++; return Number(v) } },
+				transformers: {
+					age: (v) => {
+						calls[columnScan]++
+						return Number(v)
+					},
+				},
 			}).toArray()
 
 			expect(out).toEqual([
@@ -1279,7 +1342,10 @@ describe("columnScan", () => {
 
 		const result = both("a,b\n1,2\n", { header: false, mode: "array" })
 
-		expect(result.auto).toEqual([["a", "b"], ["1", "2"]])
+		expect(result.auto).toEqual([
+			["a", "b"],
+			["1", "2"],
+		])
 		expect(result.fastPathRan).toBe(true)
 	})
 
@@ -1290,7 +1356,10 @@ describe("columnScan", () => {
 		const view = backing.subarray(4, backing.length - 4)
 		const result = both(view, { header: false, mode: "array" })
 
-		expect(result.auto).toEqual([["a", "b"], ["1", "2"]])
+		expect(result.auto).toEqual([
+			["a", "b"],
+			["1", "2"],
+		])
 		expect(result.fastPathRan).toBe(true)
 	})
 
@@ -1355,20 +1424,30 @@ describe("columnScan", () => {
 Also add, in the same describe, the isolated-process test that the scanner-unavailable case takes the row path with identical output:
 
 ```ts
-	test("without the scanner loaded, from() takes the row path in a fresh process", async ({ expect }) => {
-		const { execFile } = await import("node:child_process")
-		const { promisify } = await import("node:util")
-		const script = `
+test("without the scanner loaded, from() takes the row path in a fresh process", async ({ expect }) => {
+	const { execFile } = await import("node:child_process")
+	const { promisify } = await import("node:util")
+	const script = `
 			import { CSVSpliterator, CharacterSequence } from "${new URL("../../out/index.js", import.meta.url).pathname}"
 			const before = CSVSpliterator.from("a,b\\n1,2\\n", { header: false, mode: "array" }).toArray()
 			const ready = await CharacterSequence.whenReady()
 			const after = CSVSpliterator.from("a,b\\n1,2\\n", { header: false, mode: "array" }).toArray()
 			console.log(JSON.stringify({ before, after, ready }))
 		`
-		const { stdout } = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", script])
+	const { stdout } = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", script])
 
-		expect(JSON.parse(stdout)).toEqual({ before: [["a", "b"], ["1", "2"]], after: [["a", "b"], ["1", "2"]], ready: true })
+	expect(JSON.parse(stdout)).toEqual({
+		before: [
+			["a", "b"],
+			["1", "2"],
+		],
+		after: [
+			["a", "b"],
+			["1", "2"],
+		],
+		ready: true,
 	})
+})
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1463,55 +1542,55 @@ Add imports: `normalizeCharacterInput` from `../core/CharacterSequence.js`; `cel
 In `splitRows`, destructure `columnScan = "auto"` alongside `trim = true`. After `const columnDelimiter = new CharacterSequence(...)`, before `const rows = Spliterator.fromSync(...)`, insert the fast branch. It must not touch `source` until first pull, which is already true because `splitRows` is a generator:
 
 ```ts
-	const bytes = normalizeCharacterInput(source)
-	const rowDelimiter = new CharacterSequence(rowInit.delimiter ?? Delimiters.LineFeed)
-	const plan = cellScanEligibility({
-		columnScan,
-		rowDelimiter,
-		columnDelimiter,
+const bytes = normalizeCharacterInput(source)
+const rowDelimiter = new CharacterSequence(rowInit.delimiter ?? Delimiters.LineFeed)
+const plan = cellScanEligibility({
+	columnScan,
+	rowDelimiter,
+	columnDelimiter,
+	enableQuoteHandling,
+	position: rowInit.position,
+	byteLength: bytes.byteLength,
+})
+// The scanner loads asynchronously; a synchronous caller sees it only if something awaited `whenReady()` first.
+const text = plan && CharacterSequence.hasScanner() ? decodeForCellScan(bytes) : null
+
+if (plan && text !== null) {
+	const cellRows = scanCsvCells(bytes, text, {
+		rowDelimiter: plan.rowDelimiter,
+		columnDelimiter: plan.columnDelimiter,
 		enableQuoteHandling,
-		position: rowInit.position,
-		byteLength: bytes.byteLength,
+		crlf,
+		trim,
+		skipEmpty: rowInit.skipEmpty ?? true,
 	})
-	// The scanner loads asynchronously; a synchronous caller sees it only if something awaited `whenReady()` first.
-	const text = plan && CharacterSequence.hasScanner() ? decodeForCellScan(bytes) : null
 
-	if (plan && text !== null) {
-		const cellRows = scanCsvCells(bytes, text, {
-			rowDelimiter: plan.rowDelimiter,
-			columnDelimiter: plan.columnDelimiter,
-			enableQuoteHandling,
-			crlf,
-			trim,
-			skipEmpty: rowInit.skipEmpty ?? true,
-		})
+	if (header) {
+		const result = cellRows.next()
 
-		if (header) {
-			const result = cellRows.next()
+		if (result.done) return
 
-			if (result.done) return
+		const headers = normalizeKeys ? normalizeColumnNames(result.value) : result.value
 
-			const headers = normalizeKeys ? normalizeColumnNames(result.value) : result.value
-
-			transformers = bindTransformers(headers, transformersInput)
-		}
-
-		for (const columns of cellRows) {
-			if (yieldCount < drop) {
-				yieldCount++
-
-				continue
-			}
-
-			if (yieldCount >= yieldLimit) break
-
-			yield emitter ? emitter(columns, transformers) : columns
-
-			yieldCount++
-		}
-
-		return
+		transformers = bindTransformers(headers, transformersInput)
 	}
+
+	for (const columns of cellRows) {
+		if (yieldCount < drop) {
+			yieldCount++
+
+			continue
+		}
+
+		if (yieldCount >= yieldLimit) break
+
+		yield emitter ? emitter(columns, transformers) : columns
+
+		yieldCount++
+	}
+
+	return
+}
 ```
 
 Pass `bytes` rather than `source` to `Spliterator.fromSync` below it so the normalization is done once.
@@ -1551,10 +1630,12 @@ git commit -m "CSVSpliterator.from: columnScan auto takes the bulk cell scan whe
 ### Task 5: Adaptive-source bulk parser hook
 
 **Files:**
+
 - Modify: `lib/io/adaptive-source.ts`
 - Test: `test/io/adaptive-source.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces:
 
@@ -1603,8 +1684,12 @@ describe("bulk parser hook", () => {
 	test("an empty stream and a single exhausted chunk take the bulk parser; two chunks stream", async () => {
 		const bytes = encoder.encode("a,b\nc,d\n")
 
-		expect(Array.from((await openDelimitedRows(chunkedSource(new Uint8Array(0), 4), BULK, marker)) as Iterable<string>)).toEqual(["bulk:0"])
-		expect(Array.from((await openDelimitedRows(chunkedSource(bytes, 1024), BULK, marker)) as Iterable<string>)).toEqual(["bulk:8"])
+		expect(
+			Array.from((await openDelimitedRows(chunkedSource(new Uint8Array(0), 4), BULK, marker)) as Iterable<string>)
+		).toEqual(["bulk:0"])
+		expect(Array.from((await openDelimitedRows(chunkedSource(bytes, 1024), BULK, marker)) as Iterable<string>)).toEqual(
+			["bulk:8"]
+		)
 
 		const streamed = await openDelimitedRows(chunkedSource(bytes, 4), BULK, marker)
 
@@ -1659,7 +1744,11 @@ export type BulkParser<R> = (bytes: Uint8Array, init: AdaptiveSourceInit) => Ite
 Change `bulk` to take and use it:
 
 ```ts
-async function bulk<R>(bytes: Uint8Array, init: AdaptiveSourceInit, bulkParser?: BulkParser<R>): Promise<Iterable<Uint8Array | R>> {
+async function bulk<R>(
+	bytes: Uint8Array,
+	init: AdaptiveSourceInit,
+	bulkParser?: BulkParser<R>
+): Promise<Iterable<Uint8Array | R>> {
 	await CharacterSequence.whenReady()
 
 	return bulkParser ? bulkParser(bytes, init) : Spliterator.fromSync(bytes, init)
@@ -1688,10 +1777,12 @@ git commit -m "openDelimitedRows: optional bulk parser for the whole-source bran
 ### Task 6: The async bulk path (`CSVSpliterator.fromAsync`)
 
 **Files:**
+
 - Modify: `lib/formats/CSVSpliterator.ts` (`fromAsync`)
 - Test: `test/formats/CSVSpliterator.test.ts`
 
 **Interfaces:**
+
 - Consumes: `openDelimitedRows(source, init, bulkParser)` (Task 5); `cellScanEligibility`, `decodeForCellScan`, `scanCsvCells` (Tasks 3–4).
 - Produces: no new exports. `fromAsync`'s row op accepts `Uint8Array | string[]`: a `string[]` is already split cells from the bulk parser; a `Uint8Array` is a row from the streaming engine or the row-path fallback.
 
@@ -1700,128 +1791,136 @@ git commit -m "openDelimitedRows: optional bulk parser for the whole-source bran
 Add to the `describe("columnScan", ...)` block from Task 4:
 
 ```ts
-	test("the async bulk branch takes the fast path and matches streaming and rows", async ({ expect }) => {
-		const spy = vi.spyOn(CharacterSequence, "scanCells")
-		const auto = await CSVSpliterator.fromAsync(fixturePath).toArray()
+test("the async bulk branch takes the fast path and matches streaming and rows", async ({ expect }) => {
+	const spy = vi.spyOn(CharacterSequence, "scanCells")
+	const auto = await CSVSpliterator.fromAsync(fixturePath).toArray()
 
-		expect(spy).toHaveBeenCalled()
-		spy.mockClear()
+	expect(spy).toHaveBeenCalled()
+	spy.mockClear()
 
-		const rows = await CSVSpliterator.fromAsync(fixturePath, { columnScan: "rows" }).toArray()
-		const streamed = await CSVSpliterator.fromAsync(fixturePath, { bulkThreshold: 0 }).toArray()
+	const rows = await CSVSpliterator.fromAsync(fixturePath, { columnScan: "rows" }).toArray()
+	const streamed = await CSVSpliterator.fromAsync(fixturePath, { bulkThreshold: 0 }).toArray()
 
-		expect(spy).not.toHaveBeenCalled()
-		spy.mockRestore()
+	expect(spy).not.toHaveBeenCalled()
+	spy.mockRestore()
 
-		expect(auto).toEqual(rows)
-		expect(auto).toEqual(streamed)
-	})
+	expect(auto).toEqual(rows)
+	expect(auto).toEqual(streamed)
+})
 
-	test("an unsized single-chunk stream takes the fast path; a multi-chunk stream does not", async ({ expect }) => {
-		const encoder = new TextEncoder()
-		const bytes = encoder.encode("name,age\nAda,36\nBob,41\n")
-		const one = async function* () {
-			yield bytes
-		}
-		const many = async function* () {
-			yield bytes.subarray(0, 10)
-			yield bytes.subarray(10)
-		}
-		const spy = vi.spyOn(CharacterSequence, "scanCells")
+test("an unsized single-chunk stream takes the fast path; a multi-chunk stream does not", async ({ expect }) => {
+	const encoder = new TextEncoder()
+	const bytes = encoder.encode("name,age\nAda,36\nBob,41\n")
+	const one = async function* () {
+		yield bytes
+	}
+	const many = async function* () {
+		yield bytes.subarray(0, 10)
+		yield bytes.subarray(10)
+	}
+	const spy = vi.spyOn(CharacterSequence, "scanCells")
 
-		expect(await CSVSpliterator.fromAsync(one()).toArray()).toEqual([
-			{ name: "Ada", age: "36" },
-			{ name: "Bob", age: "41" },
-		])
-		expect(spy).toHaveBeenCalled()
-		spy.mockClear()
+	expect(await CSVSpliterator.fromAsync(one()).toArray()).toEqual([
+		{ name: "Ada", age: "36" },
+		{ name: "Bob", age: "41" },
+	])
+	expect(spy).toHaveBeenCalled()
+	spy.mockClear()
 
-		expect(await CSVSpliterator.fromAsync(many()).toArray()).toEqual([
-			{ name: "Ada", age: "36" },
-			{ name: "Bob", age: "41" },
-		])
-		expect(spy).not.toHaveBeenCalled()
-		spy.mockRestore()
-	})
+	expect(await CSVSpliterator.fromAsync(many()).toArray()).toEqual([
+		{ name: "Ada", age: "36" },
+		{ name: "Bob", age: "41" },
+	])
+	expect(spy).not.toHaveBeenCalled()
+	spy.mockRestore()
+})
 
-	test("drop and take on the async bulk path keep fromAsync's callback order", async ({ expect }) => {
-		const encoder = new TextEncoder()
-		const source = async function* () {
-			yield encoder.encode("n\n1\n2\n3\n4\n")
-		}
-		const seen: string[] = []
-		const out = await CSVSpliterator.fromAsync(source(), {
-			drop: 1,
-			take: 2,
-			transformers: { n: (v) => { seen.push(v); return Number(v) } },
-		}).toArray()
-
-		expect(out).toEqual([{ n: 2 }, { n: 3 }])
-		// fromAsync maps before it drops, so the dropped row's transformer still ran, as it does today.
-		expect(seen).toEqual(["1", "2", "3"])
-	})
-
-	test("take(0) leaves a deferred async source unopened", async ({ expect }) => {
-		let opened = false
-		const source = {
-			async *[Symbol.asyncIterator]() {
-				opened = true
-				yield new TextEncoder().encode("a,b\n1,2\n")
+test("drop and take on the async bulk path keep fromAsync's callback order", async ({ expect }) => {
+	const encoder = new TextEncoder()
+	const source = async function* () {
+		yield encoder.encode("n\n1\n2\n3\n4\n")
+	}
+	const seen: string[] = []
+	const out = await CSVSpliterator.fromAsync(source(), {
+		drop: 1,
+		take: 2,
+		transformers: {
+			n: (v) => {
+				seen.push(v)
+				return Number(v)
 			},
-		}
+		},
+	}).toArray()
 
-		expect(await CSVSpliterator.fromAsync(source, { header: false, mode: "array" }).take(0).toArray()).toEqual([])
-		expect(opened).toBe(false)
-	})
+	expect(out).toEqual([{ n: 2 }, { n: 3 }])
+	// fromAsync maps before it drops, so the dropped row's transformer still ran, as it does today.
+	expect(seen).toEqual(["1", "2", "3"])
+})
 
-	test("invalid UTF-8 on the async bulk path falls back to rows", async ({ expect }) => {
-		const source = async function* () {
-			yield new Uint8Array([0x61, 0x2c, 0xff, 0x0a])
-		}
-		const spy = vi.spyOn(CharacterSequence, "scanCells")
+test("take(0) leaves a deferred async source unopened", async ({ expect }) => {
+	let opened = false
+	const source = {
+		async *[Symbol.asyncIterator]() {
+			opened = true
+			yield new TextEncoder().encode("a,b\n1,2\n")
+		},
+	}
 
-		expect(await CSVSpliterator.fromAsync(source(), { header: false, mode: "array" }).toArray()).toEqual([["a", "�"]])
-		expect(spy).not.toHaveBeenCalled()
-		spy.mockRestore()
-	})
+	expect(await CSVSpliterator.fromAsync(source, { header: false, mode: "array" }).take(0).toArray()).toEqual([])
+	expect(opened).toBe(false)
+})
 
-	test("a throwing transformer on the bulk path propagates once", async ({ expect }) => {
-		let calls = 0
-		let closed = false
-		const source = {
-			async *[Symbol.asyncIterator]() {
-				try {
-					yield new TextEncoder().encode("a,b\n1,2\n3,4\n")
-				} finally {
-					closed = true
-				}
-			},
-		}
+test("invalid UTF-8 on the async bulk path falls back to rows", async ({ expect }) => {
+	const source = async function* () {
+		yield new Uint8Array([0x61, 0x2c, 0xff, 0x0a])
+	}
+	const spy = vi.spyOn(CharacterSequence, "scanCells")
 
-		await expect(
-			CSVSpliterator.fromAsync(source, {
-				transformers: {
-					a: () => {
-						calls++
-						throw new Error("boom")
-					},
+	expect(await CSVSpliterator.fromAsync(source(), { header: false, mode: "array" }).toArray()).toEqual([["a", "�"]])
+	expect(spy).not.toHaveBeenCalled()
+	spy.mockRestore()
+})
+
+test("a throwing transformer on the bulk path propagates once", async ({ expect }) => {
+	let calls = 0
+	let closed = false
+	const source = {
+		async *[Symbol.asyncIterator]() {
+			try {
+				yield new TextEncoder().encode("a,b\n1,2\n3,4\n")
+			} finally {
+				closed = true
+			}
+		},
+	}
+
+	await expect(
+		CSVSpliterator.fromAsync(source, {
+			transformers: {
+				a: () => {
+					calls++
+					throw new Error("boom")
 				},
-			}).toArray()
-		).rejects.toThrow("boom")
-		expect(calls).toBe(1)
-		expect(closed).toBe(true)
-	})
+			},
+		}).toArray()
+	).rejects.toThrow("boom")
+	expect(calls).toBe(1)
+	expect(closed).toBe(true)
+})
 
-	test("TSV and PSV inherit the fast path through their column delimiter", async ({ expect }) => {
-		const spy = vi.spyOn(CharacterSequence, "scanCells")
-		const source = async function* () {
-			yield new TextEncoder().encode("a\tb\n1\t2\n")
-		}
+test("TSV and PSV inherit the fast path through their column delimiter", async ({ expect }) => {
+	const spy = vi.spyOn(CharacterSequence, "scanCells")
+	const source = async function* () {
+		yield new TextEncoder().encode("a\tb\n1\t2\n")
+	}
 
-		expect(await TSVSpliterator.fromAsync(source(), { header: false, mode: "array" }).toArray()).toEqual([["a", "b"], ["1", "2"]])
-		expect(spy).toHaveBeenCalled()
-		spy.mockRestore()
-	})
+	expect(await TSVSpliterator.fromAsync(source(), { header: false, mode: "array" }).toArray()).toEqual([
+		["a", "b"],
+		["1", "2"],
+	])
+	expect(spy).toHaveBeenCalled()
+	spy.mockRestore()
+})
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1834,78 +1933,78 @@ Expected: FAIL; the spy is never called on the bulk branch.
 In `fromAsync`, destructure `columnScan = "auto"` with the other options. Replace the body from `const openRows = ...` to the end with:
 
 ```ts
-		const rowDelimiter = new CharacterSequence(rowInit.delimiter ?? Delimiters.LineFeed)
-		const skipEmpty = rowInit.skipEmpty ?? true
+const rowDelimiter = new CharacterSequence(rowInit.delimiter ?? Delimiters.LineFeed)
+const skipEmpty = rowInit.skipEmpty ?? true
 
-		/**
-		 * The bulk branch: eligibility, then the fatal decode as the last gate. Invalid UTF-8 hands the same bytes to
-		 * the row engine, which the map op below still understands. Runs after `whenReady`, on the first pull.
-		 */
-		const bulkParser = (bytes: Uint8Array): Iterable<Uint8Array | string[]> => {
-			const plan = cellScanEligibility({
-				columnScan,
-				rowDelimiter,
-				columnDelimiter,
-				enableQuoteHandling,
-				position: rowInit.position,
-				byteLength: bytes.byteLength,
-			})
-			const text = plan && CharacterSequence.hasScanner() ? decodeForCellScan(bytes) : null
+/**
+ * The bulk branch: eligibility, then the fatal decode as the last gate. Invalid UTF-8 hands the same bytes to
+ * the row engine, which the map op below still understands. Runs after `whenReady`, on the first pull.
+ */
+const bulkParser = (bytes: Uint8Array): Iterable<Uint8Array | string[]> => {
+	const plan = cellScanEligibility({
+		columnScan,
+		rowDelimiter,
+		columnDelimiter,
+		enableQuoteHandling,
+		position: rowInit.position,
+		byteLength: bytes.byteLength,
+	})
+	const text = plan && CharacterSequence.hasScanner() ? decodeForCellScan(bytes) : null
 
-			if (!plan || text === null) {
-				return Spliterator.fromSync(bytes, { ...rowInit, crlf, enableQuoteHandling })
-			}
+	if (!plan || text === null) {
+		return Spliterator.fromSync(bytes, { ...rowInit, crlf, enableQuoteHandling })
+	}
 
-			return scanCsvCells(bytes, text, {
-				rowDelimiter: plan.rowDelimiter,
-				columnDelimiter: plan.columnDelimiter,
-				enableQuoteHandling,
-				crlf,
-				trim,
-				skipEmpty,
-			})
-		}
+	return scanCsvCells(bytes, text, {
+		rowDelimiter: plan.rowDelimiter,
+		columnDelimiter: plan.columnDelimiter,
+		enableQuoteHandling,
+		crlf,
+		trim,
+		skipEmpty,
+	})
+}
 
-		const toColumns = (row: Uint8Array | string[]): string[] =>
-			Array.isArray(row) ? row : splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling, trim)
+const toColumns = (row: Uint8Array | string[]): string[] =>
+	Array.isArray(row) ? row : splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling, trim)
 
-		const openRows = async (): Promise<AsyncIterable<Uint8Array> | Iterable<Uint8Array | string[]>> => {
-			// Quote handling applies at both levels: rows must not split on newlines inside quotes,
-			// columns must not split on quoted column delimiters.
-			const rows = await openDelimitedRows(source, { ...rowInit, crlf, enableQuoteHandling }, bulkParser)
+const openRows = async (): Promise<AsyncIterable<Uint8Array> | Iterable<Uint8Array | string[]>> => {
+	// Quote handling applies at both levels: rows must not split on newlines inside quotes,
+	// columns must not split on quoted column delimiters.
+	const rows = await openDelimitedRows(source, { ...rowInit, crlf, enableQuoteHandling }, bulkParser)
 
-			if (header) {
-				// Both engines return `this` from their iterator method. Consuming the header row here advances the cursor the
-				// row ops will read. Returning `rows` afterwards resumes at row two rather than row one.
-				const iterator = Symbol.asyncIterator in rows ? rows[Symbol.asyncIterator]() : rows[Symbol.iterator]()
-				const result = await iterator.next()
+	if (header) {
+		// Both engines return `this` from their iterator method. Consuming the header row here advances the cursor the
+		// row ops will read. Returning `rows` afterwards resumes at row two rather than row one.
+		const iterator = Symbol.asyncIterator in rows ? rows[Symbol.asyncIterator]() : rows[Symbol.iterator]()
+		const result = await iterator.next()
 
-				if (result.done) return rows
+		if (result.done) return rows
 
-				const columns = toColumns(result.value)
-				const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
+		const columns = toColumns(result.value)
+		const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
 
-				transformers = bindTransformers(headers, transformersInput)
-			}
+		transformers = bindTransformers(headers, transformersInput)
+	}
 
-			return rows
-		}
+	return rows
+}
 
-		let sequence: AsyncSequence<unknown> = AsyncSequence.from<Uint8Array | string[]>(openRows).map((row) => {
-			const columns = toColumns(row)
+let sequence: AsyncSequence<unknown> = AsyncSequence.from<Uint8Array | string[]>(openRows).map((row) => {
+	const columns = toColumns(row)
 
-			return emitter ? emitter(columns, transformers) : columns
-		})
+	return emitter ? emitter(columns, transformers) : columns
+})
 
-		if (drop > 0) {
-			sequence = sequence.drop(drop)
-		}
+if (drop > 0) {
+	sequence = sequence.drop(drop)
+}
 
-		if (Number.isFinite(take)) {
-			sequence = sequence.take(take)
-		}
+if (Number.isFinite(take)) {
+	sequence = sequence.take(take)
+}
 
-		return sequence
+return sequence
 ```
 
 The generator returned by `scanCsvCells` returns `this` from `[Symbol.iterator]()`, so the header consumption above advances it exactly as it advances `Spliterator`. `Spliterator.fromSync` here receives the same `rowInit` the default parser would have received; `openDelimitedRows` passes `init` to the parser, but the CSV parser closes over its own options and ignores that argument.
@@ -1932,11 +2031,13 @@ git commit -m "CSVSpliterator.fromAsync: the bulk branch takes the cell scan"
 ### Task 7: Benchmark, default gate, docs
 
 **Files:**
+
 - Create: `benchmarks/csv-column-scan.ts`
 - Modify: `AGENTS.md` (architecture entry for CSV, gotchas, exports section unchanged)
 - Modify: `README.md` if it documents CSV options (check with `grep -n "enableQuoteHandling" README.md`)
 
 **Interfaces:**
+
 - Consumes: the finished feature.
 - Produces: numbers in AGENTS.md; the decision on the default.
 
@@ -1971,7 +2072,12 @@ function csv(rows: number, quoted: boolean, unicode: boolean): Uint8Array {
 	const lines = ["id,name,city,state,zip"]
 
 	for (let i = 0; i < rows; i++) {
-		const name = quoted && i % 4 === 0 ? `"Lovelace, Ada ""${i}"""` : unicode && i % 3 === 0 ? `Ada Lovelacé 한 😀 ${i}` : `Ada Lovelace ${i}`
+		const name =
+			quoted && i % 4 === 0
+				? `"Lovelace, Ada ""${i}"""`
+				: unicode && i % 3 === 0
+					? `Ada Lovelacé 한 😀 ${i}`
+					: `Ada Lovelace ${i}`
 
 		lines.push(`${i},${name},London,LDN,${10000 + (i % 90000)}`)
 	}
