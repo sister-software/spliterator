@@ -266,18 +266,21 @@ jobs:
             npm publish --provenance --access public
           fi
 
-      # The registry's read replicas lag the publish by a few seconds — a single `npm view` taken
-      # 1.9 s after the 6.4.0 publish still reported 6.3.1. Poll rather than sample once.
+      # The registry processes a publish asynchronously — `npm publish` returns "Your package is being
+      # processed and may take a few minutes to become available", and a single `npm view` taken 1.9 s
+      # after the 6.4.0 publish still reported 6.3.1. The 7.15.0 publish took over 60 s to appear and
+      # failed this step at the old 12 × 5 s budget while the package was in fact live. Poll for up to
+      # 10 minutes rather than sample once.
       - name: Verify the published version
         if: ${{ !inputs.dry_run }}
         env:
           EXPECTED: ${{ steps.version.outputs.version }}
         run: |
-          for attempt in $(seq 1 12); do
+          for attempt in $(seq 1 40); do
             PUBLISHED="$(npm view spliterator version 2>/dev/null || true)"
             echo "attempt ${attempt}: npm reports '${PUBLISHED}', expected ${EXPECTED}"
             test "${PUBLISHED}" = "${EXPECTED}" && exit 0
-            sleep 5
+            sleep 15
           done
-          echo "::error::npm still reports '${PUBLISHED}' after 60s; expected ${EXPECTED}"
+          echo "::error::npm still reports '${PUBLISHED}' after 10 minutes; expected ${EXPECTED}"
           exit 1
