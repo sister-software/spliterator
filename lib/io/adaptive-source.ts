@@ -37,6 +37,12 @@ export interface AdaptiveSourceInit extends AsyncSpliteratorInit {
 	bulkThreshold?: number
 }
 
+/**
+ * Parses a wholly in-memory source on the bulk branch, after {@linkcode CharacterSequence.whenReady} has resolved.
+ * `CSVSpliterator` passes the cell scan here; the default is the synchronous row engine.
+ */
+export type BulkParser<R> = (bytes: Uint8Array, init: AdaptiveSourceInit) => Iterable<R>
+
 function isChunkIterator(source: unknown): source is AsyncChunkIterator {
 	return typeof source === "object" && source !== null && Symbol.asyncIterator in source
 }
@@ -52,10 +58,14 @@ function toBytes(chunk: Uint8Array | string): Uint8Array {
  * synchronous caller normally completes before it is available and silently uses the JS scanner. Reaching the sync
  * engine through an async path is the one place that can be avoided — worth ~26% on a large source.
  */
-async function bulk(bytes: Uint8Array, init: AdaptiveSourceInit): Promise<Iterable<Uint8Array>> {
+async function bulk<R>(
+	bytes: Uint8Array,
+	init: AdaptiveSourceInit,
+	bulkParser?: BulkParser<R>
+): Promise<Iterable<Uint8Array | R>> {
 	await CharacterSequence.whenReady()
 
-	return Spliterator.fromSync(bytes, init)
+	return bulkParser ? bulkParser(bytes, init) : Spliterator.fromSync(bytes, init)
 }
 
 /**
@@ -64,10 +74,11 @@ async function bulk(bytes: Uint8Array, init: AdaptiveSourceInit): Promise<Iterab
  *
  * @returns A potentially async iterable compatible with {@linkcode AsyncSequence}.
  */
-export async function openDelimitedRows(
+export async function openDelimitedRows<R = Uint8Array>(
 	source: AsyncDataResource | AsyncChunkIterator,
-	init: AdaptiveSourceInit = {}
-): Promise<AsyncIterable<Uint8Array> | Iterable<Uint8Array>> {
+	init: AdaptiveSourceInit = {},
+	bulkParser?: BulkParser<R>
+): Promise<AsyncIterable<Uint8Array> | Iterable<Uint8Array | R>> {
 	const threshold = init.bulkThreshold ?? DEFAULT_BULK_THRESHOLD
 
 	if (threshold <= 0) {
@@ -75,7 +86,7 @@ export async function openDelimitedRows(
 	}
 
 	if (isChunkIterator(source)) {
-		return openChunkIterator(source, threshold, init)
+		return openChunkIterator(source, threshold, init, bulkParser)
 	}
 
 	let size: number
@@ -95,7 +106,7 @@ export async function openDelimitedRows(
 
 	const { readBytes } = await import("spliterator/node/fs")
 
-	return bulk(await readBytes(source, 0, size), init)
+	return bulk(await readBytes(source, 0, size), init, bulkParser)
 }
 
 /**
@@ -104,20 +115,21 @@ export async function openDelimitedRows(
  *
  * When it is not exhausted the pulled chunks cannot be discarded, so the stream is re-headed with them in front.
  */
-async function openChunkIterator(
+async function openChunkIterator<R>(
 	source: AsyncChunkIterator,
 	threshold: number,
-	init: AdaptiveSourceInit
-): Promise<AsyncIterable<Uint8Array> | Iterable<Uint8Array>> {
+	init: AdaptiveSourceInit,
+	bulkParser?: BulkParser<R>
+): Promise<AsyncIterable<Uint8Array> | Iterable<Uint8Array | R>> {
 	const iterator = source[Symbol.asyncIterator]()
 	const first = await iterator.next()
 
-	if (first.done) return bulk(new Uint8Array(0), init)
+	if (first.done) return bulk(new Uint8Array(0), init, bulkParser)
 
 	const second = await iterator.next()
 	const head = toBytes(first.value)
 
-	if (second.done && head.byteLength <= threshold) return bulk(head, init)
+	if (second.done && head.byteLength <= threshold) return bulk(head, init, bulkParser)
 
 	const pulled: Array<Uint8Array | string> = second.done ? [first.value] : [first.value, second.value]
 

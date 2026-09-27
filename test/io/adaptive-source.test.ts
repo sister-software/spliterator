@@ -8,6 +8,7 @@ import * as fs from "node:fs/promises"
 
 import {
 	type AsyncChunkIterator,
+	CharacterSequence,
 	CSVSpliterator,
 	Delimiters,
 	JSONSpliterator,
@@ -224,5 +225,71 @@ describe("documented defaults", () => {
 
 		expect(await TextSpliterator.fromAsync(source()).toArray()).toEqual(["a", "b"])
 		expect(await TextSpliterator.fromAsync(source(), { skipEmpty: false }).toArray()).toEqual("a\n\nb".split("\n"))
+	})
+})
+
+describe("bulk parser hook", () => {
+	const encoder = new TextEncoder()
+	const marker = (bytes: Uint8Array) => [`bulk:${bytes.byteLength}`]
+
+	test("a sized source at or below the threshold is handed to the bulk parser whole", async () => {
+		const rows = await openDelimitedRows(csvPath, BULK, marker)
+
+		expect(Array.from(rows as Iterable<string>)).toEqual([`bulk:${(await fs.stat(csvPath)).size}`])
+	})
+
+	test("a sized source above the threshold streams and never calls the bulk parser", async () => {
+		let calls = 0
+
+		const counting = (bytes: Uint8Array) => {
+			calls++
+
+			return marker(bytes)
+		}
+
+		const rows = await openDelimitedRows(csvPath, { bulkThreshold: 16 }, counting)
+
+		expect(Symbol.asyncIterator in rows).toBe(true)
+		expect(calls).toBe(0)
+	})
+
+	test("an empty stream and a single exhausted chunk take the bulk parser; two chunks stream", async () => {
+		const bytes = encoder.encode("a,b\nc,d\n")
+		const emptySource = chunkedSource(new Uint8Array(0), 4)
+		const singleSource = chunkedSource(bytes, 1024)
+		const manyChunks = chunkedSource(bytes, 4)
+		const empty = await openDelimitedRows(emptySource, BULK, marker)
+		const single = await openDelimitedRows(singleSource, BULK, marker)
+		const streamed = await openDelimitedRows(manyChunks, BULK, marker)
+
+		expect(Array.from(empty as Iterable<string>)).toEqual(["bulk:0"])
+		expect(Array.from(single as Iterable<string>)).toEqual(["bulk:8"])
+		expect(Symbol.asyncIterator in streamed).toBe(true)
+	})
+
+	test("a single chunk above the threshold streams", async () => {
+		const bytes = encoder.encode("a,b\nc,d\n")
+		const oneChunk = chunkedSource(bytes, 1024)
+		const streamed = await openDelimitedRows(oneChunk, { bulkThreshold: 4 }, marker)
+
+		expect(Symbol.asyncIterator in streamed).toBe(true)
+	})
+
+	test("bulkThreshold: 0 streams even with a bulk parser", async () => {
+		const streamed = await openDelimitedRows(csvPath, STREAMING, marker)
+
+		expect(Symbol.asyncIterator in streamed).toBe(true)
+	})
+
+	test("the bulk parser is called after the scanner is ready", async () => {
+		let ready = false
+
+		await openDelimitedRows(csvPath, BULK, (bytes) => {
+			ready = CharacterSequence.hasScanner()
+
+			return marker(bytes)
+		})
+
+		expect(ready).toBe(true)
 	})
 })

@@ -4,13 +4,19 @@
  * @author Teffen Ellis, et al.
  */
 
-import { CharacterSequence, type CharacterSequenceInput, Delimiters } from "../core/CharacterSequence.js"
+import {
+	CharacterSequence,
+	type CharacterSequenceInput,
+	Delimiters,
+	normalizeCharacterInput,
+} from "../core/CharacterSequence.js"
 import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "../core/Spliterator.js"
 import type { AsyncChunkIterator, AsyncDataResource } from "../internal/shared.js"
 import { type AdaptiveSourceInit, openDelimitedRows } from "../io/adaptive-source.js"
 import { AsyncSequence } from "../iterators/AsyncSequence.js"
 import { Sequence } from "../iterators/Sequence.js"
 import { normalizeColumnNames } from "./casing.js"
+import { cellScanEligibility, decodeForCellScan, scanCsvCells } from "./csv-cells.js"
 import { splitRowColumns } from "./csv-columns.js"
 import {
 	bindTransformers,
@@ -77,6 +83,18 @@ export interface CSVSpliteratorInit extends SpliteratorInit, RowSpliteratorInit<
 	 * @default true
 	 */
 	trim?: boolean
+
+	/**
+	 * How columns are found. `"auto"` scans every cell of a wholly in-memory source in one SIMD pass and slices the
+	 * decoded text, and otherwise uses `"rows"`. `"rows"` decodes and splits each row, as every version before 7.20 did.
+	 * Both produce the same values.
+	 *
+	 * The bulk path decodes the whole source on the first pull, even for `take(1)`, and a retained cell may keep the
+	 * whole decoded string alive. Use `"rows"` to avoid either cost.
+	 *
+	 * @default "auto"
+	 */
+	columnScan?: "auto" | "rows"
 }
 
 /**
@@ -101,6 +119,7 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 		// never carries a stray `\r` on Windows-lineage sources.
 		crlf = true,
 		trim = true,
+		columnScan = "auto",
 		take = Infinity,
 		drop = 0,
 		...rowInit
@@ -113,10 +132,61 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 
 	const decoder = new TextDecoder()
 	const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? defaultColumnDelimiter)
+	const bytes = normalizeCharacterInput(source)
+	const rowDelimiter = new CharacterSequence(rowInit.delimiter ?? Delimiters.LineFeed)
+
+	const plan = cellScanEligibility({
+		columnScan,
+		rowDelimiter,
+		columnDelimiter,
+		enableQuoteHandling,
+		position: rowInit.position,
+		byteLength: bytes.byteLength,
+	})
+
+	// The scanner loads asynchronously; a synchronous caller sees it only if something awaited `whenReady()` first.
+	const text = plan && CharacterSequence.hasScanner() ? decodeForCellScan(bytes) : null
+
+	if (plan && text !== null) {
+		const cellRows = scanCsvCells(bytes, text, {
+			rowDelimiter: plan.rowDelimiter,
+			columnDelimiter: plan.columnDelimiter,
+			enableQuoteHandling,
+			crlf,
+			trim,
+			skipEmpty: rowInit.skipEmpty ?? true,
+		})
+
+		if (header) {
+			const result = cellRows.next()
+
+			if (result.done) return
+
+			const headers = normalizeKeys ? normalizeColumnNames(result.value) : result.value
+
+			transformers = bindTransformers(headers, transformersInput)
+		}
+
+		for (const columns of cellRows) {
+			if (yieldCount < drop) {
+				yieldCount++
+
+				continue
+			}
+
+			if (yieldCount >= yieldLimit) break
+
+			yield emitter ? emitter(columns, transformers) : columns
+
+			yieldCount++
+		}
+
+		return
+	}
 
 	// Quote handling applies at both levels: rows must not split on newlines inside quotes,
 	// columns must not split on quoted column delimiters.
-	const rows = Spliterator.fromSync(source, { ...rowInit, crlf, enableQuoteHandling })
+	const rows = Spliterator.fromSync(bytes, { ...rowInit, crlf, enableQuoteHandling })
 
 	if (header) {
 		const result = rows.next()

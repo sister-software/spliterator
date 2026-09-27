@@ -175,6 +175,13 @@ export class CharacterSequence extends Uint8Array {
 	 * completion in a single tick would otherwise always fall back to the JS scanner. Await this first to opt into SIMD
 	 * acceleration.
 	 */
+	/**
+	 * Whether the SIMD scanner is loaded right now. A synchronous caller uses this to choose a path without awaiting.
+	 */
+	public static hasScanner(): boolean {
+		return Boolean(CharacterSequence.#wasmScanner)
+	}
+
 	public static whenReady(): Promise<boolean> {
 		return CharacterSequence.#loadWasm().then((mod) => mod !== null)
 	}

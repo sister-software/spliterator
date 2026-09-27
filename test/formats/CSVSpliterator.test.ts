@@ -6,6 +6,7 @@
 
 import {
 	type AsyncSequence,
+	CharacterSequence,
 	CSVSpliterator,
 	Delimiters,
 	normalizeColumnNames,
@@ -15,7 +16,7 @@ import {
 	zipSync,
 } from "spliterator"
 import { createChunkIterator } from "spliterator/node/fs"
-import { expectTypeOf, test } from "vitest"
+import { describe, expectTypeOf, test, vi } from "vitest"
 
 import { fixturesDirectory, loadFixture } from "../support/utils.js"
 
@@ -269,7 +270,9 @@ test("a column delimiter that does not round-trip through UTF-8 takes the byte p
 		const out: number[] = []
 
 		parts.forEach((part, i) => {
-			if (i) { out.push(0xff) }
+			if (i) {
+				out.push(0xff)
+			}
 
 			out.push(...encoder.encode(part))
 		})
@@ -295,4 +298,188 @@ test("a column delimiter that does not round-trip through UTF-8 takes the byte p
 		["a", "", '"x\u00FF y"', ""],
 		["1", "2", "3", "4"],
 	])
+})
+
+describe("columnScan", () => {
+	const encoder = new TextEncoder()
+
+	function both(source: Uint8Array | string, init: Parameters<typeof CSVSpliterator.from>[1]) {
+		const spy = vi.spyOn(CharacterSequence, "scanCells")
+		const auto = CSVSpliterator.from(source, { ...init, columnScan: "auto" } as never).toArray()
+		const autoCalls = spy.mock.calls.length
+
+		spy.mockClear()
+
+		const rows = CSVSpliterator.from(source, { ...init, columnScan: "rows" } as never).toArray()
+		const rowsCalls = spy.mock.calls.length
+
+		spy.mockRestore()
+
+		return { auto, rows, fastPathRan: autoCalls > 0, rowsCalls }
+	}
+
+	test("the fast path yields what the row path yields, and actually ran", async ({ expect }) => {
+		await CharacterSequence.whenReady()
+
+		for (const mode of ["array", "object", "entries"] as const) {
+			for (const trim of [true, false]) {
+				for (const header of [true, false]) {
+					if (mode !== "array" && !header) continue
+
+					const result = both(fixture.bytes, { mode, trim, header } as never)
+
+					expect(result.auto, `${mode} trim=${trim} header=${header}`).toEqual(result.rows)
+					expect(result.fastPathRan).toBe(true)
+					expect(result.rowsCalls).toBe(0)
+				}
+			}
+		}
+	})
+
+	test("transformers, normalizeKeys, drop and take behave the same on both paths", async ({ expect }) => {
+		await CharacterSequence.whenReady()
+
+		const calls = { auto: 0, rows: 0 }
+		const src = ' Name , Age \n " Ada " , 36 \r\nBob,  41\nCy,7\n'
+
+		for (const columnScan of ["auto", "rows"] as const) {
+			const out = CSVSpliterator.from(src, {
+				columnScan,
+				drop: 1,
+				take: 2,
+				transformers: {
+					age: (v) => {
+						calls[columnScan]++
+
+						return Number(v)
+					},
+				},
+			}).toArray()
+
+			expect(out).toEqual([
+				{ name: "Bob", age: 41 },
+				{ name: "Cy", age: 7 },
+			])
+		}
+
+		expect(calls.auto).toBe(calls.rows)
+	})
+
+	test("a string source is eligible", async ({ expect }) => {
+		await CharacterSequence.whenReady()
+
+		const result = both("a,b\n1,2\n", { header: false, mode: "array" })
+
+		expect(result.auto).toEqual([
+			["a", "b"],
+			["1", "2"],
+		])
+
+		expect(result.fastPathRan).toBe(true)
+	})
+
+	test("a byte view with a nonzero offset is eligible and correct", async ({ expect }) => {
+		await CharacterSequence.whenReady()
+
+		const backing = encoder.encode("XXXXa,b\n1,2\nYYYY")
+		const view = backing.subarray(4, -4)
+		const result = both(view, { header: false, mode: "array" })
+
+		expect(result.auto).toEqual([
+			["a", "b"],
+			["1", "2"],
+		])
+
+		expect(result.fastPathRan).toBe(true)
+	})
+
+	test("invalid UTF-8 falls back to the row path and yields U+FFFD", async ({ expect }) => {
+		await CharacterSequence.whenReady()
+
+		const bytes = new Uint8Array([0x61, 0x2c, 0xff, 0x0a])
+		const result = both(bytes, { header: false, mode: "array" })
+
+		expect(result.auto).toEqual([["a", "\uFFFD"]])
+		expect(result.auto).toEqual(result.rows)
+		expect(result.fastPathRan).toBe(false)
+	})
+
+	test("an ineligible configuration takes the row path", async ({ expect }) => {
+		await CharacterSequence.whenReady()
+
+		const cases: Array<[string, object]> = [
+			["multi-byte column delimiter", { columnDelimiter: "::" }],
+			["column delimiter equal to the row delimiter", { columnDelimiter: "\n" }],
+			["non-ASCII single-byte column delimiter", { columnDelimiter: new Uint8Array([0xff]) }],
+			["quote byte as column delimiter", { columnDelimiter: '"' }],
+			["carriage return as column delimiter", { columnDelimiter: "\r" }],
+			["multi-byte row delimiter", { delimiter: "\r\n" }],
+			["nonzero position", { position: 2 }],
+			["columnScan rows", { columnScan: "rows" }],
+		]
+
+		for (const [label, init] of cases) {
+			const spy = vi.spyOn(CharacterSequence, "scanCells")
+
+			CSVSpliterator.from("a,b\n1,2\n", { header: false, mode: "array", ...init } as never).toArray()
+
+			const seen = spy.mock.calls.length
+
+			spy.mockRestore()
+			expect(seen, label).toBe(0)
+		}
+	})
+
+	test("take(0) on the sequence yields nothing and does not decode", async ({ expect }) => {
+		await CharacterSequence.whenReady()
+
+		const spy = vi.spyOn(CharacterSequence, "scanCells")
+
+		expect(CSVSpliterator.from("a,b\n1,2\n", { header: false, mode: "array" }).take(0).toArray()).toEqual([])
+		expect(spy).not.toHaveBeenCalled()
+		spy.mockRestore()
+	})
+
+	test("a header normalization failure propagates once and is not retried on the row path", async ({ expect }) => {
+		await CharacterSequence.whenReady()
+
+		let calls = 0
+
+		const boom = () => {
+			calls++
+
+			throw new Error("boom")
+		}
+
+		expect(() => CSVSpliterator.from("a,b\n1,2\n", { transformers: { a: boom } }).toArray()).toThrow("boom")
+		expect(calls).toBe(1)
+	})
+
+	test("without the scanner loaded, from() takes the row path in a fresh process", async ({ expect }) => {
+		const { execFile } = await import("node:child_process")
+		const { promisify } = await import("node:util")
+		const entry = new URL("../../out/index.js", import.meta.url).pathname
+
+		const script = `
+			import { CSVSpliterator, CharacterSequence } from ${JSON.stringify(entry)}
+			const before = CSVSpliterator.from("a,b\\n1,2\\n", { header: false, mode: "array" }).toArray()
+			const ready = await CharacterSequence.whenReady()
+			const after = CSVSpliterator.from("a,b\\n1,2\\n", { header: false, mode: "array" }).toArray()
+			console.log(JSON.stringify({ before, after, ready }))
+		`
+
+		const { stdout } = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", script])
+
+		expect(JSON.parse(stdout)).toEqual({
+			before: [
+				["a", "b"],
+				["1", "2"],
+			],
+			after: [
+				["a", "b"],
+				["1", "2"],
+			],
+			ready: true,
+		})
+	})
 })

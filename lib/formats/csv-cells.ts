@@ -133,3 +133,68 @@ export function* scanCsvCells(source: Uint8Array, text: string, init: CsvCellSca
 		yield [""]
 	}
 }
+
+/**
+ * The largest source the fast path decodes whole. V8 refuses strings above ~2^29 characters; a source near that size
+ * takes the row path rather than throwing a `RangeError` from the decoder, which is not the error the fallback
+ * catches.
+ */
+export const MAX_CELL_SCAN_BYTES = 2 ** 29 - 2 ** 20
+
+export interface CellScanPlan {
+	rowDelimiter: number
+	columnDelimiter: number
+}
+
+const CARRIAGE_RETURN = 0x0d
+const DOUBLE_QUOTE = 0x22
+
+/**
+ * Whether the fast path may run, and with which bytes. Cheap and decode-free; the decode is the one remaining gate.
+ */
+export function cellScanEligibility(init: {
+	columnScan: "auto" | "rows"
+	rowDelimiter: Uint8Array
+	columnDelimiter: Uint8Array
+	enableQuoteHandling: boolean
+	position: number | undefined
+	byteLength: number
+}): CellScanPlan | null {
+	if (init.columnScan !== "auto") return null
+
+	if (init.rowDelimiter.length !== 1 || init.columnDelimiter.length !== 1) return null
+
+	const row = init.rowDelimiter[0]!
+	const column = init.columnDelimiter[0]!
+
+	// ASCII only: a single byte above 0x7F can split a UTF-8 sequence, which would break the unit count.
+	if (row > 0x7f || column > 0x7f) return null
+
+	if (row === column) return null
+
+	if (row === CARRIAGE_RETURN || column === CARRIAGE_RETURN) return null
+
+	if (init.enableQuoteHandling && (row === DOUBLE_QUOTE || column === DOUBLE_QUOTE)) return null
+
+	if (init.position !== undefined && init.position !== 0) return null
+
+	if (init.byteLength > MAX_CELL_SCAN_BYTES) return null
+
+	return { rowDelimiter: row, columnDelimiter: column }
+}
+
+const fatalDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+
+/**
+ * Decode the whole source for slicing. `null` means invalid UTF-8, the one failure the fast path defers to the row path
+ * on. Any other error propagates.
+ */
+export function decodeForCellScan(bytes: Uint8Array): string | null {
+	try {
+		return fatalDecoder.decode(bytes)
+	} catch (error) {
+		if (error instanceof TypeError) return null
+
+		throw error
+	}
+}
