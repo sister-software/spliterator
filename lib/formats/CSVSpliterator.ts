@@ -86,7 +86,7 @@ export interface CSVSpliteratorInit extends SpliteratorInit, RowSpliteratorInit<
 
 	/**
 	 * How columns are found. `"auto"` scans every cell of a wholly in-memory source in one SIMD pass and slices the
-	 * decoded text, and otherwise uses `"rows"`. `"rows"` decodes and splits each row, as every version before 7.20 did.
+	 * decoded text, and otherwise uses `"rows"`. `"rows"` decodes and splits each row, as every version before 8.0.0 did.
 	 * Both produce the same values.
 	 *
 	 * The bulk path decodes the whole source on the first pull, even for `take(1)`, and a retained cell may keep the
