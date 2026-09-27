@@ -7,6 +7,7 @@
 import { CharacterSequence } from "../core/CharacterSequence.js"
 import { type AsyncSpliteratorInit, Spliterator } from "../core/Spliterator.js"
 import type { AsyncChunkIterator, AsyncDataResource } from "../internal/shared.js"
+import type { AsyncSequence } from "../iterators/AsyncSequence.js"
 
 /**
  * Byte length at or below which a source is read whole and parsed synchronously.
@@ -59,8 +60,9 @@ async function bulk(bytes: Uint8Array, init: AdaptiveSourceInit): Promise<Iterab
 
 /**
  * Take the delimited rows of `source`, reading it whole when it is small enough to be worth the memory and streaming it
- * otherwise. It returns a sync iterable in the first case and an async one in the second. Both satisfy
- * {@linkcode AsyncSequence}.
+ * otherwise.
+ *
+ * @returns A potentially async iterable compatible with {@linkcode AsyncSequence}.
  */
 export async function openDelimitedRows(
 	source: AsyncDataResource | AsyncChunkIterator,
@@ -68,9 +70,13 @@ export async function openDelimitedRows(
 ): Promise<AsyncIterable<Uint8Array> | Iterable<Uint8Array>> {
 	const threshold = init.bulkThreshold ?? DEFAULT_BULK_THRESHOLD
 
-	if (threshold <= 0) return Spliterator.fromAsync(source, init)
+	if (threshold <= 0) {
+		return Spliterator.fromAsync(source, init)
+	}
 
-	if (isChunkIterator(source)) return openChunkIterator(source, threshold, init)
+	if (isChunkIterator(source)) {
+		return openChunkIterator(source, threshold, init)
+	}
 
 	let size: number
 
@@ -83,7 +89,9 @@ export async function openDelimitedRows(
 		return Spliterator.fromAsync(source, init)
 	}
 
-	if (size > threshold) return Spliterator.fromAsync(source, init)
+	if (size > threshold) {
+		return Spliterator.fromAsync(source, init)
+	}
 
 	const { readBytes } = await import("spliterator/node/fs")
 

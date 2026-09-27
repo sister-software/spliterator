@@ -72,10 +72,6 @@
 		"release": "release-it",
 		"test": "yarn compile && vitest"
 	},
-	"dependencies": {
-		"change-case": "^5.4.4",
-		"type-fest": "^5.8.0"
-	},
 	"devDependencies": {
 		"@sister.software/oxfmt-config": "^12.1.3",
 		"@sister.software/oxlint-config": "^12.1.3",
@@ -88,16 +84,21 @@
 		"path-ts": "^2.4.1",
 		"read-excel-file": "^9.3.5",
 		"release-it": "^21.0.1",
+		"type-fest": "^5.8.0",
 		"typescript": "^7.0.2",
 		"vitest": "^4.1.10",
 		"write-excel-file": "^4.1.1"
 	},
 	"peerDependencies": {
 		"read-excel-file": "^9.3.5",
+		"type-fest": "^5.8.0",
 		"write-excel-file": "^4.1.1"
 	},
 	"peerDependenciesMeta": {
 		"read-excel-file": {
+			"optional": true
+		},
+		"type-fest": {
 			"optional": true
 		},
 		"write-excel-file": {

@@ -1367,13 +1367,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"change-case@npm:^5.4.4":
-  version: 5.4.4
-  resolution: "change-case@npm:5.4.4"
-  checksum: 10/446e5573f3c854290a91292afef92b957d2e43a928260c91989b482aa860caaa29711b6725fc40c200af68061cbab357b033446d16a17bc5c553636994074e92
-  languageName: node
-  linkType: hard
-
 "chardet@npm:^2.1.1":
   version: 2.2.0
   resolution: "chardet@npm:2.2.0"
@@ -3906,7 +3899,6 @@ __metadata:
     "@sister.software/oxlint-config": "npm:^12.1.3"
     "@sister.software/tsconfig": "npm:^12.1.3"
     "@types/node": "npm:^26.1.2"
-    change-case: "npm:^5.4.4"
     colorette: "npm:^2.0.20"
     npm-run-all: "npm:^4.1.5"
     oxfmt: "npm:0.62.0"
@@ -3920,9 +3912,12 @@ __metadata:
     write-excel-file: "npm:^4.1.1"
   peerDependencies:
     read-excel-file: ^9.3.5
+    type-fest: ^5.8.0
     write-excel-file: ^4.1.1
   peerDependenciesMeta:
     read-excel-file:
+      optional: true
+    type-fest:
       optional: true
     write-excel-file:
       optional: true

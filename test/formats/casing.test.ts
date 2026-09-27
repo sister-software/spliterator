@@ -12,7 +12,19 @@
  *   destroyed, and every value in the file became unreachable by name.
  */
 
-import { normalizeColumnNames, smartSnakeCase } from "spliterator"
+import {
+	camelCase,
+	isLowerCase,
+	isUniformlyCased,
+	isUpperCase,
+	normalizeColumnNames,
+	sentenceCase,
+	smartCapitalCase,
+	smartSnakeCase,
+	snakeCase,
+	titleCase,
+	titleCaseIfUpper,
+} from "spliterator"
 import { describe, expect, it } from "vitest"
 
 describe("smartSnakeCase", () => {
@@ -44,6 +56,142 @@ describe("smartSnakeCase", () => {
 		["a camel name", "firstName", "first_name"],
 	])("leaves ASCII behaviour alone: %s", (_label, input, expected) => {
 		expect(smartSnakeCase(input)).toBe(expected)
+	})
+})
+
+describe("snakeCase and camelCase", () => {
+	// The in-house port of change-case's word splitting. These were checked against change-case 5.4.4 when the
+	// dependency was dropped; a difference here is a regression against what 7.14.0 shipped.
+	it.each([
+		["fooBar", "foo_bar", "fooBar"],
+		["FooBar", "foo_bar", "fooBar"],
+		["FOO_BAR", "foo_bar", "fooBar"],
+		["XMLHttpRequest", "xml_http_request", "xmlHttpRequest"],
+		["version2Beta", "version2_beta", "version2Beta"],
+		["2fast", "2fast", "2fast"],
+		["a1B2c3", "a1_b2c3", "a1B2c3"],
+		["  hello--world  ", "hello_world", "helloWorld"],
+		["résumé Café", "résumé_café", "résuméCafé"],
+		["", "", ""],
+		["___", "", ""],
+	])("splits %j", (input, snake, camel) => {
+		expect(snakeCase(input)).toBe(snake)
+		expect(camelCase(input)).toBe(camel)
+	})
+
+	it("guards a digit-leading word in camelCase, as change-case did", () => {
+		expect(camelCase("point 3d")).toBe("point_3d")
+	})
+})
+
+describe("titleCase", () => {
+	it.each([
+		["hello world", "Hello World"],
+		["HELLO WORLD", "Hello World"],
+		["o'brien", "O'Brien"],
+		["mcdonald's", "Mcdonald's"],
+		["MCDONALD'S", "Mcdonald's"],
+		["DON'T", "Don't"],
+		["rock 'n' roll", "Rock 'n' Roll"],
+		["d'angelo", "D'Angelo"],
+		["it’s", "It’s"],
+		["123abc def", "123Abc Def"],
+		["first_name", "First Name"],
+		["FIRST_NAME__X", "First Name  X"],
+		["한글 name", "한글 Name"],
+		["", ""],
+		["straße", "Straße"],
+	])("titlecases each Latin run of %j", (input, expected) => {
+		expect(titleCase(input)).toBe(expected)
+	})
+
+	it("keeps a run whose conversion would change its length", () => {
+		expect(titleCase("ßtraße")).toBe("ßtraße")
+		expect(titleCase("ANKARA İZMİR")).toBe("Ankara İZMİR")
+	})
+
+	it("keeps or uppercases short runs on request", () => {
+		expect(titleCase("1600 pennsylvania AVE NW, washington DC", { shortLength: 2 })).toBe(
+			"1600 Pennsylvania Ave NW, Washington DC"
+		)
+
+		expect(titleCase("1600 pennsylvania ave nw, washington dc", { shortLength: 2, short: "upper" })).toBe(
+			"1600 Pennsylvania Ave NW, Washington DC"
+		)
+	})
+
+	it("works as an array callback", () => {
+		expect(["hello", "WORLD"].map(titleCase)).toEqual(["Hello", "World"])
+	})
+})
+
+describe("sentenceCase", () => {
+	it.each([
+		["afghan_restaurant", "Afghan restaurant"],
+		["afghanRestaurant", "Afghan restaurant"],
+		["AFGHAN_RESTAURANT", "Afghan restaurant"],
+		["afghan restaurant", "Afghan restaurant"],
+		["", ""],
+	])("labels %j", (input, expected) => {
+		expect(sentenceCase(input)).toBe(expected)
+	})
+})
+
+describe("case predicates", () => {
+	it.each([
+		["ABC", true, false, true],
+		["abc", false, true, true],
+		["Abc", false, false, false],
+		["ABC-123", true, false, true],
+		["123", false, false, true],
+		["한글", false, false, true],
+		["", false, false, false],
+	])("%j → isUpperCase %s, isLowerCase %s, isUniformlyCased %s", (input, upper, lower, uniform) => {
+		expect(isUpperCase(input)).toBe(upper)
+		expect(isLowerCase(input)).toBe(lower)
+		expect(isUniformlyCased(input)).toBe(uniform)
+	})
+
+	it("treats null as not uniformly cased", () => {
+		expect(isUniformlyCased(null)).toBe(false)
+	})
+
+	it("applies a cased-letter floor", () => {
+		expect(isUpperCase("NY", { minimumCased: 3 })).toBe(false)
+		expect(isUpperCase("214 JONES RD", { minimumCased: 3 })).toBe(true)
+		expect(isLowerCase("dc", { minimumCased: 3 })).toBe(false)
+	})
+
+	it("gates on script", () => {
+		expect(isUpperCase("RUE DU FAUBOURG SAINT-HONORÉ", { script: "latin" })).toBe(true)
+		expect(isUpperCase("RUE DU FAUBOURG SAINT-HONORÉ", { script: "ascii" })).toBe(false)
+		expect(isUpperCase("ΑΘΗΝΑ 123 RD", { script: "latin" })).toBe(false)
+		expect(isLowerCase("café", { script: "ascii" })).toBe(false)
+		expect(isLowerCase("café")).toBe(true)
+	})
+
+	it("works as an array callback", () => {
+		expect(["a", "b", "c", "D"].some(isUpperCase)).toBe(true)
+		expect(["a", "b", "c", "D"].every(isLowerCase)).toBe(false)
+		expect(["a", "b", "c"].every(isLowerCase)).toBe(true)
+	})
+})
+
+describe("titleCaseIfUpper", () => {
+	it("titlecases only a shouted field", () => {
+		expect(titleCaseIfUpper("MAIN STREET")).toBe("Main Street")
+		expect(titleCaseIfUpper("Main street")).toBe("Main street")
+		expect(titleCaseIfUpper("main street")).toBe("main street")
+		expect(titleCaseIfUpper("123")).toBe("123")
+	})
+})
+
+describe("smartCapitalCase", () => {
+	it("titlecases mixed-case input and leaves uniform input and email addresses alone", () => {
+		expect(smartCapitalCase("john sMith")).toBe("John Smith")
+		expect(smartCapitalCase("JOHN SMITH")).toBe("JOHN SMITH")
+		expect(smartCapitalCase("john smith")).toBe("john smith")
+		expect(smartCapitalCase("John@Example.com")).toBe("John@Example.com")
 	})
 })
 

@@ -4,7 +4,6 @@
  * @author Teffen Ellis, et al.
  */
 
-import { camelCase, capitalCase, snakeCase } from "change-case"
 import type { CamelCase, SnakeCase } from "type-fest"
 
 /**
@@ -17,14 +16,50 @@ import type { CamelCase, SnakeCase } from "type-fest"
  */
 const NON_KEY_CHARACTER = /[^\p{L}\p{N}_]+/gu
 
+// These are the word-boundary rules. The separator is a NUL
+// because it cannot be a word character matched by the stripping expression.
+const SPLIT_LOWER_UPPER = /([\p{Ll}\d])(\p{Lu})/gu
+const SPLIT_UPPER_UPPER = /(\p{Lu})([\p{Lu}][\p{Ll}])/gu
+const STRIP_NON_WORD = /[^\p{L}\d]+/giu
+
+function splitWords(input: string): string[] {
+	let result = input.trim().replace(SPLIT_LOWER_UPPER, "$1\0$2").replace(SPLIT_UPPER_UPPER, "$1\0$2")
+	result = result.replace(STRIP_NON_WORD, "\0")
+
+	let start = 0
+	let end = result.length
+
+	while (result.charAt(start) === "\0") {
+		start++
+	}
+
+	if (start === end) {
+		return []
+	}
+
+	while (result.charAt(end - 1) === "\0") {
+		end--
+	}
+
+	return result.slice(start, end).split("\0")
+}
+
+export function snakeCase(input: string): string {
+	return splitWords(input)
+		.map((word) => word.toLocaleLowerCase())
+		.join("_")
+}
+
 /**
  * Converts a name to snake_case, unless the name is already in all caps.
  *
- * A caseless script takes the all-caps branch because `toUpperCase()` is the identity on Korean, Japanese, Chinese,
- * Hebrew, and Arabic. Those names have no case to convert, so the branch preserves their letters and replaces only
- * characters that cannot be keys.
+ * A caseless script takes the all-caps branch, because `toUpperCase()` is the identity on Korean, Japanese, Chinese,
+ * Hebrew and Arabic. That is the right branch. Those names have no case to convert and survive as written.
  */
-export function smartSnakeCase<T extends string>(name: T): T extends Uppercase<T> ? T : SnakeCase<T> {
+export function smartSnakeCase<T extends string>(name: T): T extends Uppercase<T> ? T : SnakeCase<T>
+export function smartSnakeCase(name: string): string
+
+export function smartSnakeCase(name: string): string {
 	const normalizedName = name
 		// Remove periods after capital letters, e.g. "U.S.A." -> "USA"
 		.replaceAll(/([A-Z])(\.+)/g, "$1")
@@ -43,6 +78,25 @@ export function smartSnakeCase<T extends string>(name: T): T extends Uppercase<T
 	return snakeCase(normalizedName) as any
 }
 
+export function camelCase<T extends string>(name: T): CamelCase<T>
+export function camelCase(name: string): string
+
+export function camelCase(name: string): string {
+	return splitWords(name)
+		.map((word, index) => {
+			const lower = word.toLocaleLowerCase()
+
+			if (index === 0) {
+				return lower
+			}
+
+			const first = lower[0]!
+
+			return (first >= "0" && first <= "9" ? "_" : "") + first.toLocaleUpperCase() + lower.slice(1)
+		})
+		.join("") as any
+}
+
 /**
  * Converts a name to camelCase, unless the name is already in all caps.
  */
@@ -53,21 +107,219 @@ export function smartCamelCase<T extends string>(name: T): T extends Uppercase<T
 }
 
 /**
- * Predicate to determine if a given string is uniformly cased, i.e. all uppercase or all lowercase.
+ * Sentence-case a name into a display label: `afghan_restaurant` and `afghanRestaurant` both become `Afghan
+ * restaurant`. The first word is capitalized and the rest are lowercased.
  */
-export function isUniformlyCased(input: string | null): boolean {
-	return Boolean(input && (input === input.toUpperCase() || input === input.toLowerCase()))
+export function sentenceCase(name: string): string {
+	const sentence = splitWords(name)
+		.map((word) => word.toLocaleLowerCase())
+		.join(" ")
+
+	return sentence.charAt(0).toLocaleUpperCase() + sentence.slice(1)
 }
 
 /**
- * Capitalizes a string, unless the string is uniformly cased, or an email address.
+ * Options shared by the case predicates and {@link titleCase}. Every function taking them also accepts a number in the
+ * same position and ignores it, so they can be handed straight to `Array.prototype.some`, `every`, `filter` and `map`
+ * without a wrapping arrow.
+ */
+export interface CaseOptions {
+	/**
+	 * Cased letters the input needs before the predicate can be true. Keeps a digit-only, punctuation-only or single
+	 * stray token from reading as a whole shouting or whispering input.
+	 *
+	 * @default 1
+	 */
+	minimumCased?: number
+
+	/**
+	 * Which characters the input may contain. `"latin"` refuses a letter from any other script; `"ascii"` refuses any
+	 * character above U+007F. Case conversion outside Latin script is locale-sensitive and can change string length, so a
+	 * caller that must keep offsets stable gates on this.
+	 *
+	 * @default "any"
+	 */
+	script?: "any" | "latin" | "ascii"
+}
+
+const LATIN_LETTER = /\p{Script=Latin}/u
+/**
+ * A run of Latin letters, with the apostrophe that precedes it when there is one. The apostrophe decides whether a
+ * short run is a word (`O'Brien`) or a possessive or contraction (`Mcdonald's`, `don't`, `rock 'n' roll`).
+ */
+const LATIN_RUN = /(['\u2019]?)(\p{Script=Latin}+)|_/gu
+const CONTRACTION_LENGTH = 2
+const ASCII_MAX = 0x7f
+
+interface CaseProfile {
+	/**
+	 * Count of uppercase letters.
+	 */
+	upper: number
+	/**
+	 * Count of lowercase letters.
+	 */
+	lower: number
+	/**
+	 * Whether a letter from a script other than Latin was seen.
+	 */
+	nonLatin: boolean
+	/**
+	 * Whether any character above U+007F was seen.
+	 */
+	nonAscii: boolean
+}
+
+function caseProfile(input: string): CaseProfile {
+	const profile: CaseProfile = { upper: 0, lower: 0, nonLatin: false, nonAscii: false }
+
+	for (const ch of input) {
+		if (ch.codePointAt(0)! > ASCII_MAX) {
+			profile.nonAscii = true
+		}
+
+		const upper = ch.toUpperCase()
+		const lower = ch.toLowerCase()
+
+		if (upper === lower) continue
+
+		if (!LATIN_LETTER.test(ch)) {
+			profile.nonLatin = true
+		}
+
+		if (ch === upper) {
+			profile.upper++
+		} else {
+			profile.lower++
+		}
+	}
+
+	return profile
+}
+
+/**
+ * Normalize the second argument of a predicate: a number is an array index and means "no options".
+ */
+function toOptions(options: CaseOptions | number | undefined): Required<CaseOptions> {
+	if (typeof options !== "object") return { minimumCased: 1, script: "any" }
+
+	return { minimumCased: options.minimumCased ?? 1, script: options.script ?? "any" }
+}
+
+function admits(profile: CaseProfile, script: CaseOptions["script"]): boolean {
+	if (script === "ascii") return !profile.nonAscii
+
+	if (script === "latin") return !profile.nonLatin
+
+	return true
+}
+
+/**
+ * True when the input has at least one cased character and every cased character is uppercase.
+ *
+ * `"123"` and a Korean header have no cased characters, so they are neither upper nor lower case; see
+ * {@link isUniformlyCased} for the predicate that accepts them.
+ *
+ * With `minimumCased` and `script` this is the strict "shouting input" detector: `isUpperCase(text, { minimumCased: 3,
+ * script: "latin" })` is true only for a Latin-script input with three or more capitals and no lowercase letter.
+ */
+export function isUpperCase(input: string, options?: CaseOptions | number): boolean {
+	const { minimumCased, script } = toOptions(options)
+	const profile = caseProfile(input)
+
+	return profile.lower === 0 && profile.upper >= minimumCased && admits(profile, script)
+}
+
+/**
+ * True when the input has at least one cased character and every cased character is lowercase.
+ *
+ * Takes the same options as {@link isUpperCase}.
+ */
+export function isLowerCase(input: string, options?: CaseOptions | number): boolean {
+	const { minimumCased, script } = toOptions(options)
+	const profile = caseProfile(input)
+
+	return profile.upper === 0 && profile.lower >= minimumCased && admits(profile, script)
+}
+
+/**
+ * Predicate to determine if a given string is uniformly cased, i.e. it does not mix upper and lower case.
+ *
+ * A string with no cased characters at all (`"123"`, `"한글"`) is uniformly cased. `null` and the empty string are not.
+ */
+export function isUniformlyCased(input: string | null): boolean {
+	if (!input) return false
+
+	const { upper, lower } = caseProfile(input)
+
+	return upper === 0 || lower === 0
+}
+
+export interface TitleCaseOptions {
+	/**
+	 * A run of Latin letters this long or shorter is "short" and handled by {@link TitleCaseOptions.short} instead of
+	 * being titlecased. In address text every run of one or two letters is an abbreviation (`NY`, `DC`, `NW`, `ST`) that
+	 * reads best uppercase, and titlecasing `NY` to `Ny` turns a region into a locality.
+	 *
+	 * @default 0
+	 */
+	shortLength?: number
+
+	/**
+	 * What to do with a short run: leave it as typed, or uppercase it.
+	 *
+	 * @default "keep"
+	 */
+	short?: "keep" | "upper"
+}
+
+/**
+ * Titlecase each run of Latin letters: the first letter uppercased, the rest lowercased. `o'brien` becomes `O'Brien`
+ * and `mcdonald's` becomes `Mcdonald's`. Characters outside Latin script, digits and punctuation pass through as typed,
+ * so `first_name` becomes `First_Name`; use {@link sentenceCase} for a label from a code.
+ *
+ * Length-preserving by construction: a run whose case conversion changes its length (`İ` lowercases to two code units,
+ * `ß` uppercases to `SS`) is kept as typed, so offsets into the input never move.
+ *
+ * Accepts a number in place of options and ignores it, so `strings.map(titleCase)` works.
+ */
+export function titleCase(input: string, options?: TitleCaseOptions | number): string {
+	const shortLength = typeof options === "object" ? (options.shortLength ?? 0) : 0
+	const short = typeof options === "object" ? (options.short ?? "keep") : "keep"
+
+	return input.replaceAll(LATIN_RUN, (match: string, apostrophe: string | undefined, run: string | undefined) => {
+		if (run === undefined) return " "
+
+		let converted: string
+
+		if (apostrophe && run.length <= CONTRACTION_LENGTH) {
+			converted = run.toLowerCase()
+		} else if (run.length <= shortLength) {
+			converted = short === "upper" ? run.toUpperCase() : run
+		} else {
+			converted = run[0]!.toUpperCase() + run.slice(1).toLowerCase()
+		}
+
+		return converted.length === run.length ? (apostrophe ?? "") + converted : match
+	})
+}
+
+/**
+ * Titlecases a string, unless the string is uniformly cased, or an email address.
  */
 export function smartCapitalCase(input: string): string {
 	if (input.includes("@")) return input
 
 	if (isUniformlyCased(input)) return input
 
-	return capitalCase(input)
+	return titleCase(input)
+}
+
+/**
+ * Titlecase a shouted string, leave anything else alone. The shape source dumps use when a field arrives all caps.
+ */
+export function titleCaseIfUpper(input: string, options?: CaseOptions | number): string {
+	return isUpperCase(input, options) ? titleCase(input) : input
 }
 
 /**
