@@ -3,12 +3,22 @@
 	"version": "7.14.0",
 	"description": "Line-delimited iterator library for CSV, NDJSON, and other delimited formats.",
 	"keywords": [
+		"async-iterable",
+		"async-iterator",
 		"csv",
 		"delimited",
+		"excel",
 		"iterator",
 		"jsonl",
 		"line-delimited",
-		"ndjson"
+		"ndjson",
+		"parallel-processing",
+		"spliterator",
+		"streaming",
+		"tsv",
+		"web-streams",
+		"worker-threads",
+		"xlsx"
 	],
 	"homepage": "https://github.com/sister-software/spliterator",
 	"bugs": {
