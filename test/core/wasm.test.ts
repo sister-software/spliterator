@@ -573,6 +573,34 @@ describe("WASM SIMD scanner", () => {
 			expect(result).toMatchObject({ cursor: 2, units: 2, cellStartUnits: 2 })
 		})
 
+		test("stops at max_cells inside the SIMD loop, in the first and a later vector", async () => {
+			// 35 bytes: two full 16-byte vectors run through the SIMD loop before the scalar tail. The 6-byte case above
+			// only reaches the tail.
+			const bytes = encoder.encode("aaaa,bbbb,cccc,dddd,eeee,ffff,gggg\n")
+
+			// Filled by the comma at 9, in the first vector.
+			const first = await scan(bytes, { maxCells: 2 })
+
+			expect(first.cells).toEqual([
+				[0, 4, 0],
+				[5, 9, 0],
+			])
+
+			expect(first).toMatchObject({ cursor: 10, units: 10, cellStartUnits: 10 })
+
+			// Filled by the comma at 19, in the second vector.
+			const second = await scan(bytes, { maxCells: 4 })
+
+			expect(second.cells).toEqual([
+				[0, 4, 0],
+				[5, 9, 0],
+				[10, 14, 0],
+				[15, 19, 0],
+			])
+
+			expect(second).toMatchObject({ cursor: 20, units: 20, cellStartUnits: 20 })
+		})
+
 		test("carries an open quoted cell across calls", async () => {
 			const first = await scan(encoder.encode('"ab'))
 

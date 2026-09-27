@@ -374,6 +374,8 @@ pub unsafe extern "C" fn scan_csv_cells(
         end_units: i32,
         row_end: bool,
     ) -> bool {
+        // Reachable only when the kernel is entered with `max_cells == 0`: every caller returns as soon as a
+        // successful close fills the buffer, so a full buffer never meets another delimiter otherwise.
         if *count >= max_cells {
             return false;
         }
