@@ -121,6 +121,32 @@ export function splitRowColumns(
 	row: Uint8Array,
 	columnDelimiter: CharacterSequence,
 	decoder: TextDecoder,
+	enableQuoteHandling: boolean,
+	trim = false
+): string[] {
+	const columns = splitRowColumnsRaw(row, columnDelimiter, decoder, enableQuoteHandling)
+
+	if (trim) {
+		for (let i = 0; i < columns.length; i++) {
+			let column = columns[i]!.trim()
+
+			// Padding outside the quotes (` " Ada " `) is malformed under RFC 4180 but common. The edge-based unquote in
+			// the raw pass could not see the quotes, so unquote what trimming has exposed, then trim what was inside.
+			if (enableQuoteHandling && column.charCodeAt(0) === DOUBLE_QUOTE_CODE) {
+				column = unquoteColumn(column).trim()
+			}
+
+			columns[i] = column
+		}
+	}
+
+	return columns
+}
+
+function splitRowColumnsRaw(
+	row: Uint8Array,
+	columnDelimiter: CharacterSequence,
+	decoder: TextDecoder,
 	enableQuoteHandling: boolean
 ): string[] {
 	const delimiter = delimiterAsString(columnDelimiter)

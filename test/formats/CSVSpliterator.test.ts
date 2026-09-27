@@ -225,3 +225,35 @@ test("Async: Empty fields are preserved between consecutive column delimiters", 
 		["1", "", "", "", "5"],
 	])
 })
+
+test("trim: columns and header cells are trimmed by default, after unquoting", ({ expect }) => {
+	const source = new TextEncoder().encode(' Name , Age \n " Ada " , 36 \r\nBob,  41\n')
+
+	expect(CSVSpliterator.from(source).toArray()).toEqual([
+		{ name: "Ada", age: "36" },
+		{ name: "Bob", age: "41" },
+	])
+
+	expect(CSVSpliterator.from(source, { mode: "array", header: false }).toArray()).toEqual([
+		["Name", "Age"],
+		["Ada", "36"],
+		["Bob", "41"],
+	])
+})
+
+test("trim: false keeps the padding", ({ expect }) => {
+	const source = new TextEncoder().encode("a, b \n 1 ,2\n")
+
+	expect(CSVSpliterator.from(source, { mode: "array", header: false, trim: false }).toArray()).toEqual([
+		["a", " b "],
+		[" 1 ", "2"],
+	])
+})
+
+test("trim applies on the async path", async ({ expect }) => {
+	async function* source() {
+		yield new TextEncoder().encode(" x , y \n 1 , 2 \n")
+	}
+
+	expect(await CSVSpliterator.fromAsync(source()).toArray()).toEqual([{ x: "1", y: "2" }])
+})

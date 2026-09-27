@@ -69,6 +69,14 @@ export interface CSVSpliteratorInit extends SpliteratorInit, RowSpliteratorInit<
 	 * @default true
 	 */
 	crlf?: boolean
+
+	/**
+	 * Trim leading and trailing whitespace from every column, header cells included, after quotes are stripped. RFC 4180
+	 * treats that whitespace as part of the field; real-world sources pad it. Pass `false` to keep it.
+	 *
+	 * @default true
+	 */
+	trim?: boolean
 }
 
 /**
@@ -92,6 +100,7 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 		// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
 		// never carries a stray `\r` on Windows-lineage sources.
 		crlf = true,
+		trim = true,
 		take = Infinity,
 		drop = 0,
 		...rowInit
@@ -114,7 +123,7 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 
 		if (result.done) return
 
-		const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling)
+		const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling, trim)
 		const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
 
 		transformers = bindTransformers(headers, transformersInput)
@@ -129,7 +138,7 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 
 		if (yieldCount >= yieldLimit) break
 
-		const columns = splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling)
+		const columns = splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling, trim)
 
 		yield emitter ? emitter(columns, transformers) : columns
 
@@ -169,7 +178,16 @@ export abstract class CSVSpliterator {
 	 * @see {@linkcode countAsync} for files and other asynchronous sources.
 	 */
 	public static count(source: CharacterSequenceInput, init: CSVSpliteratorInit = {}): number {
-		const { header = true, enableQuoteHandling = true, crlf = true, drop = 0, take = Infinity, ...rowInit } = init
+		const {
+			header = true,
+			enableQuoteHandling = true,
+			crlf = true,
+			trim: _trim,
+			drop = 0,
+			take = Infinity,
+			...rowInit
+		} = init
+
 		const rows = Spliterator.fromSync(source, { ...rowInit, crlf, enableQuoteHandling })
 
 		if (header && rows.next().done) return 0
@@ -205,7 +223,15 @@ export abstract class CSVSpliterator {
 		source: AsyncDataResource | AsyncChunkIterator,
 		init: CSVSpliteratorInit & AdaptiveSourceInit = {}
 	): Promise<number> {
-		const { header = true, enableQuoteHandling = true, crlf = true, drop = 0, take = Infinity, ...rowInit } = init
+		const {
+			header = true,
+			enableQuoteHandling = true,
+			crlf = true,
+			trim: _trim,
+			drop = 0,
+			take = Infinity,
+			...rowInit
+		} = init
 
 		const rows = await openDelimitedRows(source, { ...rowInit, crlf, enableQuoteHandling })
 		const iterator = Symbol.asyncIterator in rows ? rows[Symbol.asyncIterator]() : rows[Symbol.iterator]()
@@ -328,6 +354,7 @@ export abstract class CSVSpliterator {
 			// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
 			// never carries a stray `\r` on Windows-lineage sources.
 			crlf = true,
+			trim = true,
 			take = Infinity,
 			drop = 0,
 			...rowInit
@@ -354,7 +381,7 @@ export abstract class CSVSpliterator {
 
 				if (result.done) return rows
 
-				const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling)
+				const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling, trim)
 				const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
 
 				transformers = bindTransformers(headers, transformersInput)
@@ -364,7 +391,7 @@ export abstract class CSVSpliterator {
 		}
 
 		let sequence: AsyncSequence<unknown> = AsyncSequence.from<Uint8Array>(openRows).map((row) => {
-			const columns = splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling)
+			const columns = splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling, trim)
 
 			return emitter ? emitter(columns, transformers) : columns
 		})

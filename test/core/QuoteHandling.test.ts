@@ -183,7 +183,8 @@ test("CSV fast path: an unmatched quote opens a region that runs to EOF, as it d
 	// Malformed CSV has no RFC 4180 rule for a lone `"` mid-field. The row splitter opens a quoted region on it just as
 	// the column splitter does, so the row continues through the newline. This test preserves that interpretation.
 	const source = encoder.encode('h1,h2\n5" pipe,b\n')
-	const rows = Array.from(CSVSpliterator.from(source, { mode: "array", enableQuoteHandling: true }))
+	// The swallowed newline is the point, so this is a `trim: false` parity case.
+	const rows = Array.from(CSVSpliterator.from(source, { mode: "array", enableQuoteHandling: true, trim: false }))
 
 	expect(rows).toEqual([['5" pipe,b\n']])
 })
