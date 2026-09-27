@@ -26,6 +26,12 @@ export { AsyncSpliterator }
 export type { AsyncSpliteratorInit, SpliteratorInit }
 
 /**
+ * Bytes staged into the SIMD kernel per quote-aware scan call. Large enough that the copy is a small share of the scan,
+ * small enough that a source of any size stays bounded per call.
+ */
+const QUOTE_SCAN_WINDOW = 64 * 1024
+
+/**
  * A byte stream delimiting iterator.
  */
 export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Array>
@@ -191,6 +197,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 		this.#needle = new CharacterSequence(init.delimiter)
 
 		this.#readPosition = init.position ?? 0
+		this.#scanCursor = this.#readPosition
 
 		this.#highWaterMark = Math.max(this.#needle.length * 4, 4096)
 
@@ -283,6 +290,18 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 * The current byte index to perform read operations from.
 	 */
 	#readPosition: number
+
+	/**
+	 * How far the quote-aware scan has read. It runs ahead of {@linkcode #readPosition} while a record is open, because
+	 * the kernel is bounded and may return mid-record; the record then resumes from here with {@linkcode #insideQuotes}
+	 * carried. Equal to `#readPosition` outside quote mode.
+	 */
+	#scanCursor: number
+
+	/**
+	 * Whether the quote-aware scan stopped inside a double-quoted region.
+	 */
+	#insideQuotes = false
 
 	/**
 	 * The previous byte range seen while draining the buffer.
@@ -387,6 +406,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 
 				this.#indices.enqueue([this.#readPosition, this.#trimEnd(this.#readPosition, delimiterIndex)])
 				this.#readPosition = delimiterIndex + this.#needle.length
+				this.#scanCursor = this.#readPosition
 			}
 
 			return
@@ -396,39 +416,81 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 		// emitted slices keep their quotes verbatim — stripping and `""` unescaping belong to the
 		// consumer (CSVSpliterator does both). The tail after the last consumed delimiter is left
 		// to `#drain`, same as the plain path.
-		while (this.#readPosition < sourceByteLength && this.#indices.byteLength < this.#highWaterMark) {
-			const matches = this.#needle.searchMatches(
+		//
+		// The bounded WASM kernel carries quote state and emits ranges directly, resuming from
+		// `#scanCursor` when its result batch fills. It is what keeps a large quoted source from
+		// being scanned whole through `searchMatches`: one match object per delimiter, and above
+		// the kernel's result cap that call falls back to the JavaScript scanner. Measured on a
+		// 1M-row CSV, this path went from 969ms to the plain path's ~85ms.
+		//
+		// The kernel stages `[scanCursor, end)` into WASM memory on every call, so `end` is a window
+		// rather than the end of the source: handing it the whole remainder copied up to the full
+		// source per fill, thousands of times over a large one, and cost more than the scan it
+		// replaced. The record open at a window's edge resumes through the carried state.
+		while (this.#scanCursor < sourceByteLength && this.#indices.byteLength < this.#highWaterMark) {
+			const scan = this.#needle.scanRanges(
 				this.#source,
-				this.#doubleQuoteSequence,
-				this.#readPosition,
-				sourceByteLength
+				{
+					scanCursor: this.#scanCursor,
+					pendingSliceStart: this.#readPosition,
+					insideQuotes: this.#insideQuotes,
+				},
+				Math.min(sourceByteLength, this.#scanCursor + QUOTE_SCAN_WINDOW),
+				this.#doubleQuoteSequence
 			)
 
-			if (!matches.length) return
+			if (!scan) break
 
-			let sliceStart = this.#readPosition
-			let insideQuotes = false
+			for (let i = 0; i < scan.count; i++) {
+				const start = scan.ranges[i * 2]!
 
-			for (const match of matches) {
-				if (match.patternId === 1) {
-					insideQuotes = !insideQuotes
-
-					continue
-				}
-
-				// A delimiter inside quotes is part of the slice, so skip it.
-				if (insideQuotes) continue
-
-				this.#indices.enqueue([sliceStart, this.#trimEnd(sliceStart, match.offset)])
-				sliceStart = match.offset + this.#needle.length
+				this.#indices.enqueue([start, this.#trimEnd(start, scan.ranges[i * 2 + 1]!)])
 			}
 
-			// No delimiter was consumed (e.g. an unclosed quote swallows the rest of the source) —
-			// leave the tail to `#drain` rather than rescanning the same matches forever.
-			if (sliceStart === this.#readPosition) return
+			const previousCursor = this.#scanCursor
+			this.#scanCursor = scan.scanCursor
+			this.#readPosition = scan.pendingSliceStart
+			this.#insideQuotes = scan.insideQuotes
 
-			this.#readPosition = sliceStart
+			if (this.#scanCursor >= sourceByteLength) return
+
+			if (this.#scanCursor <= previousCursor) break
 		}
+
+		if (this.#scanCursor >= sourceByteLength || this.#indices.byteLength >= this.#highWaterMark) return
+
+		// The JavaScript fallback, for a source below the kernel's threshold or a scanner that has
+		// not loaded. It resumes from wherever the kernel left off, with its quote state, and scans
+		// the rest of the source in one pass.
+		const matches = this.#needle.searchMatches(
+			this.#source,
+			this.#doubleQuoteSequence,
+			this.#scanCursor,
+			sourceByteLength
+		)
+
+		let sliceStart = this.#readPosition
+		let insideQuotes = this.#insideQuotes
+
+		for (const match of matches) {
+			if (match.patternId === 1) {
+				insideQuotes = !insideQuotes
+
+				continue
+			}
+
+			// A delimiter inside quotes is part of the slice, so skip it.
+			if (insideQuotes) continue
+
+			this.#indices.enqueue([sliceStart, this.#trimEnd(sliceStart, match.offset)])
+			sliceStart = match.offset + this.#needle.length
+		}
+
+		// Everything has been scanned; the tail after the last consumed delimiter (an unclosed
+		// quote swallows the rest of the source) is left to `#drain`.
+		this.#scanCursor = sourceByteLength
+		this.#readPosition = sliceStart
+		this.#insideQuotes = insideQuotes
 	}
 
 	//#endregion

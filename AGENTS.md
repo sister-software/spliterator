@@ -197,6 +197,8 @@ The parallel-parsing layers are tested bottom-up so the worker protocol is verif
 
 - **`caseProfile` has two fast paths that the predicates depend on**: ASCII code units are classified by range with no allocation, and a non-ASCII position runs one sticky `UNCASED_RUN` exec to skip a whole caseless run (a Korean address went 1412ns → 109ns). Rewriting it as a `for..of` over `toUpperCase()`/`toLowerCase()` per character reads simpler and is 4× slower on ASCII and 13× on CJK. `titleCase` sits at ~150 MB/s on ASCII; a `Uint16Array` + `String.fromCharCode.apply` rewrite was measured and is not faster.
 
+- **`scanRanges` stages `[scanCursor, end)` into WASM memory per call, so `end` must be a window**: the sync `Spliterator` passes `min(source, scanCursor + 64 KiB)`, never the whole source. Handing it the remainder copied up to the full source per 4 KiB fill and made a 1M-row quoted CSV scan 969ms against 85ms plain; windowed it is 62ms. The record open at a window's edge resumes through the carried `pendingSliceStart`/`insideQuotes`, which is the kernel's contract. Before this the sync quote path scanned the whole remainder through `searchMatches`, one match object per delimiter, and above `WASM_MAX_RESULTS` that call falls back to the JS scanner.
+
 - **`Array.shift()` is O(n)**: Avoid `shift()` on large arrays in hot paths. Use a `head` pointer instead (`chunks[head++]`).
 
 ## Known Performance Issues

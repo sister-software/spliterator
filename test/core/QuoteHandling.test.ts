@@ -24,13 +24,14 @@
 
 import {
 	AsyncSpliterator,
+	CharacterSequence,
 	CSVSpliterator,
 	JSONSpliterator,
 	smartSnakeCase,
 	Spliterator,
 	TextSpliterator,
 } from "spliterator"
-import { test } from "vitest"
+import { describe, test } from "vitest"
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -394,3 +395,47 @@ test("JSONSpliterator.fromAsync accepts an async chunk iterator", async ({ expec
 })
 
 //#endregion
+
+describe("sync quote mode above the SIMD threshold", () => {
+	// A quoted source large enough for the WASM kernel and far larger than the sync engine's 4 KiB high-water mark, so
+	// the scan stops and resumes mid-record many times, with quoted newlines and delimiters that must not split. The
+	// expectation is String-derived, and the async engine over the same bytes must agree.
+	const rows: string[] = []
+
+	for (let i = 0; i < 20_000; i++) {
+		rows.push(i % 7 === 0 ? `${i},"multi\nline, ""quoted"" field",tail` : `${i},plain field ${i},tail`)
+	}
+
+	const text = rows.join("\n") + "\n"
+	const bytes = encoder.encode(text)
+
+	test("row ranges match the async engine and the String-derived expectation", async ({ expect }) => {
+		await CharacterSequence.whenReady()
+
+		const sync = Array.from(Spliterator.fromSync(bytes, { enableQuoteHandling: true }), (row) => decoder.decode(row))
+
+		const async = await Array.fromAsync(
+			await Spliterator.fromAsync(
+				(async function* () {
+					yield bytes
+				})(),
+				{ enableQuoteHandling: true }
+			),
+			(row) => decoder.decode(row)
+		)
+
+		expect(sync).toEqual(rows)
+		expect(async).toEqual(rows)
+	})
+
+	test("CSVSpliterator.from parses the same source into the expected fields", async ({ expect }) => {
+		await CharacterSequence.whenReady()
+
+		const parsed = CSVSpliterator.from(bytes, { mode: "array", header: false }).toArray()
+
+		expect(parsed).toHaveLength(rows.length)
+		expect(parsed[0]).toEqual(["0", 'multi\nline, "quoted" field', "tail"])
+		expect(parsed[1]).toEqual(["1", "plain field 1", "tail"])
+		expect(parsed[7]).toEqual(["7", 'multi\nline, "quoted" field', "tail"])
+	})
+})
