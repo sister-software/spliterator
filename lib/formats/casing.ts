@@ -143,11 +143,6 @@ export interface CaseOptions {
 }
 
 const LATIN_LETTER = /\p{Script=Latin}/u
-/**
- * A run of Latin letters, with the apostrophe that precedes it when there is one. The apostrophe decides whether a
- * short run is a word (`O'Brien`) or a possessive or contraction (`Mcdonald's`, `don't`, `rock 'n' roll`).
- */
-const LATIN_RUN = /(['\u2019]?)(\p{Script=Latin}+)|_/gu
 const CONTRACTION_LENGTH = 2
 const ASCII_MAX = 0x7f
 
