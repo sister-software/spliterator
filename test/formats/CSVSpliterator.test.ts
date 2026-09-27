@@ -257,3 +257,42 @@ test("trim applies on the async path", async ({ expect }) => {
 
 	expect(await CSVSpliterator.fromAsync(source()).toArray()).toEqual([{ x: "1", y: "2" }])
 })
+
+test("a column delimiter that does not round-trip through UTF-8 takes the byte path, with quotes and empties intact", ({
+	expect,
+}) => {
+	// 0xFF alone is not valid UTF-8, so `TextDecoder` would turn it into U+FFFD and a string split could never find it.
+	const delimiter = new Uint8Array([0xff])
+	const encoder = new TextEncoder()
+
+	const row = (...parts: string[]) => {
+		const out: number[] = []
+
+		parts.forEach((part, i) => {
+			if (i) { out.push(0xff) }
+
+			out.push(...encoder.encode(part))
+		})
+
+		return out
+	}
+
+	const source = new Uint8Array([...row("a", "", '"x\xFF y"', ""), 0x0a, ...row("1", "2", "3", "4"), 0x0a])
+
+	expect(CSVSpliterator.from(source, { columnDelimiter: delimiter, header: false, mode: "array" }).toArray()).toEqual([
+		["a", "", "x\xFF y", ""],
+		["1", "2", "3", "4"],
+	])
+
+	expect(
+		CSVSpliterator.from(source, {
+			columnDelimiter: delimiter,
+			header: false,
+			mode: "array",
+			enableQuoteHandling: false,
+		}).toArray()
+	).toEqual([
+		["a", "", '"x\xFF y"', ""],
+		["1", "2", "3", "4"],
+	])
+})

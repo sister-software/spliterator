@@ -4,9 +4,9 @@
  * @author Teffen Ellis, et al.
  */
 
-import { CharacterSequence } from "../core/CharacterSequence.js"
+import type { CharacterSequence } from "../core/CharacterSequence.js"
+import { Spliterator } from "../core/Spliterator.js"
 
-const doubleQuoteSequence = new CharacterSequence('"')
 const DOUBLE_QUOTE_CODE = 0x22
 
 /**
@@ -185,29 +185,18 @@ function splitRowColumnsRaw(
 		return columns
 	}
 
-	// A delimiter that does not round-trip through UTF-8 keeps the byte scan.
-	if (!enableQuoteHandling) {
-		return columnDelimiter.searchAll(row).map(([start, end]) => decoder.decode(row.subarray(start, end)))
-	}
-
+	// A delimiter that does not round-trip through UTF-8 keeps the byte scan, through the engine itself: a row is a
+	// delimited source like any other, and the quote-aware split is written once, there. This costs ~3µs a row against
+	// ~0.3µs for the string path, which is why it is only for a delimiter the string path cannot represent.
 	const columns: string[] = []
-	let sliceStart = 0
-	let insideQuotes = false
 
-	for (const match of columnDelimiter.searchMatches(row, doubleQuoteSequence)) {
-		if (match.patternId === 1) {
-			insideQuotes = !insideQuotes
-
-			continue
-		}
-
-		if (insideQuotes) continue
-
-		columns.push(decodeColumn(row.subarray(sliceStart, match.offset), decoder, enableQuoteHandling))
-		sliceStart = match.offset + columnDelimiter.length
+	for (const column of Spliterator.fromSync(row, {
+		delimiter: columnDelimiter,
+		enableQuoteHandling,
+		skipEmpty: false,
+	})) {
+		columns.push(decodeColumn(column, decoder, enableQuoteHandling))
 	}
-
-	columns.push(decodeColumn(row.subarray(sliceStart), decoder, enableQuoteHandling))
 
 	return columns
 }
