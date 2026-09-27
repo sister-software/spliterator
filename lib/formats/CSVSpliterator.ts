@@ -494,7 +494,11 @@ export abstract class CSVSpliterator {
 
 					transformers = bindTransformers(headers, transformersInput)
 				} catch (error) {
-					await iterator.return?.()
+					try {
+						await iterator.return?.()
+					} catch {
+						// The original error is the one worth reporting.
+					}
 
 					throw error
 				}

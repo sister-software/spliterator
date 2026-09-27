@@ -40,6 +40,8 @@ export interface AdaptiveSourceInit extends AsyncSpliteratorInit {
 /**
  * Parses a wholly in-memory source on the bulk branch, after {@linkcode CharacterSequence.whenReady} has resolved.
  * `CSVSpliterator` passes the cell scan here; the default is the synchronous row engine.
+ *
+ * @internal
  */
 export type BulkParser<R> = (bytes: Uint8Array, init: AdaptiveSourceInit) => Iterable<R>
 
@@ -74,6 +76,22 @@ async function bulk<R>(
  *
  * @returns A potentially async iterable compatible with {@linkcode AsyncSequence}.
  */
+export async function openDelimitedRows(
+	source: AsyncDataResource | AsyncChunkIterator,
+	init?: AdaptiveSourceInit
+): Promise<AsyncIterable<Uint8Array> | Iterable<Uint8Array>>
+
+/**
+ * With a `bulkParser`, the bulk branch hands the whole source to it instead of the row engine.
+ *
+ * @internal
+ */
+export async function openDelimitedRows<R>(
+	source: AsyncDataResource | AsyncChunkIterator,
+	init: AdaptiveSourceInit | undefined,
+	bulkParser: BulkParser<R>
+): Promise<AsyncIterable<Uint8Array> | Iterable<Uint8Array | R>>
+
 export async function openDelimitedRows<R = Uint8Array>(
 	source: AsyncDataResource | AsyncChunkIterator,
 	init: AdaptiveSourceInit = {},

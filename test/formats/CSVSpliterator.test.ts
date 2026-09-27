@@ -635,4 +635,88 @@ describe("columnScan", () => {
 
 		expect(calls).toBeGreaterThan(0)
 	})
+
+	test("a nested parse inside a transformer does not disturb the outer batch", async ({ expect }) => {
+		await CharacterSequence.whenReady()
+
+		const inner = "x,y\n1,2\n3,4\n"
+		const outerRows = Array.from({ length: 300 }, (_, i) => `${i},v${i}`)
+		const outer = "id,val\n" + outerRows.join("\n") + "\n"
+		const expected = CSVSpliterator.from(outer, { columnScan: "rows" }).toArray()
+		const seen: unknown[] = []
+
+		const out = CSVSpliterator.from(outer, {
+			transformers: {
+				val: (v) => {
+					// Runs while the outer batch still has unread cells, and stages its own windows into WASM memory.
+					seen.push(CSVSpliterator.from(inner).toArray().length)
+
+					return v
+				},
+			},
+		}).toArray()
+
+		expect(out).toEqual(expected)
+		expect(seen).toHaveLength(outerRows.length)
+		expect(new Set(seen)).toEqual(new Set([2]))
+	})
+
+	test("two interleaved fast-path parsers stay independent", async ({ expect }) => {
+		await CharacterSequence.whenReady()
+
+		const a = "h\n" + Array.from({ length: 200 }, (_, i) => `a${i}`).join("\n") + "\n"
+		const b = "h\n" + Array.from({ length: 200 }, (_, i) => `b${i}`).join("\n") + "\n"
+		const one = CSVSpliterator.from(a, { mode: "array" })[Symbol.iterator]()
+		const two = CSVSpliterator.from(b, { mode: "array" })[Symbol.iterator]()
+		const merged: string[] = []
+
+		for (;;) {
+			const x = one.next()
+			const y = two.next()
+
+			if (x.done && y.done) break
+
+			if (!x.done) {
+				merged.push((x.value as string[])[0]!)
+			}
+
+			if (!y.done) {
+				merged.push((y.value as string[])[0]!)
+			}
+		}
+
+		expect(merged).toEqual(Array.from({ length: 200 }, (_, i) => [`a${i}`, `b${i}`]).flat())
+	})
+
+	test("a header-time throw closes a streaming source and propagates once", async ({ expect }) => {
+		let closed = false
+		let reads = 0
+
+		const source = {
+			async *[Symbol.asyncIterator]() {
+				try {
+					yield encoder.encode("name,")
+					yield encoder.encode("age\nAda,36\n")
+					yield encoder.encode("Bob,41\n")
+				} finally {
+					closed = true
+				}
+			},
+		}
+
+		const transformers = {
+			get name(): never {
+				reads++
+
+				throw new Error("boom")
+			},
+		}
+
+		await expect(
+			CSVSpliterator.fromAsync(source, { transformers, bulkThreshold: 0 } as never).toArray()
+		).rejects.toThrow("boom")
+
+		expect(reads).toBe(1)
+		expect(closed).toBe(true)
+	})
 })

@@ -292,4 +292,16 @@ describe("bulk parser hook", () => {
 
 		expect(ready).toBe(true)
 	})
+
+	test("a source exactly at the threshold takes the bulk parser; one byte over streams", async () => {
+		const at = new Uint8Array(64).fill(0x61)
+		const over = new Uint8Array(65).fill(0x61)
+		const atSource = chunkedSource(at, 1024)
+		const overSource = chunkedSource(over, 1024)
+		const bulk = await openDelimitedRows(atSource, { bulkThreshold: 64 }, marker)
+		const streamed = await openDelimitedRows(overSource, { bulkThreshold: 64 }, marker)
+
+		expect(Array.from(bulk as Iterable<string>)).toEqual(["bulk:64"])
+		expect(Symbol.asyncIterator in streamed).toBe(true)
+	})
 })

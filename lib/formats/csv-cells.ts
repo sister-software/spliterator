@@ -42,13 +42,14 @@ export interface CsvCellScanInit {
  * Row emptiness follows `Spliterator`: a row is empty when its byte range after CRLF removal is empty, before any BOM
  * removal, unquoting or trimming. `""`, a BOM-only row and `,,` are not empty.
  *
- * The caller has established eligibility (single ASCII delimiters, scanner loaded); this generator throws nothing of
- * its own and yields nothing until first pulled.
+ * The caller has established eligibility (single ASCII delimiters, scanner loaded); this generator yields nothing until
+ * first pulled and throws only on a broken scanner contract.
  */
 export function* scanCsvCells(source: Uint8Array, text: string, init: CsvCellScanInit): Generator<string[]> {
 	const { rowDelimiter, columnDelimiter, enableQuoteHandling, crlf, trim, skipEmpty } = init
 	const windowSize = init.windowSize ?? CELL_SCAN_WINDOW
-	const maxCells = init.maxCells ?? WASM_MAX_RESULTS
+	// A zero batch would return without advancing and loop forever; it is a test-only knob, so clamp it.
+	const maxCells = Math.max(1, init.maxCells ?? WASM_MAX_RESULTS)
 	const options = { rowDelimiter, columnDelimiter, quote: enableQuoteHandling ? 0x22 : -1, crlf, maxCells }
 	const length = source.byteLength
 

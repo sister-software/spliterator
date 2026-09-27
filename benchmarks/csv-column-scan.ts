@@ -69,12 +69,6 @@ function countRows(bytes: Uint8Array, init: object): void {
 	}
 }
 
-async function countRowsAsync(path: string, columnScan: "auto" | "rows"): Promise<void> {
-	for await (const row of CSVSpliterator.fromAsync(path, { columnScan })) {
-		sink.n += Object.keys(row).length
-	}
-}
-
 function firstRow(bytes: Uint8Array, columnScan: "auto" | "rows"): void {
 	const rows = CSVSpliterator.from(bytes, { columnScan })
 
