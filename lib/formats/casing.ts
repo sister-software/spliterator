@@ -109,6 +109,19 @@ export function smartCamelCase<T extends string>(name: T): T extends Uppercase<T
 }
 
 /**
+ * Word-split a name and titlecase every word: `firstName`, `first_name` and `FIRST_NAME` all become `First Name`, and
+ * `XMLHttpRequest` becomes `Xml Http Request`. The label form of a code or identifier.
+ *
+ * Unlike {@link titleCase}, this splits on camel boundaries and drops punctuation, so it is not length-preserving and
+ * `o'brien` becomes `O Brien`. Use {@link titleCase} for text and this for identifiers.
+ */
+export function capitalCase(name: string): string {
+	return splitWords(name)
+		.map((word) => word[0]!.toLocaleUpperCase() + word.slice(1).toLocaleLowerCase())
+		.join(" ")
+}
+
+/**
  * Converts a name into sentence case for display labels.
  *
  * `afghan_restaurant` and `afghanRestaurant` both become `Afghan restaurant`. The first word is capitalized; the rest

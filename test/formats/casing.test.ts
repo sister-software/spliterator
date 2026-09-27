@@ -14,6 +14,7 @@
 
 import {
 	camelCase,
+	capitalCase,
 	isLowerCase,
 	isUniformlyCased,
 	isUpperCase,
@@ -149,6 +150,20 @@ describe("matchCase", () => {
 		["", "avenue", "avenue"],
 	])("shapes the target like %j", (reference, target, expected) => {
 		expect(matchCase(target, reference)).toBe(expected)
+	})
+})
+
+describe("capitalCase", () => {
+	it.each([
+		["firstName", "First Name"],
+		["first_name", "First Name"],
+		["FIRST_NAME", "First Name"],
+		["XMLHttpRequest", "Xml Http Request"],
+		["date of birth", "Date Of Birth"],
+		["  hello--world  ", "Hello World"],
+		["", ""],
+	])("labels %j", (input, expected) => {
+		expect(capitalCase(input)).toBe(expected)
 	})
 })
 
