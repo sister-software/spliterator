@@ -155,6 +155,7 @@ The package's public entry points:
 
 - `.` → `out/index.js` — all public symbols
 - `./node/fs` → `out/node/fs/index.js` — Node file helpers (dynamically imported by core)
+- `./casing` → `out/lib/formats/casing.js` — the casing helpers alone, with no `node:` import anywhere in their static chain. Browser-bundled consumers (mailwoman's codex and core) import from here rather than the root, whose static chain reaches `node:stream/web`.
 
 Plus four worker-runtime subpaths (`./merge-async-iterators`, `./parallel-map-runtime`, `./segment-runtime`, `./segment-workers`), which exist so worker entry modules can import them by specifier rather than by relative path.
 
