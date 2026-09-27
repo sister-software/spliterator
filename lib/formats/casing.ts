@@ -328,6 +328,13 @@ export interface TitleCaseOptions {
 	 * @default "keep"
 	 */
 	short?: "keep" | "upper"
+
+	/**
+	 * Lowercase words that stay lowercase anywhere but first: the joining particles of a place name
+	 * (`Stratford-upon-Avon`, `Villeneuve-l'Archevêque`, `Weston-super-Mare`). A run is matched by its lowercased form,
+	 * and the first run of the input is always titlecased. The set is the locale's; this function only applies it.
+	 */
+	particles?: ReadonlySet<string>
 }
 
 /**
@@ -345,6 +352,7 @@ export interface TitleCaseOptions {
 export function titleCase(input: string, options?: TitleCaseOptions | number): string {
 	const shortLength = typeof options === "object" ? (options.shortLength ?? 0) : 0
 	const uppercaseShort = typeof options === "object" && options.short === "upper"
+	const particles = typeof options === "object" ? options.particles : undefined
 
 	let out = ""
 	// Index of the first character not yet copied into `out`.
@@ -352,12 +360,15 @@ export function titleCase(input: string, options?: TitleCaseOptions | number): s
 	// Index where the current Latin run begins, or -1 when not in a run.
 	let runStart = -1
 	let runAfterApostrophe = false
+	let runIndex = 0
 
 	const closeRun = (runEnd: number) => {
 		const run = input.slice(runStart, runEnd)
 		let converted: string
 
 		if (runAfterApostrophe && run.length <= CONTRACTION_LENGTH) {
+			converted = run.toLowerCase()
+		} else if (particles && runIndex > 0 && particles.has(run.toLowerCase())) {
 			converted = run.toLowerCase()
 		} else if (run.length <= shortLength) {
 			converted = uppercaseShort ? run.toUpperCase() : run
@@ -371,6 +382,8 @@ export function titleCase(input: string, options?: TitleCaseOptions | number): s
 		}
 
 		runStart = -1
+
+		runIndex++
 	}
 
 	for (let i = 0; i < input.length; i++) {
@@ -426,6 +439,25 @@ export function smartCapitalCase(input: string): string {
 	if (isUniformlyCased(input)) return input
 
 	return titleCase(input)
+}
+
+/**
+ * Apply `reference`'s case pattern to `target`: an all-uppercase reference uppercases the target, an all-lowercase one
+ * lowercases it, and anything mixed titlecases it. A reference with no cased letters counts as uppercase, and an empty
+ * one leaves the target as typed.
+ *
+ * The idiom for rewriting one token in a user's own casing: replacing `AVE` with `AVENUE`, `Ave` with `Avenue`.
+ */
+export function matchCase(target: string, reference: string): string {
+	if (!reference) return target
+
+	const { upper, lower } = caseProfile(reference)
+
+	if (lower === 0) return target.toUpperCase()
+
+	if (upper === 0) return target.toLowerCase()
+
+	return titleCase(target)
 }
 
 /**

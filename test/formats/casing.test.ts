@@ -17,6 +17,7 @@ import {
 	isLowerCase,
 	isUniformlyCased,
 	isUpperCase,
+	matchCase,
 	normalizeColumnNames,
 	sentenceCase,
 	smartCapitalCase,
@@ -122,6 +123,32 @@ describe("titleCase", () => {
 
 	it("works as an array callback", () => {
 		expect(["hello", "WORLD"].map(titleCase)).toEqual(["Hello", "World"])
+	})
+
+	it("keeps a locale's particles lowercase after the first word", () => {
+		const gb = new Set(["upon", "super", "on", "the"])
+		const fr = new Set(["de", "la", "l", "d", "sur"])
+
+		expect(titleCase("STRATFORD-UPON-AVON", { particles: gb })).toBe("Stratford-upon-Avon")
+		expect(titleCase("WESTON-SUPER-MARE", { particles: gb })).toBe("Weston-super-Mare")
+		expect(titleCase("THE MUMBLES", { particles: gb })).toBe("The Mumbles")
+		expect(titleCase("BISHOP'S STORTFORD", { particles: gb })).toBe("Bishop's Stortford")
+		expect(titleCase("villeneuve-l'archevêque", { particles: fr })).toBe("Villeneuve-l'Archevêque")
+		expect(titleCase("SAINT-JEAN-DE-LA-RUELLE", { particles: fr })).toBe("Saint-Jean-de-la-Ruelle")
+		expect(titleCase("de la salle", { particles: fr })).toBe("De la Salle")
+	})
+})
+
+describe("matchCase", () => {
+	it.each([
+		["AVE", "avenue", "AVENUE"],
+		["ave", "AVENUE", "avenue"],
+		["Ave", "avenue", "Avenue"],
+		["aVe", "AVENUE", "Avenue"],
+		["123", "avenue", "AVENUE"],
+		["", "avenue", "avenue"],
+	])("shapes the target like %j", (reference, target, expected) => {
+		expect(matchCase(target, reference)).toBe(expected)
 	})
 })
 
