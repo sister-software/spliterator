@@ -425,6 +425,7 @@ export abstract class CSVSpliterator {
 			// never carries a stray `\r` on Windows-lineage sources.
 			crlf = true,
 			trim = true,
+			columnScan = "auto",
 			take = Infinity,
 			drop = 0,
 			...rowInit
@@ -432,36 +433,78 @@ export abstract class CSVSpliterator {
 
 		const emitter = CSVSpliteratorEmitters[mode]
 		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? defaultColumnDelimiter)
+		const rowDelimiter = new CharacterSequence(rowInit.delimiter ?? Delimiters.LineFeed)
+		const skipEmpty = rowInit.skipEmpty ?? true
 		const decoder = new TextDecoder()
 
 		// Populated by the header pass below before the first row op runs, since the source thunk resolves on the first
 		// pull and the ops only run against what it returns.
 		let transformers: CSVTransformerEntry[] = []
 
-		const openRows = async (): Promise<AsyncIterable<Uint8Array> | Iterable<Uint8Array>> => {
+		/**
+		 * The bulk branch: eligibility, then the fatal decode as the last gate. Invalid UTF-8 hands the same bytes to the
+		 * row engine, which the map op below still understands. Runs after `whenReady`, on the first pull.
+		 */
+		const bulkParser = (bytes: Uint8Array): Iterable<Uint8Array | string[]> => {
+			const plan = cellScanEligibility({
+				columnScan,
+				rowDelimiter,
+				columnDelimiter,
+				enableQuoteHandling,
+				position: rowInit.position,
+				byteLength: bytes.byteLength,
+			})
+
+			const text = plan && CharacterSequence.hasScanner() ? decodeForCellScan(bytes) : null
+
+			if (!plan || text === null) {
+				return Spliterator.fromSync(bytes, { ...rowInit, crlf, enableQuoteHandling })
+			}
+
+			return scanCsvCells(bytes, text, {
+				rowDelimiter: plan.rowDelimiter,
+				columnDelimiter: plan.columnDelimiter,
+				enableQuoteHandling,
+				crlf,
+				trim,
+				skipEmpty,
+			})
+		}
+
+		const toColumns = (row: Uint8Array | string[]): string[] =>
+			Array.isArray(row) ? row : splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling, trim)
+
+		const openRows = async (): Promise<AsyncIterable<Uint8Array> | Iterable<Uint8Array | string[]>> => {
 			// Quote handling applies at both levels: rows must not split on newlines inside quotes,
 			// columns must not split on quoted column delimiters.
-			const rows = await openDelimitedRows(source, { ...rowInit, crlf, enableQuoteHandling })
+			const rows = await openDelimitedRows(source, { ...rowInit, crlf, enableQuoteHandling }, bulkParser)
 
 			if (header) {
 				// Both engines return `this` from their iterator method. Consuming the header row here advances the cursor the
 				// row ops will read. Returning `rows` afterwards resumes at row two rather than row one.
 				const iterator = Symbol.asyncIterator in rows ? rows[Symbol.asyncIterator]() : rows[Symbol.iterator]()
-				const result = await iterator.next()
 
-				if (result.done) return rows
+				try {
+					const result = await iterator.next()
 
-				const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling, trim)
-				const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
+					if (result.done) return rows
 
-				transformers = bindTransformers(headers, transformersInput)
+					const columns = toColumns(result.value)
+					const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
+
+					transformers = bindTransformers(headers, transformersInput)
+				} catch (error) {
+					await iterator.return?.()
+
+					throw error
+				}
 			}
 
 			return rows
 		}
 
-		let sequence: AsyncSequence<unknown> = AsyncSequence.from<Uint8Array>(openRows).map((row) => {
-			const columns = splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling, trim)
+		let sequence: AsyncSequence<unknown> = AsyncSequence.from<Uint8Array | string[]>(openRows).map((row) => {
+			const columns = toColumns(row)
 
 			return emitter ? emitter(columns, transformers) : columns
 		})

@@ -482,4 +482,157 @@ describe("columnScan", () => {
 			ready: true,
 		})
 	})
+
+	test("the async bulk branch takes the fast path and matches streaming and rows", async ({ expect }) => {
+		const spy = vi.spyOn(CharacterSequence, "scanCells")
+		const auto = await CSVSpliterator.fromAsync(fixturePath).toArray()
+		const autoCalls = spy.mock.calls.length
+
+		spy.mockClear()
+
+		const rows = await CSVSpliterator.fromAsync(fixturePath, { columnScan: "rows" }).toArray()
+		const streamed = await CSVSpliterator.fromAsync(fixturePath, { bulkThreshold: 0 } as never).toArray()
+		const otherCalls = spy.mock.calls.length
+
+		spy.mockRestore()
+		expect(autoCalls).toBeGreaterThan(0)
+		expect(otherCalls).toBe(0)
+		expect(auto).toEqual(rows)
+		expect(auto).toEqual(streamed)
+	})
+
+	test("an unsized single-chunk stream takes the fast path; a multi-chunk stream does not", async ({ expect }) => {
+		const bytes = encoder.encode("name,age\nAda,36\nBob,41\n")
+
+		const one = async function* () {
+			yield bytes
+		}
+
+		const many = async function* () {
+			yield bytes.subarray(0, 10)
+			yield bytes.subarray(10)
+		}
+
+		const expected = [
+			{ name: "Ada", age: "36" },
+			{ name: "Bob", age: "41" },
+		]
+
+		const spy = vi.spyOn(CharacterSequence, "scanCells")
+
+		expect(await CSVSpliterator.fromAsync(one()).toArray()).toEqual(expected)
+
+		const oneCalls = spy.mock.calls.length
+
+		spy.mockClear()
+		expect(await CSVSpliterator.fromAsync(many()).toArray()).toEqual(expected)
+
+		const manyCalls = spy.mock.calls.length
+
+		spy.mockRestore()
+		expect(oneCalls).toBeGreaterThan(0)
+		expect(manyCalls).toBe(0)
+	})
+
+	test("drop and take on the async bulk path keep fromAsync's callback order", async ({ expect }) => {
+		const source = async function* () {
+			yield encoder.encode("n\n1\n2\n3\n4\n")
+		}
+
+		const seen: string[] = []
+
+		const out = await CSVSpliterator.fromAsync(source(), {
+			drop: 1,
+			take: 2,
+			transformers: {
+				n: (v) => {
+					seen.push(v)
+
+					return Number(v)
+				},
+			},
+		}).toArray()
+
+		expect(out).toEqual([{ n: 2 }, { n: 3 }])
+		// fromAsync maps before it drops, so the dropped row's transformer still ran, as it does today.
+		expect(seen).toEqual(["1", "2", "3"])
+	})
+
+	test("take(0) leaves a deferred async source unopened", async ({ expect }) => {
+		let opened = false
+
+		const source = {
+			async *[Symbol.asyncIterator]() {
+				opened = true
+				yield encoder.encode("a,b\n1,2\n")
+			},
+		}
+
+		expect(await CSVSpliterator.fromAsync(source, { header: false, mode: "array" }).take(0).toArray()).toEqual([])
+		expect(opened).toBe(false)
+	})
+
+	test("invalid UTF-8 on the async bulk path falls back to rows", async ({ expect }) => {
+		const source = async function* () {
+			yield new Uint8Array([0x61, 0x2c, 0xff, 0x0a])
+		}
+
+		const spy = vi.spyOn(CharacterSequence, "scanCells")
+		const out = await CSVSpliterator.fromAsync(source(), { header: false, mode: "array" }).toArray()
+		const calls = spy.mock.calls.length
+
+		spy.mockRestore()
+		expect(out).toEqual([["a", "\uFFFD"]])
+		expect(calls).toBe(0)
+	})
+
+	test("a throwing transformer on the bulk path propagates once", async ({ expect }) => {
+		let calls = 0
+		let closed = false
+
+		const source = {
+			async *[Symbol.asyncIterator]() {
+				try {
+					yield encoder.encode("a,b\n1,2\n3,4\n")
+				} finally {
+					closed = true
+				}
+			},
+		}
+
+		await expect(
+			CSVSpliterator.fromAsync(source, {
+				transformers: {
+					a: () => {
+						calls++
+
+						throw new Error("boom")
+					},
+				},
+			}).toArray()
+		).rejects.toThrow("boom")
+
+		expect(calls).toBe(1)
+		expect(closed).toBe(true)
+	})
+
+	test("TSV and PSV inherit the fast path through their column delimiter", async ({ expect }) => {
+		const spy = vi.spyOn(CharacterSequence, "scanCells")
+
+		const source = async function* () {
+			yield encoder.encode("a\tb\n1\t2\n")
+		}
+
+		const out = await TSVSpliterator.fromAsync(source(), { header: false, mode: "array" }).toArray()
+		const calls = spy.mock.calls.length
+
+		spy.mockRestore()
+
+		expect(out).toEqual([
+			["a", "b"],
+			["1", "2"],
+		])
+
+		expect(calls).toBeGreaterThan(0)
+	})
 })
