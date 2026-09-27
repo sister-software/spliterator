@@ -194,6 +194,8 @@ The parallel-parsing layers are tested bottom-up so the worker protocol is verif
 
 - **Pooled worker messages carry a `leaseId`**: a worker is handed to the next caller while a batch from the previous lease may still be in flight, so every message is matched against the active lease and anything else is dropped. Adding a message type to `pool-worker-entry.ts` means carrying the id through it.
 
+- **`caseProfile` has two fast paths that the predicates depend on**: ASCII code units are classified by range with no allocation, and a non-ASCII position runs one sticky `UNCASED_RUN` exec to skip a whole caseless run (a Korean address went 1412ns → 109ns). Rewriting it as a `for..of` over `toUpperCase()`/`toLowerCase()` per character reads simpler and is 4× slower on ASCII and 13× on CJK. `titleCase` sits at ~150 MB/s on ASCII; a `Uint16Array` + `String.fromCharCode.apply` rewrite was measured and is not faster.
+
 - **`Array.shift()` is O(n)**: Avoid `shift()` on large arrays in hot paths. Use a `head` pointer instead (`chunks[head++]`).
 
 ## Known Performance Issues

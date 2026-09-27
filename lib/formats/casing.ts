@@ -170,24 +170,68 @@ interface CaseProfile {
 	nonAscii: boolean
 }
 
+const CODE_A = 0x41
+const CODE_Z = 0x5a
+const CODE_a = 0x61
+const CODE_z = 0x7a
+const CODE_UNDERSCORE = 0x5f
+const CODE_APOSTROPHE = 0x27
+const CODE_RIGHT_SINGLE_QUOTE = 0x20_19
+const SURROGATE_HIGH_START = 0xd8_00
+const SURROGATE_HIGH_END = 0xdb_ff
+
+/**
+ * Read the code point at `index`, so a supplementary character is examined whole rather than as two surrogates.
+ */
+function codePointLengthAt(input: string, index: number): number {
+	const unit = input.charCodeAt(index)
+
+	return unit >= SURROGATE_HIGH_START && unit <= SURROGATE_HIGH_END && index + 1 < input.length ? 2 : 1
+}
+
+/**
+ * A run of characters with no case. Sticky, so one `exec` at a Korean, Chinese, Japanese, digit or punctuation position
+ * skips the whole run instead of classifying it a character at a time.
+ */
+const UNCASED_RUN = /[^\p{Lu}\p{Ll}\p{Lt}]+/uy
+
 function caseProfile(input: string): CaseProfile {
 	const profile: CaseProfile = { upper: 0, lower: 0, nonLatin: false, nonAscii: false }
 
-	for (const ch of input) {
-		if (ch.codePointAt(0)! > ASCII_MAX) {
-			profile.nonAscii = true
+	for (let i = 0; i < input.length; i++) {
+		const code = input.charCodeAt(i)
+
+		// ASCII is the overwhelmingly common case, and needs no allocation to classify.
+		if (code <= ASCII_MAX) {
+			if (code >= CODE_A && code <= CODE_Z) {
+				profile.upper++
+			} else if (code >= CODE_a && code <= CODE_z) {
+				profile.lower++
+			}
+
+			continue
 		}
 
-		const upper = ch.toUpperCase()
-		const lower = ch.toLowerCase()
+		profile.nonAscii = true
 
-		if (upper === lower) continue
+		UNCASED_RUN.lastIndex = i
+		const uncased = UNCASED_RUN.exec(input)
+
+		if (uncased) {
+			i += uncased[0].length - 1
+
+			continue
+		}
+
+		const length = codePointLengthAt(input, i)
+		const ch = input.slice(i, i + length)
+		i += length - 1
 
 		if (!LATIN_LETTER.test(ch)) {
 			profile.nonLatin = true
 		}
 
-		if (ch === upper) {
+		if (ch === ch.toUpperCase()) {
 			profile.upper++
 		} else {
 			profile.lower++
@@ -285,23 +329,77 @@ export interface TitleCaseOptions {
  */
 export function titleCase(input: string, options?: TitleCaseOptions | number): string {
 	const shortLength = typeof options === "object" ? (options.shortLength ?? 0) : 0
-	const short = typeof options === "object" ? (options.short ?? "keep") : "keep"
+	const uppercaseShort = typeof options === "object" && options.short === "upper"
 
-	return input.replaceAll(LATIN_RUN, (match: string, apostrophe: string | undefined, run: string | undefined) => {
-		if (run === undefined) return " "
+	let out = ""
+	// Index of the first character not yet copied to `out`.
+	let copied = 0
+	// Index where the current Latin run began, or -1 outside a run.
+	let runStart = -1
+	let runAfterApostrophe = false
 
+	const closeRun = (runEnd: number) => {
+		const run = input.slice(runStart, runEnd)
 		let converted: string
 
-		if (apostrophe && run.length <= CONTRACTION_LENGTH) {
+		if (runAfterApostrophe && run.length <= CONTRACTION_LENGTH) {
 			converted = run.toLowerCase()
 		} else if (run.length <= shortLength) {
-			converted = short === "upper" ? run.toUpperCase() : run
+			converted = uppercaseShort ? run.toUpperCase() : run
 		} else {
 			converted = run[0]!.toUpperCase() + run.slice(1).toLowerCase()
 		}
 
-		return converted.length === run.length ? (apostrophe ?? "") + converted : match
-	})
+		if (converted !== run && converted.length === run.length) {
+			out += input.slice(copied, runStart) + converted
+			copied = runEnd
+		}
+
+		runStart = -1
+	}
+
+	for (let i = 0; i < input.length; i++) {
+		const code = input.charCodeAt(i)
+		let latin: boolean
+		let length = 1
+
+		if (code <= ASCII_MAX) {
+			latin = (code >= CODE_A && code <= CODE_Z) || (code >= CODE_a && code <= CODE_z)
+		} else {
+			length = codePointLengthAt(input, i)
+			latin = LATIN_LETTER.test(input.slice(i, i + length))
+		}
+
+		if (latin) {
+			if (runStart === -1) {
+				runStart = i
+
+				runAfterApostrophe =
+					i > 0 && (input.charCodeAt(i - 1) === CODE_APOSTROPHE || input.charCodeAt(i - 1) === CODE_RIGHT_SINGLE_QUOTE)
+			}
+
+			i += length - 1
+
+			continue
+		}
+
+		if (runStart !== -1) {
+			closeRun(i)
+		}
+
+		if (code === CODE_UNDERSCORE) {
+			out += input.slice(copied, i) + " "
+			copied = i + 1
+		}
+
+		i += length - 1
+	}
+
+	if (runStart !== -1) {
+		closeRun(input.length)
+	}
+
+	return copied === 0 ? input : out + input.slice(copied)
 }
 
 /**
