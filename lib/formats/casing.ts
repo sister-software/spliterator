@@ -7,17 +7,19 @@
 import type { CamelCase, SnakeCase } from "type-fest"
 
 /**
- * Any character that is not a letter, a digit, or an underscore in any script.
+ * Matches any character that is not a letter, a digit, or an underscore, across all scripts.
  *
- * `\W` cannot serve here: it is `[^A-Za-z0-9_]` in JavaScript, with or without the `u` flag, so every character of a
- * non-Latin header is "non-word". A Korean CSV header (`영업상태명`) collapsed to a single `_`, and a file of them became
- * `_`, `__2`, `__3` … once `normalizeColumnNames` de-duplicated the collisions — the header was not renamed, it was
- * destroyed, and every value became unreachable by name.
+ * `\W` is not usable here. In JavaScript (with or without `u`) it means `[^A-Za-z0-9_]`, so every character in a
+ * non-Latin header is treated as "non-word".
+ *
+ * For example, a Korean CSV header (`영업상태명`) was reduced to `_`, and a file full of such headers became `_`, `__2`,
+ * `__3`, … after `normalizeColumnNames` de-duplicated collisions. The headers were effectively destroyed, making values
+ * unreachable by name.
  */
 const NON_KEY_CHARACTER = /[^\p{L}\p{N}_]+/gu
 
-// These are the word-boundary rules. The separator is a NUL
-// because it cannot be a word character matched by the stripping expression.
+// Word-boundary split rules. We use a NUL separator because
+// it cannot be matched as a word character by the stripping expression.
 const SPLIT_LOWER_UPPER = /([\p{Ll}\d])(\p{Lu})/gu
 const SPLIT_UPPER_UPPER = /(\p{Lu})([\p{Lu}][\p{Ll}])/gu
 const STRIP_NON_WORD = /[^\p{L}\d]+/giu
@@ -53,8 +55,8 @@ export function snakeCase(input: string): string {
 /**
  * Converts a name to snake_case, unless the name is already in all caps.
  *
- * A caseless script takes the all-caps branch, because `toUpperCase()` is the identity on Korean, Japanese, Chinese,
- * Hebrew and Arabic. That is the right branch. Those names have no case to convert and survive as written.
+ * Caseless scripts take the all-caps branch because `toUpperCase()` is an identity transform for Korean, Japanese,
+ * Chinese, Hebrew, and Arabic. That is intentional: these names have no case to convert and should be preserved.
  */
 export function smartSnakeCase<T extends string>(name: T): T extends Uppercase<T> ? T : SnakeCase<T>
 export function smartSnakeCase(name: string): string
@@ -107,8 +109,10 @@ export function smartCamelCase<T extends string>(name: T): T extends Uppercase<T
 }
 
 /**
- * Sentence-case a name into a display label: `afghan_restaurant` and `afghanRestaurant` both become `Afghan
- * restaurant`. The first word is capitalized and the rest are lowercased.
+ * Converts a name into sentence case for display labels.
+ *
+ * `afghan_restaurant` and `afghanRestaurant` both become `Afghan restaurant`. The first word is capitalized; the rest
+ * are lowercased.
  */
 export function sentenceCase(name: string): string {
 	const sentence = splitWords(name)
@@ -119,23 +123,28 @@ export function sentenceCase(name: string): string {
 }
 
 /**
- * Options shared by the case predicates and {@link titleCase}. Every function taking them also accepts a number in the
- * same position and ignores it, so they can be handed straight to `Array.prototype.some`, `every`, `filter` and `map`
- * without a wrapping arrow.
+ * Options shared by case predicates and {@link titleCase}.
+ *
+ * Functions that accept these options also accept a number in the same position and ignore it. This makes them usable
+ * directly with `Array.prototype.some`, `every`, `filter`, and `map` without a wrapper callback.
  */
 export interface CaseOptions {
 	/**
-	 * Cased letters the input needs before the predicate can be true. Keeps a digit-only, punctuation-only or single
-	 * stray token from reading as a whole shouting or whispering input.
+	 * Minimum number of cased letters required before a predicate can be true.
+	 *
+	 * Prevents digit-only, punctuation-only, or single stray tokens from being interpreted as fully upper/lower input.
 	 *
 	 * @default 1
 	 */
 	minimumCased?: number
 
 	/**
-	 * Which characters the input may contain. `"latin"` refuses a letter from any other script; `"ascii"` refuses any
-	 * character above U+007F. Case conversion outside Latin script is locale-sensitive and can change string length, so a
-	 * caller that must keep offsets stable gates on this.
+	 * Restricts which characters the input may contain.
+	 *
+	 * `"latin"` rejects letters from other scripts; `"ascii"` rejects any character above U+007F.
+	 *
+	 * Case conversion outside Latin script can be locale-sensitive and may change string length, so callers that need
+	 * stable offsets can enforce that here.
 	 *
 	 * @default "any"
 	 */
@@ -176,7 +185,9 @@ const SURROGATE_HIGH_START = 0xd8_00
 const SURROGATE_HIGH_END = 0xdb_ff
 
 /**
- * Read the code point at `index`, so a supplementary character is examined whole rather than as two surrogates.
+ * Returns the UTF-16 code-point length at `index`.
+ *
+ * This ensures supplementary characters are examined as one code point rather than two surrogate code units.
  */
 function codePointLengthAt(input: string, index: number): number {
 	const unit = input.charCodeAt(index)
@@ -185,8 +196,10 @@ function codePointLengthAt(input: string, index: number): number {
 }
 
 /**
- * A run of characters with no case. Sticky, so one `exec` at a Korean, Chinese, Japanese, digit or punctuation position
- * skips the whole run instead of classifying it a character at a time.
+ * Matches a consecutive run of uncased characters.
+ *
+ * Sticky mode (`y`) lets a single `exec` at Korean, Chinese, Japanese, digit, or punctuation text skip the whole run at
+ * once, instead of classifying each character individually.
  */
 const UNCASED_RUN = /[^\p{Lu}\p{Ll}\p{Lt}]+/uy
 
@@ -196,7 +209,7 @@ function caseProfile(input: string): CaseProfile {
 	for (let i = 0; i < input.length; i++) {
 		const code = input.charCodeAt(i)
 
-		// ASCII is the overwhelmingly common case, and needs no allocation to classify.
+		// ASCII is the common fast path and needs no allocation to classify.
 		if (code <= ASCII_MAX) {
 			if (code >= CODE_A && code <= CODE_Z) {
 				profile.upper++
@@ -237,7 +250,9 @@ function caseProfile(input: string): CaseProfile {
 }
 
 /**
- * Normalize the second argument of a predicate: a number is an array index and means "no options".
+ * Normalizes the optional predicate argument.
+ *
+ * A numeric argument is treated as an array index (from callback signatures) and means "no options".
  */
 function toOptions(options: CaseOptions | number | undefined): Required<CaseOptions> {
 	if (typeof options !== "object") return { minimumCased: 1, script: "any" }
@@ -259,8 +274,9 @@ function admits(profile: CaseProfile, script: CaseOptions["script"]): boolean {
  * `"123"` and a Korean header have no cased characters, so they are neither upper nor lower case; see
  * {@link isUniformlyCased} for the predicate that accepts them.
  *
- * With `minimumCased` and `script` this is the strict "shouting input" detector: `isUpperCase(text, { minimumCased: 3,
- * script: "latin" })` is true only for a Latin-script input with three or more capitals and no lowercase letter.
+ * With `minimumCased` and `script`, this becomes a strict "shouting input" detector. `isUpperCase(text, { minimumCased:
+ * 3, script: "latin" })` is true only for Latin-script input with three or more uppercase letters and no lowercase
+ * letters.
  */
 export function isUpperCase(input: string, options?: CaseOptions | number): boolean {
 	const { minimumCased, script } = toOptions(options)
@@ -282,7 +298,7 @@ export function isLowerCase(input: string, options?: CaseOptions | number): bool
 }
 
 /**
- * Predicate to determine if a given string is uniformly cased, i.e. it does not mix upper and lower case.
+ * Returns true when a string is uniformly cased (it does not mix upper and lower case).
  *
  * A string with no cased characters at all (`"123"`, `"한글"`) is uniformly cased. `null` and the empty string are not.
  */
@@ -296,9 +312,11 @@ export function isUniformlyCased(input: string | null): boolean {
 
 export interface TitleCaseOptions {
 	/**
-	 * A run of Latin letters this long or shorter is "short" and handled by {@link TitleCaseOptions.short} instead of
-	 * being titlecased. In address text every run of one or two letters is an abbreviation (`NY`, `DC`, `NW`, `ST`) that
-	 * reads best uppercase, and titlecasing `NY` to `Ny` turns a region into a locality.
+	 * A run of Latin letters of this length or shorter is treated as "short" and handled by {@link TitleCaseOptions.short}
+	 * instead of normal titlecasing.
+	 *
+	 * In address text, one- or two-letter runs are often abbreviations (`NY`, `DC`, `NW`, `ST`) that read best in
+	 * uppercase; titlecasing `NY` to `Ny` can change meaning.
 	 *
 	 * @default 0
 	 */
@@ -313,23 +331,25 @@ export interface TitleCaseOptions {
 }
 
 /**
- * Titlecase each run of Latin letters: the first letter uppercased, the rest lowercased. `o'brien` becomes `O'Brien`
- * and `mcdonald's` becomes `Mcdonald's`. Characters outside Latin script, digits and punctuation pass through as typed,
- * so `first_name` becomes `First_Name`; use {@link sentenceCase} for a label from a code.
+ * Titlecases each run of Latin letters: first letter uppercase, remaining letters lowercase.
  *
- * Length-preserving by construction: a run whose case conversion changes its length (`İ` lowercases to two code units,
- * `ß` uppercases to `SS`) is kept as typed, so offsets into the input never move.
+ * `o'brien` becomes `O'Brien` and `mcdonald's` becomes `Mcdonald's`. Non-Latin text, digits, and punctuation pass
+ * through as typed, so `first_name` becomes `First_Name`; use {@link sentenceCase} to create labels from code-like
+ * names.
  *
- * Accepts a number in place of options and ignores it, so `strings.map(titleCase)` works.
+ * Length-preserving by design: if case conversion would change run length (`İ` lowercases to two code units, `ß`
+ * uppercases to `SS`), the original run is kept so offsets into the input remain stable.
+ *
+ * Accepts a number in place of options and ignores it, so `strings.map(titleCase)` works directly.
  */
 export function titleCase(input: string, options?: TitleCaseOptions | number): string {
 	const shortLength = typeof options === "object" ? (options.shortLength ?? 0) : 0
 	const uppercaseShort = typeof options === "object" && options.short === "upper"
 
 	let out = ""
-	// Index of the first character not yet copied to `out`.
+	// Index of the first character not yet copied into `out`.
 	let copied = 0
-	// Index where the current Latin run began, or -1 outside a run.
+	// Index where the current Latin run begins, or -1 when not in a run.
 	let runStart = -1
 	let runAfterApostrophe = false
 
@@ -398,7 +418,7 @@ export function titleCase(input: string, options?: TitleCaseOptions | number): s
 }
 
 /**
- * Titlecases a string, unless the string is uniformly cased, or an email address.
+ * Titlecases a string unless it is uniformly cased or appears to be an email address.
  */
 export function smartCapitalCase(input: string): string {
 	if (input.includes("@")) return input
@@ -409,7 +429,9 @@ export function smartCapitalCase(input: string): string {
 }
 
 /**
- * Titlecase a shouted string, leave anything else alone. The shape source dumps use when a field arrives all caps.
+ * Titlecases shouting input and leaves everything else unchanged.
+ *
+ * Useful for shape-source dumps where fields often arrive in all caps.
  */
 export function titleCaseIfUpper(input: string, options?: CaseOptions | number): string {
 	return isUpperCase(input, options) ? titleCase(input) : input
@@ -418,10 +440,11 @@ export function titleCaseIfUpper(input: string, options?: CaseOptions | number):
 /**
  * Given an array of column names, normalize them to ensure they are unique and usable as object keys.
  *
- * Keys are LOWER CASE, where {@link smartSnakeCase} leaves an all-caps name as it found it. A column key is an
- * identifier a caller types. One source's `LON,LAT,NUMBER` is another's `lon,lat,number` for the same data. A reader
- * that preserves the difference makes every consumer handle both spellings. `smartSnakeCase` keeps its own contract for
- * callers naming things other than columns.
+ * Keys are lowercased, even though {@link smartSnakeCase} preserves all-caps names.
+ *
+ * Column keys are caller-facing identifiers. One source may emit `LON,LAT,NUMBER` while another emits `lon,lat,number`
+ * for the same data. Preserving that difference forces every consumer to handle both spellings. `smartSnakeCase` keeps
+ * its original contract for non-column naming use cases.
  */
 export function normalizeColumnNames(columnHeaders: Iterable<string>): string[] {
 	const columnInputCountMap = new Map<string, number>()
