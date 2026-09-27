@@ -7,7 +7,7 @@
 import type { CharacterSequence } from "../core/CharacterSequence.js"
 import { Spliterator } from "../core/Spliterator.js"
 
-const DOUBLE_QUOTE_CODE = 0x22
+export const DOUBLE_QUOTE_CODE = 0x22
 
 /**
  * Decode a single column, stripping wrapping quotes and unescaping doubled quotes (`""` → `"`) when quote handling is
@@ -25,12 +25,36 @@ function decodeColumn(bytes: Uint8Array, decoder: TextDecoder, enableQuoteHandli
  * Shared by both split paths rather than transcribed into each — the two must agree on what a quoted field means, and a
  * constant they both reference would not have proved that.
  */
-function unquoteColumn(value: string): string {
+export function unquoteColumn(value: string): string {
 	if (value.length >= 2 && value.charCodeAt(0) === DOUBLE_QUOTE_CODE && value.endsWith('"')) {
 		return value.slice(1, -1).replaceAll('""', '"')
 	}
 
 	return value
+}
+
+/**
+ * The trim step both column paths apply. Most cells have nothing to trim, and reading the two edge code units is far
+ * cheaper than the `trim` call that would find that out. Padding outside the quotes (` " Ada " `) is malformed under
+ * RFC 4180 but common: the edge-based unquote could not see the quotes, so unquote what trimming exposed, then trim
+ * what was inside.
+ */
+export function normalizeCell(value: string, enableQuoteHandling: boolean, trim: boolean): string {
+	if (!trim) return value
+
+	const length = value.length
+
+	if (length === 0 || (!mayNeedTrim(value.charCodeAt(0)) && !mayNeedTrim(value.charCodeAt(length - 1)))) {
+		return value
+	}
+
+	let column = value.trim()
+
+	if (enableQuoteHandling && column.charCodeAt(0) === DOUBLE_QUOTE_CODE) {
+		column = unquoteColumn(column).trim()
+	}
+
+	return column
 }
 
 /**
@@ -128,25 +152,7 @@ export function splitRowColumns(
 
 	if (trim) {
 		for (let i = 0; i < columns.length; i++) {
-			const raw = columns[i]!
-			const length = raw.length
-
-			// Most cells have nothing to trim. Reading the two edge code units is far cheaper than the `trim` call
-			// that would find that out, and this loop runs once per cell of the file. A non-ASCII edge takes the call,
-			// because `trim` also strips the Unicode spaces.
-			if (length === 0 || (!mayNeedTrim(raw.charCodeAt(0)) && !mayNeedTrim(raw.charCodeAt(length - 1)))) {
-				continue
-			}
-
-			let column = raw.trim()
-
-			// Padding outside the quotes (` " Ada " `) is malformed under RFC 4180 but common. The edge-based unquote in
-			// the raw pass could not see the quotes, so unquote what trimming has exposed, then trim what was inside.
-			if (enableQuoteHandling && column.charCodeAt(0) === DOUBLE_QUOTE_CODE) {
-				column = unquoteColumn(column).trim()
-			}
-
-			columns[i] = column
+			columns[i] = normalizeCell(columns[i]!, enableQuoteHandling, true)
 		}
 	}
 
