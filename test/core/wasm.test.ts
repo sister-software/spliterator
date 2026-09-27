@@ -25,6 +25,29 @@ describe("WASM SIMD scanner", () => {
 		}
 	})
 
+	// `wasm_module.ts` is not re-exported from the package root, so it must be reached by
+	// relative path into the compiled output (per AGENTS.md, the way `benchmarks/` reaches
+	// internals) rather than through `"spliterator"`. A *static* import of a path under `out/`
+	// makes tsc -b treat the generated `.d.ts` there as a root input of this project (rootDir is
+	// the whole project, which contains outDir) — a second `tsc -b` run then fails with
+	// TS5055 "would overwrite input file" because the emit target is that same file. Building
+	// the specifier at runtime keeps it a non-literal `import()`, which tsc does not resolve
+	// statically, avoiding the cycle. The imported members are untyped as a result.
+	// Shared by the `scan_csv_cells` and `CharacterSequence.scanCells` describe blocks below.
+	let loadWasmModule: () => Promise<any>
+	let CELL_RESULT_HEADER: number
+	let CELL_RESULT_STRIDE: number
+	let CELL_FLAG_ROW_END: number
+	let CELL_FLAG_HAS_QUOTE: number
+
+	beforeAll(async () => {
+		const wasmModulePath = "../../out/lib/core/wasm_module.js"
+
+		;({ loadWasmModule, CELL_RESULT_HEADER, CELL_RESULT_STRIDE, CELL_FLAG_ROW_END, CELL_FLAG_HAS_QUOTE } = await import(
+			wasmModulePath
+		))
+	})
+
 	test("whenReady() resolves true once the SIMD scanner is loaded", async () => {
 		expect(await CharacterSequence.whenReady()).toBe(true)
 	})
@@ -407,27 +430,6 @@ describe("WASM SIMD scanner", () => {
 	})
 
 	describe("scan_csv_cells", () => {
-		// `wasm_module.ts` is not re-exported from the package root, so it must be reached by
-		// relative path into the compiled output (per AGENTS.md, the way `benchmarks/` reaches
-		// internals) rather than through `"spliterator"`. A *static* import of a path under `out/`
-		// makes tsc -b treat the generated `.d.ts` there as a root input of this project (rootDir is
-		// the whole project, which contains outDir) — a second `tsc -b` run then fails with
-		// TS5055 "would overwrite input file" because the emit target is that same file. Building
-		// the specifier at runtime keeps it a non-literal `import()`, which tsc does not resolve
-		// statically, avoiding the cycle. The imported members are untyped as a result.
-		let loadWasmModule: () => Promise<any>
-		let CELL_RESULT_HEADER: number
-		let CELL_RESULT_STRIDE: number
-		let CELL_FLAG_ROW_END: number
-		let CELL_FLAG_HAS_QUOTE: number
-
-		beforeAll(async () => {
-			const wasmModulePath = "../../out/lib/core/wasm_module.js"
-
-			;({ loadWasmModule, CELL_RESULT_HEADER, CELL_RESULT_STRIDE, CELL_FLAG_ROW_END, CELL_FLAG_HAS_QUOTE } =
-				await import(wasmModulePath))
-		})
-
 		/**
 		 * Stage `bytes` at offset 0 and run the kernel once. Returns the header and the cells as plain numbers.
 		 */
@@ -615,6 +617,91 @@ describe("WASM SIMD scanner", () => {
 
 			expected.push([start, text.length - 1, CELL_FLAG_ROW_END])
 			expect(result.cells).toEqual(expected)
+		})
+	})
+
+	describe("CharacterSequence.scanCells", () => {
+		const options = { rowDelimiter: 0x0a, columnDelimiter: 0x2c, quote: 0x22, crlf: true }
+		const initial = { scanCursor: 0, units: 0, insideQuotes: false, cellStartUnits: 0, cellHasQuote: false }
+
+		test("rebases a window's cells and state to absolute offsets", () => {
+			const bytes = encoder.encode("é,a\nbb,c")
+			// Scan the first row only, then resume.
+			const first = CharacterSequence.scanCells(bytes, initial, 5, options)!
+
+			expect(Array.from(first.cells)).toEqual([0, 1, 0, 2, 3, CELL_FLAG_ROW_END])
+
+			expect(first).toMatchObject({
+				scanCursor: 5,
+				units: 4,
+				insideQuotes: false,
+				cellStartUnits: 4,
+				cellHasQuote: false,
+			})
+
+			const second = CharacterSequence.scanCells(bytes, first, bytes.length, options)!
+
+			expect(Array.from(second.cells)).toEqual([4, 6, 0])
+			expect(second).toMatchObject({ scanCursor: 9, units: 8, cellStartUnits: 7 })
+		})
+
+		test("a cell open across the window edge keeps its absolute start", () => {
+			const bytes = encoder.encode('a,"b\nc",d\n')
+			const first = CharacterSequence.scanCells(bytes, initial, 4, options)!
+
+			expect(Array.from(first.cells)).toEqual([0, 1, 0])
+
+			expect(first).toMatchObject({
+				scanCursor: 4,
+				units: 4,
+				insideQuotes: true,
+				cellStartUnits: 2,
+				cellHasQuote: true,
+			})
+
+			const second = CharacterSequence.scanCells(bytes, first, bytes.length, options)!
+
+			expect(Array.from(second.cells)).toEqual([2, 7, CELL_FLAG_HAS_QUOTE, 8, 9, CELL_FLAG_ROW_END])
+		})
+
+		test("supplies previous_byte so a CRLF split by the window is trimmed", () => {
+			const bytes = encoder.encode("ab\r\ncd\n")
+			const first = CharacterSequence.scanCells(bytes, initial, 3, options)!
+
+			expect(first.count).toBe(0)
+
+			const second = CharacterSequence.scanCells(bytes, first, bytes.length, options)!
+
+			expect(Array.from(second.cells)).toEqual([0, 2, CELL_FLAG_ROW_END, 4, 6, CELL_FLAG_ROW_END])
+		})
+
+		test("returns an owned copy that survives a later scan", () => {
+			const bytes = encoder.encode("a,b\n")
+			const result = CharacterSequence.scanCells(bytes, initial, bytes.length, options)!
+			const snapshot = Array.from(result.cells)
+
+			CharacterSequence.scanCells(encoder.encode("zzzzzzzz,yyyyyyyy\n"), initial, 18, options)
+
+			expect(Array.from(result.cells)).toEqual(snapshot)
+		})
+
+		test("honours maxCells and reports where it stopped", () => {
+			const bytes = encoder.encode("a,b,c\n")
+			const result = CharacterSequence.scanCells(bytes, initial, bytes.length, { ...options, maxCells: 2 })!
+
+			expect(result.count).toBe(2)
+			expect(result).toMatchObject({ scanCursor: 4, units: 4, cellStartUnits: 4 })
+		})
+
+		test("returns null for an empty window", () => {
+			expect(
+				CharacterSequence.scanCells(
+					encoder.encode("a"),
+					{ ...initial, scanCursor: 1, units: 1, cellStartUnits: 1 },
+					1,
+					options
+				)
+			).toBeNull()
 		})
 	})
 })

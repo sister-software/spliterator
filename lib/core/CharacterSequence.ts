@@ -6,10 +6,13 @@
 
 import type { ByteRange, PathBuilderLike } from "../internal/shared.js"
 import {
+	CELL_RESULT_HEADER,
+	CELL_RESULT_STRIDE,
 	loadWasmModule,
 	WASM_MAX_RESULTS,
 	WASM_THRESHOLD,
 	type MatchResult,
+	type WasmCellScanResult,
 	type WasmDelimiterScanner,
 	type WasmMemory,
 	type WasmRangeScanResult,
@@ -96,6 +99,43 @@ function ensureWasmCapacity(memory: WasmMemory, required: number): void {
  */
 function alignTo4(offset: number): number {
 	return Math.ceil(offset / 4) * 4
+}
+
+export interface CellScanState {
+	/**
+	 * Absolute byte offset to resume from.
+	 */
+	scanCursor: number
+	/**
+	 * Absolute UTF-16 units at `scanCursor`.
+	 */
+	units: number
+	insideQuotes: boolean
+	/**
+	 * Absolute UTF-16 start of the open cell.
+	 */
+	cellStartUnits: number
+	cellHasQuote: boolean
+}
+
+export interface CellScanOptions {
+	/**
+	 * One ASCII byte.
+	 */
+	rowDelimiter: number
+	/**
+	 * One ASCII byte.
+	 */
+	columnDelimiter: number
+	/**
+	 * One byte, or -1 for no quote handling.
+	 */
+	quote: number
+	crlf: boolean
+	/**
+	 * Default `WASM_MAX_RESULTS`.
+	 */
+	maxCells?: number
 }
 
 export class CharacterSequence extends Uint8Array {
@@ -360,6 +400,86 @@ export class CharacterSequence extends Uint8Array {
 			// start. Keep the carried value in that case.
 			pendingSliceStart: count > 0 ? windowStart + result[1]! : state.pendingSliceStart,
 			insideQuotes: result[2] === 1,
+		}
+	}
+
+	/**
+	 * Scan CSV cells over `[state.scanCursor, end)` in one bounded kernel call, returning an owned batch rebased to
+	 * absolute byte and UTF-16 offsets. The kernel counts UTF-16 units as it scans, which is what lets the caller slice a
+	 * decoded string by these offsets without an ASCII gate; the decode must be `fatal` so the count is exact.
+	 *
+	 * The batch is copied out of WASM memory before returning, so a caller may hold it across further scans, including a
+	 * nested parse run by user code while a row is being consumed.
+	 *
+	 * Returns `null` when the scanner is unavailable or the window is empty. Callers keep their own fallback.
+	 */
+	public static scanCells(
+		haystack: Uint8Array,
+		state: CellScanState,
+		end: number,
+		options: CellScanOptions
+	): WasmCellScanResult | null {
+		const windowStart = Math.min(state.scanCursor, end)
+		const windowLength = end - windowStart
+
+		if (windowLength <= 0) return null
+
+		const wasm = CharacterSequence.#wasmScanner
+
+		if (!wasm) {
+			if (CharacterSequence.#wasmScanner === undefined) {
+				CharacterSequence.#ensureWasm()
+			}
+
+			return null
+		}
+
+		const maxCells = options.maxCells ?? WASM_MAX_RESULTS
+		const resultsOffset = alignTo4(windowLength)
+		const resultValueCount = CELL_RESULT_HEADER + maxCells * CELL_RESULT_STRIDE
+		const totalNeeded = resultsOffset + resultValueCount * Int32Array.BYTES_PER_ELEMENT
+
+		ensureWasmCapacity(wasm.memory, totalNeeded)
+		new Uint8Array(wasm.memory.buffer, 0, windowLength).set(haystack.subarray(windowStart, end))
+		// The haystack cache belongs to `search()`; staging over offset 0 invalidates it.
+		CharacterSequence.#wasmHaystack = null
+
+		const previousByte = windowStart > 0 ? haystack[windowStart - 1]! : -1
+
+		const count = wasm.scanCsvCells(
+			0,
+			windowLength,
+			options.rowDelimiter,
+			options.columnDelimiter,
+			options.quote,
+			options.crlf ? 1 : 0,
+			state.insideQuotes ? 1 : 0,
+			// Window-relative; negative when the open cell began before this window.
+			state.cellStartUnits - state.units,
+			state.cellHasQuote ? 1 : 0,
+			previousByte,
+			resultsOffset,
+			maxCells
+		)
+
+		const block = new Int32Array(wasm.memory.buffer, resultsOffset, CELL_RESULT_HEADER + count * CELL_RESULT_STRIDE)
+		// Copy: the view aliases shared memory that the next scanner call overwrites.
+		const cells = block.slice(CELL_RESULT_HEADER)
+		const unitBase = state.units
+
+		for (let i = 0; i < count; i++) {
+			cells[i * CELL_RESULT_STRIDE] = cells[i * CELL_RESULT_STRIDE]! + unitBase
+			cells[i * CELL_RESULT_STRIDE + 1] = cells[i * CELL_RESULT_STRIDE + 1]! + unitBase
+		}
+
+		return {
+			cells,
+			count,
+			scanCursor: windowStart + block[0]!,
+			units: unitBase + block[1]!,
+			insideQuotes: block[2] === 1,
+			cellStartUnits: unitBase + block[3]!,
+			cellHasQuote: block[4] === 1,
 		}
 	}
 
