@@ -459,7 +459,9 @@ describe("columnScan", () => {
 		}
 	})
 
-	test("a header normalization failure propagates once and is not retried on the row path", async ({ expect }) => {
+	test("a throwing data-row transformer on the sync fast path propagates once and is not retried on the row path", async ({
+		expect,
+	}) => {
 		await CharacterSequence.whenReady()
 
 		let calls = 0
@@ -470,8 +472,15 @@ describe("columnScan", () => {
 			throw new Error("boom")
 		}
 
-		expect(() => CSVSpliterator.from("a,b\n1,2\n", { transformers: { a: boom } }).toArray()).toThrow("boom")
-		expect(calls).toBe(1)
+		const spy = vi.spyOn(CharacterSequence, "scanCells")
+
+		try {
+			expect(() => CSVSpliterator.from("a,b\n1,2\n", { transformers: { a: boom } }).toArray()).toThrow("boom")
+			expect(calls).toBe(1)
+			expect(spy).toHaveBeenCalled()
+		} finally {
+			spy.mockRestore()
+		}
 	})
 
 	test("without the scanner loaded, from() takes the row path in a fresh process", async ({ expect }) => {
@@ -481,15 +490,17 @@ describe("columnScan", () => {
 
 		const script = `
 			import { CSVSpliterator, CharacterSequence } from ${JSON.stringify(entry)}
+			const scannerBefore = CharacterSequence.hasScanner()
 			const before = CSVSpliterator.from("a,b\\n1,2\\n", { header: false, mode: "array" }).toArray()
 			const ready = await CharacterSequence.whenReady()
 			const after = CSVSpliterator.from("a,b\\n1,2\\n", { header: false, mode: "array" }).toArray()
-			console.log(JSON.stringify({ before, after, ready }))
+			console.log(JSON.stringify({ scannerBefore, before, after, ready }))
 		`
 
 		const { stdout } = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", script])
 
 		expect(JSON.parse(stdout)).toEqual({
+			scannerBefore: false,
 			before: [
 				["a", "b"],
 				["1", "2"],
