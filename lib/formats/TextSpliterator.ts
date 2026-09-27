@@ -29,6 +29,30 @@ export interface TextSpliteratorInit {
 	 * Whether to ignore BOM characters.
 	 */
 	ignoreBOM?: boolean
+
+	/**
+	 * Trim leading and trailing whitespace from each decoded row. With `skipEmpty` (on by default) a row that is
+	 * whitespace-only is then dropped too, so a CRLF file read on `\n` yields clean lines and a padded list yields clean
+	 * entries. Pass `false` to keep every row byte-for-byte as decoded.
+	 *
+	 * @default true
+	 */
+	trim?: boolean
+}
+
+const ASCII_WHITESPACE = new Set([0x20, 0x09, 0x0a, 0x0b, 0x0c, 0x0d])
+
+/**
+ * Whether a raw row would trim to nothing: what `count` tests so it agrees with `from` without decoding. It checks
+ * ASCII whitespace, which is what a delimited text file contains; `String.prototype.trim` also strips the rarer Unicode
+ * spaces, so a row made only of those is counted here and dropped there.
+ */
+function isBlank(row: Uint8Array): boolean {
+	for (const byte of row) {
+		if (!ASCII_WHITESPACE.has(byte)) return false
+	}
+
+	return true
 }
 
 /**
@@ -37,9 +61,10 @@ export interface TextSpliteratorInit {
  */
 function* decodeRows(
 	source: CharacterSequenceInput,
-	{ encoding, fatal, ignoreBOM, ...options }: TextSpliteratorInit & SpliteratorInit = {}
+	{ encoding, fatal, ignoreBOM, trim = true, ...options }: TextSpliteratorInit & SpliteratorInit = {}
 ): Generator<string> {
 	const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
+	const dropBlank = trim && (options.skipEmpty ?? true)
 	let rowCursor = 0
 
 	const spliterator = Spliterator.fromSync(source, options)
@@ -56,9 +81,15 @@ function* decodeRows(
 			throw error
 		}
 
-		yield decoded
-
 		rowCursor++
+
+		if (trim) {
+			decoded = decoded.trim()
+
+			if (dropBlank && !decoded) continue
+		}
+
+		yield decoded
 	}
 }
 
@@ -93,10 +124,13 @@ export abstract class TextSpliterator {
 	 * @see {@linkcode countAsync} for files and other asynchronous sources.
 	 */
 	public static count(source: CharacterSequenceInput, init: TextSpliteratorInit & SpliteratorInit = {}): number {
-		const { encoding: _encoding, fatal: _fatal, ignoreBOM: _ignoreBOM, ...options } = init
+		const { encoding: _encoding, fatal: _fatal, ignoreBOM: _ignoreBOM, trim = true, ...options } = init
+		const dropBlank = trim && (options.skipEmpty ?? true)
 		let count = 0
 
-		for (const _row of Spliterator.fromSync(source, options)) {
+		for (const row of Spliterator.fromSync(source, options)) {
+			if (dropBlank && isBlank(row)) continue
+
 			count++
 		}
 
@@ -116,13 +150,17 @@ export abstract class TextSpliterator {
 			encoding: _encoding,
 			fatal: _fatal,
 			ignoreBOM: _ignoreBOM,
+			trim = true,
 			...options
 		}: TextSpliteratorInit & AdaptiveSourceInit = {}
 	): Promise<number> {
 		const rows = await openDelimitedRows(source, options)
+		const dropBlank = trim && (options.skipEmpty ?? true)
 		let count = 0
 
-		for await (const _row of rows) {
+		for await (const row of rows) {
+			if (dropBlank && isBlank(row)) continue
+
 			count++
 		}
 
@@ -141,15 +179,18 @@ export abstract class TextSpliterator {
 	 */
 	public static fromAsync(
 		source: AsyncDataResource,
-		{ encoding, fatal, ignoreBOM, ...options }: TextSpliteratorInit & AdaptiveSourceInit = {}
+		{ encoding, fatal, ignoreBOM, trim = true, ...options }: TextSpliteratorInit & AdaptiveSourceInit = {}
 	): AsyncSequence<string> {
 		const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
+		const dropBlank = trim && (options.skipEmpty ?? true)
 
 		// Decoding is an op on the sequence rather than a generator wrapped inside one. A wrapping generator adds an async frame
 		// per row on top of the sequence's own, which measured 297ms against 279ms over 500k rows.
-		return AsyncSequence.from<Uint8Array>(() => openDelimitedRows(source, options)).map((row, rowCursor) => {
+		const decoded = AsyncSequence.from<Uint8Array>(() => openDelimitedRows(source, options)).map((row, rowCursor) => {
 			try {
-				return decoder.decode(row)
+				const text = decoder.decode(row)
+
+				return trim ? text.trim() : text
 			} catch (parsedError) {
 				const error = new SyntaxError(`Failed to decode data at row ${rowCursor}`)
 				error.cause = parsedError
@@ -157,5 +198,7 @@ export abstract class TextSpliterator {
 				throw error
 			}
 		})
+
+		return dropBlank ? decoded.filter((line) => line.length > 0) : decoded
 	}
 }

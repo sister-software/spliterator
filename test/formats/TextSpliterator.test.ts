@@ -5,7 +5,7 @@
  */
 
 import { TextSpliterator } from "spliterator"
-import { test } from "vitest"
+import { describe, test } from "vitest"
 
 import { fixturesDirectory, loadFixture } from "../support/utils.js"
 
@@ -52,7 +52,8 @@ test("Async pipe separator", async ({ expect }) => {
 	const fixture = await loadFixture(fixturePath, { delimiter: "|" })
 	expect(fixture.decodedLines, "Fixture has lines").not.toHaveLength(0)
 
-	const generator = TextSpliterator.fromAsync(fixturePath, { skipEmpty: false, delimiter: "|" })
+	// Pieces split on `|` carry their newlines; byte parity needs `trim: false`.
+	const generator = TextSpliterator.fromAsync(fixturePath, { skipEmpty: false, delimiter: "|", trim: false })
 	const decodedLines = await Array.fromAsync(generator)
 
 	expect(decodedLines, "Decoded lines match").toMatchObject(fixture.decodedLines)
@@ -87,4 +88,45 @@ test("Async EOF without trailing delimiter (regression: libpostal given_names.tx
 	const decodedLines = await Array.fromAsync(generator)
 
 	expect(decodedLines, "Decoded lines match split").toMatchObject(fixture.decodedLines)
+})
+
+describe("trim", () => {
+	const padded = "  alpha \r\n\t\nbeta\r\n   \r\ngamma  "
+
+	test("trims each row and drops whitespace-only rows by default", ({ expect }) => {
+		expect(TextSpliterator.from(padded).toArray()).toEqual(["alpha", "beta", "gamma"])
+	})
+
+	test("count agrees with from under the default", ({ expect }) => {
+		expect(TextSpliterator.count(padded)).toBe(3)
+		expect(TextSpliterator.count(padded, { trim: false })).toBe(5)
+	})
+
+	test("trim: false keeps every row as decoded", ({ expect }) => {
+		expect(TextSpliterator.from(padded, { trim: false }).toArray()).toEqual([
+			"  alpha \r",
+			"\t",
+			"beta\r",
+			"   \r",
+			"gamma  ",
+		])
+	})
+
+	test("skipEmpty: false keeps a whitespace-only row as an empty string", ({ expect }) => {
+		expect(TextSpliterator.from(padded, { skipEmpty: false }).toArray()).toEqual(["alpha", "", "beta", "", "gamma"])
+	})
+
+	test("parses a padded list", ({ expect }) => {
+		expect(TextSpliterator.from(" us, fr ,, de ", { delimiter: "," }).toArray()).toEqual(["us", "fr", "de"])
+	})
+
+	test("async path matches", async ({ expect }) => {
+		async function* source() {
+			yield new TextEncoder().encode(padded)
+		}
+
+		expect(await TextSpliterator.fromAsync(source()).toArray()).toEqual(["alpha", "beta", "gamma"])
+		expect(await TextSpliterator.countAsync(source())).toBe(3)
+		expect(await TextSpliterator.fromAsync(source(), { trim: false }).toArray()).toHaveLength(5)
+	})
 })
