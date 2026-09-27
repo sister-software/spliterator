@@ -55,9 +55,6 @@ export function* scanCsvCells(source: Uint8Array, text: string, init: CsvCellSca
 
 	let state: CellScanState = { scanCursor: 0, units: 0, insideQuotes: false, cellStartUnits: 0, cellHasQuote: false }
 	let row: string[] = []
-	// UTF-16 start of the row being assembled, for the emptiness test.
-	let rowStart = 0
-	let rowsEmitted = 0
 
 	const cell = (start: number, end: number, hasQuote: boolean): string => {
 		// The row path decodes each row on its own, which strips one BOM at the row's start.
@@ -87,26 +84,23 @@ export function* scanCsvCells(source: Uint8Array, text: string, init: CsvCellSca
 		const cells = scan.cells
 
 		for (let i = 0; i < scan.count; i++) {
-			const start = cells[i * CELL_RESULT_STRIDE]!
-			const cellEnd = cells[i * CELL_RESULT_STRIDE + 1]!
-			const flags = cells[i * CELL_RESULT_STRIDE + 2]!
+			const offset = i * CELL_RESULT_STRIDE
+			const start = cells[offset]!
+			const cellEnd = cells[offset + 1]!
+			const flags = cells[offset + 2]!
 
 			row.push(cell(start, cellEnd, (flags & CELL_FLAG_HAS_QUOTE) !== 0))
 
 			if (flags & CELL_FLAG_ROW_END) {
-				// Empty means the raw row range is empty: one cell, and it spans nothing after CRLF removal.
-				const empty = row.length === 1 && cellEnd === rowStart
+				// Empty means the raw row range is empty: one cell, and it spans nothing after CRLF removal. A row's first
+				// cell starts where the row does, so its raw start (before any BOM strip) is the row's start.
+				const empty = row.length === 1 && cellEnd === start
 
 				if (!(empty && skipEmpty)) {
 					yield row
-
-					rowsEmitted++
 				}
 
 				row = []
-				// The next row starts where the next cell starts; when this cell closed the batch, the carried state
-				// holds that offset.
-				rowStart = i + 1 < scan.count ? cells[(i + 1) * CELL_RESULT_STRIDE]! : scan.cellStartUnits
 			}
 		}
 
@@ -124,13 +118,8 @@ export function* scanCsvCells(source: Uint8Array, text: string, init: CsvCellSca
 		// A row whose last cell is empty: `a,` at EOF.
 		row.push(cell(tailStart, tailEnd, false))
 		yield row
-	} else if (rowsEmitted === 0 && length === 0) {
-		// An empty source is one empty row, dropped by skipEmpty.
-		if (!skipEmpty) {
-			yield [""]
-		}
 	} else if (!skipEmpty) {
-		// The source ended on a row delimiter: one trailing empty row, matching String.split.
+		// An empty source, or one ending on a row delimiter: one empty row, matching String.split.
 		yield [""]
 	}
 }
