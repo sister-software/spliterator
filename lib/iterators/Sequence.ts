@@ -276,20 +276,33 @@ export class Sequence<T> implements IterableIterator<T>, Disposable {
 	}
 
 	/**
-	 * Collect every remaining value into a `Set`. The callback receives `(value, counter)`.
+	 * Collect every remaining value into a `Set`, de-duplicated. With a callback, its results are collected instead; it
+	 * receives `(value, counter)`.
 	 *
 	 * ```ts
-	 * const set = Sequence.from(["a", "b", "c"]).toSet((value) => {
+	 * const letters = Sequence.from(["a", "b", "a"]).toSet() // Set { "a", "b" }
+	 *
+	 * const codes = Sequence.from(["a", "b", "c"]).toSet((value) => {
 	 * 	return value.charCodeAt(0)
 	 * })
 	 *
-	 * for (const value of set) {
+	 * for (const value of codes) {
 	 * 	console.log(value) // 97, 98, 99
 	 * }
 	 * ```
 	 */
-	public toSet<U>(fn: (value: T, counter: number) => U): Set<U> {
-		const set = new Set<U>()
+	public toSet(): Set<T>
+	public toSet<U>(fn: (value: T, counter: number) => U): Set<U>
+	public toSet<U>(fn?: (value: T, counter: number) => U): Set<T | U> {
+		const set = new Set<T | U>()
+
+		if (!fn) {
+			for (const value of this) {
+				set.add(value)
+			}
+
+			return set
+		}
 
 		let counter = 0
 

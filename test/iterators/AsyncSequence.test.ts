@@ -371,6 +371,18 @@ describe("laziness and closure", () => {
 })
 
 describe("terminals", () => {
+	test("toSet without a callback collects the values themselves", async () => {
+		const set: Set<string> = await AsyncSequence.from(["a", "b", "a"]).toSet()
+
+		expect([...set]).toEqual(["a", "b"])
+	})
+
+	test("toSet collects the callback's results, awaiting promises", async () => {
+		const set = await AsyncSequence.from(["a", "b", "a"]).toSet(async (value) => value.charCodeAt(0))
+
+		expect([...set]).toEqual([97, 98])
+	})
+
 	test("reduce with an initial value", async () => {
 		expect(await AsyncSequence.from(range(5)).reduce((total, value) => total + value, 100)).toBe(110)
 	})

@@ -493,20 +493,33 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	}
 
 	/**
-	 * Collect every remaining value into a `Set`. The callback receives `(value, counter)` and may return a promise.
+	 * Collect every remaining value into a `Set`, de-duplicated. With a callback, its results are collected instead; it
+	 * receives `(value, counter)` and may return a promise.
 	 *
 	 * ```ts
-	 * const set = await AsyncSequence.from(["a", "b", "c"]).toSet((value) => {
+	 * const letters = await AsyncSequence.from(["a", "b", "a"]).toSet() // Set { "a", "b" }
+	 *
+	 * const codes = await AsyncSequence.from(["a", "b", "c"]).toSet((value) => {
 	 * 	return value.charCodeAt(0)
 	 * })
 	 *
-	 * for (const value of set) {
+	 * for (const value of codes) {
 	 * 	console.log(value) // 97, 98, 99
 	 * }
 	 * ```
 	 */
-	public async toSet<U>(fn: (value: T, counter: number) => U | PromiseLike<U>): Promise<Set<U>> {
-		const set = new Set<U>()
+	public toSet(): Promise<Set<T>>
+	public toSet<U>(fn: (value: T, counter: number) => U | PromiseLike<U>): Promise<Set<U>>
+	public async toSet<U>(fn?: (value: T, counter: number) => U | PromiseLike<U>): Promise<Set<T | U>> {
+		const set = new Set<T | U>()
+
+		if (!fn) {
+			for await (const value of this) {
+				set.add(value)
+			}
+
+			return set
+		}
 
 		let counter = 0
 

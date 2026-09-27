@@ -285,6 +285,12 @@ describe("terminal collectors", () => {
 		])
 	})
 
+	test("toSet without a callback collects the values themselves", () => {
+		const set: Set<string> = Sequence.from(["a", "b", "a"]).toSet()
+
+		expect([...set]).toEqual(["a", "b"])
+	})
+
 	test("toSet collects the callback's results", () => {
 		const set = Sequence.from(["a", "b", "a"]).toSet((value) => value.charCodeAt(0))
 
