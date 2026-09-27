@@ -5,6 +5,7 @@
 //!   - find_all_delimiters: all matches of a single pattern → (start,end) pairs
 //!   - find_all_matches: all matches of TWO patterns → (offset, pattern_id) pairs
 //!   - scan_delimited_ranges: resumable single-byte delimiter/quote scan → ranges + state
+//!   - scan_csv_cells: resumable CSV cell scan with UTF-16 unit counting → cells + state
 //!
 //! Build:
 //!   RUSTFLAGS="-C target-feature=+simd128" cargo build --target wasm32-unknown-unknown --release
@@ -296,6 +297,242 @@ unsafe fn write_range_scan_state(
     *results = cursor as i32;
     *results.add(1) = slice_start as i32;
     *results.add(2) = if inside_quotes { 1 } else { 0 };
+}
+
+// ── scan_csv_cells ────────────────────────────────────────────
+
+const CELL_RESULT_HEADER: usize = 5;
+const CELL_RESULT_STRIDE: usize = 3;
+const CELL_FLAG_ROW_END: i32 = 1;
+const CELL_FLAG_HAS_QUOTE: i32 = 2;
+
+/// Resumable single-pass CSV cell scan. Emits `[start, end, flags]` per cell in UTF-16 code
+/// units relative to the window's unit base, tracking quote state and counting units from the
+/// UTF-8 lead-byte pattern. See docs/superpowers/specs/2026-09-27-csv-bulk-cell-scan-design.md.
+///
+/// Results block (i32): [cursor, units, inside_quotes, cell_start_units, cell_has_quote, cells...]
+#[no_mangle]
+pub unsafe extern "C" fn scan_csv_cells(
+    haystack_offset: usize,
+    haystack_len: usize,
+    row_delimiter: u32,
+    column_delimiter: u32,
+    quote: i32,
+    crlf: i32,
+    inside_quotes: i32,
+    cell_start_units: i32,
+    cell_has_quote: i32,
+    previous_byte: i32,
+    results_offset: usize,
+    max_cells: usize,
+) -> usize {
+    let results = results_offset as *mut i32;
+    let haystack = haystack_offset as *const u8;
+    let row_byte = row_delimiter as u8;
+    let col_byte = column_delimiter as u8;
+    let quote_enabled = quote >= 0;
+    let quote_byte = quote as u8;
+    let crlf = crlf != 0;
+
+    let mut cursor = 0usize;
+    let mut units: i32 = 0;
+    let mut quoted = inside_quotes != 0;
+    let mut cell_start = cell_start_units;
+    let mut has_quote = cell_has_quote != 0;
+    let mut count = 0usize;
+
+    let row_splat = i8x16_splat(row_byte as i8);
+    let col_splat = i8x16_splat(col_byte as i8);
+    let quote_splat = i8x16_splat(quote_byte as i8);
+    let cont_mask_splat = u8x16_splat(0xC0);
+    let cont_value_splat = u8x16_splat(0x80);
+    let four_splat = u8x16_splat(0xF0);
+
+    // Units contributed by a byte at `offset`: 1 unless it is a continuation byte, plus 1 more
+    // for a 4-byte lead. The scalar tail and the in-vector prefix both use this.
+    #[inline(always)]
+    fn byte_units(b: u8) -> i32 {
+        if b & 0xC0 == 0x80 {
+            0
+        } else if b >= 0xF0 {
+            2
+        } else {
+            1
+        }
+    }
+
+    // Closes the open cell at byte `offset`, whose unit offset is `units_at`. Returns false when
+    // the result block is full (the caller then writes state and returns without consuming).
+    #[inline(always)]
+    unsafe fn close_cell(
+        results: *mut i32,
+        count: &mut usize,
+        max_cells: usize,
+        cell_start: &mut i32,
+        has_quote: &mut bool,
+        units_at: i32,
+        end_units: i32,
+        row_end: bool,
+    ) -> bool {
+        if *count >= max_cells {
+            return false;
+        }
+
+        let base = CELL_RESULT_HEADER + *count * CELL_RESULT_STRIDE;
+        let mut flags = 0;
+
+        if row_end {
+            flags |= CELL_FLAG_ROW_END;
+        }
+
+        if *has_quote {
+            flags |= CELL_FLAG_HAS_QUOTE;
+        }
+
+        *results.add(base) = *cell_start;
+        *results.add(base + 1) = end_units;
+        *results.add(base + 2) = flags;
+        *count += 1;
+        // The delimiter is one ASCII byte, one unit.
+        *cell_start = units_at + 1;
+        *has_quote = false;
+
+        true
+    }
+
+    // Returns the unit offset at which the cell ends for a row delimiter at `offset`:
+    // one unit short when crlf is on and the byte before is CR, and that CR is inside the cell.
+    #[inline(always)]
+    unsafe fn row_end_units(
+        haystack: *const u8,
+        offset: usize,
+        previous_byte: i32,
+        crlf: bool,
+        units_at: i32,
+        cell_start: i32,
+    ) -> i32 {
+        if !crlf {
+            return units_at;
+        }
+
+        let before = if offset == 0 { previous_byte } else { *haystack.add(offset - 1) as i32 };
+
+        if before == 0x0D && units_at - 1 >= cell_start {
+            units_at - 1
+        } else {
+            units_at
+        }
+    }
+
+    while cursor + 16 <= haystack_len {
+        let chunk = v128_load(haystack.add(cursor) as *const v128);
+        let row_mask = i8x16_bitmask(i8x16_eq(chunk, row_splat)) as u32;
+        let col_mask = i8x16_bitmask(i8x16_eq(chunk, col_splat)) as u32;
+        let quote_mask = if quote_enabled {
+            i8x16_bitmask(i8x16_eq(chunk, quote_splat)) as u32
+        } else {
+            0
+        };
+        let cont_mask = i8x16_bitmask(u8x16_eq(v128_and(chunk, cont_mask_splat), cont_value_splat)) as u32;
+        let noncont_mask = !cont_mask & 0xFFFF;
+        let four_mask = i8x16_bitmask(u8x16_ge(chunk, four_splat)) as u32;
+        let chunk_units = (noncont_mask.count_ones() + four_mask.count_ones()) as i32;
+        let mut matches = row_mask | col_mask | quote_mask;
+
+        while matches != 0 {
+            let position = matches.trailing_zeros();
+            let offset = cursor + position as usize;
+            let before_mask = (1u32 << position) - 1;
+            let units_at = units + ((noncont_mask & before_mask).count_ones() + (four_mask & before_mask).count_ones()) as i32;
+            let is_row = (row_mask >> position) & 1 != 0;
+            let is_col = (col_mask >> position) & 1 != 0;
+
+            if is_row || is_col {
+                if !quoted {
+                    let end_units = if is_row {
+                        row_end_units(haystack, offset, previous_byte, crlf, units_at, cell_start)
+                    } else {
+                        units_at
+                    };
+
+                    if !close_cell(results, &mut count, max_cells, &mut cell_start, &mut has_quote, units_at, end_units, is_row) {
+                        write_cell_scan_state(results, offset, units_at, quoted, cell_start, has_quote);
+                        return count;
+                    }
+
+                    if count >= max_cells {
+                        // The result buffer is now full. The cursor is immediately after the
+                        // delimiter that filled it — one ASCII byte, one unit past this position.
+                        write_cell_scan_state(results, offset + 1, units_at + 1, quoted, cell_start, has_quote);
+                        return count;
+                    }
+                }
+            } else {
+                quoted = !quoted;
+                has_quote = true;
+            }
+
+            matches &= matches - 1;
+        }
+
+        units += chunk_units;
+        cursor += 16;
+    }
+
+    while cursor < haystack_len {
+        let byte = *haystack.add(cursor);
+        let mut just_filled = false;
+
+        if byte == row_byte || byte == col_byte {
+            if !quoted {
+                let is_row = byte == row_byte;
+                let end_units = if is_row {
+                    row_end_units(haystack, cursor, previous_byte, crlf, units, cell_start)
+                } else {
+                    units
+                };
+
+                if !close_cell(results, &mut count, max_cells, &mut cell_start, &mut has_quote, units, end_units, is_row) {
+                    write_cell_scan_state(results, cursor, units, quoted, cell_start, has_quote);
+                    return count;
+                }
+
+                just_filled = count >= max_cells;
+            }
+        } else if quote_enabled && byte == quote_byte {
+            quoted = !quoted;
+            has_quote = true;
+        }
+
+        units += byte_units(byte);
+        cursor += 1;
+
+        if just_filled {
+            // The result buffer is now full. The cursor is immediately after the delimiter
+            // that filled it, which was just accounted for above.
+            write_cell_scan_state(results, cursor, units, quoted, cell_start, has_quote);
+            return count;
+        }
+    }
+
+    write_cell_scan_state(results, haystack_len, units, quoted, cell_start, has_quote);
+    count
+}
+
+#[inline]
+unsafe fn write_cell_scan_state(
+    results: *mut i32,
+    cursor: usize,
+    units: i32,
+    inside_quotes: bool,
+    cell_start_units: i32,
+    cell_has_quote: bool,
+) {
+    *results = cursor as i32;
+    *results.add(1) = units;
+    *results.add(2) = if inside_quotes { 1 } else { 0 };
+    *results.add(3) = cell_start_units;
+    *results.add(4) = if cell_has_quote { 1 } else { 0 };
 }
 
 /// SIMD double-scan: both patterns are single-byte.

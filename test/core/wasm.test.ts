@@ -405,4 +405,216 @@ describe("WASM SIMD scanner", () => {
 		expect(ranges).toEqual(referenceRanges(buf, comma))
 		expect(ranges.at(-1)).toEqual([4100, 4100])
 	})
+
+	describe("scan_csv_cells", () => {
+		// `wasm_module.ts` is not re-exported from the package root, so it must be reached by
+		// relative path into the compiled output (per AGENTS.md, the way `benchmarks/` reaches
+		// internals) rather than through `"spliterator"`. A *static* import of a path under `out/`
+		// makes tsc -b treat the generated `.d.ts` there as a root input of this project (rootDir is
+		// the whole project, which contains outDir) — a second `tsc -b` run then fails with
+		// TS5055 "would overwrite input file" because the emit target is that same file. Building
+		// the specifier at runtime keeps it a non-literal `import()`, which tsc does not resolve
+		// statically, avoiding the cycle. The imported members are untyped as a result.
+		let loadWasmModule: () => Promise<any>
+		let CELL_RESULT_HEADER: number
+		let CELL_RESULT_STRIDE: number
+		let CELL_FLAG_ROW_END: number
+		let CELL_FLAG_HAS_QUOTE: number
+
+		beforeAll(async () => {
+			const wasmModulePath = "../../out/lib/core/wasm_module.js"
+
+			;({ loadWasmModule, CELL_RESULT_HEADER, CELL_RESULT_STRIDE, CELL_FLAG_ROW_END, CELL_FLAG_HAS_QUOTE } =
+				await import(wasmModulePath))
+		})
+
+		/**
+		 * Stage `bytes` at offset 0 and run the kernel once. Returns the header and the cells as plain numbers.
+		 */
+		async function scan(
+			bytes: Uint8Array,
+			{
+				quote = 0x22,
+				crlf = 1,
+				insideQuotes = 0,
+				cellStartUnits = 0,
+				cellHasQuote = 0,
+				previousByte = -1,
+				maxCells = 64,
+			} = {}
+		) {
+			const wasm = await loadWasmModule()
+
+			if (!wasm) throw new Error("scanner unavailable")
+
+			const resultsOffset = Math.ceil(bytes.length / 4) * 4
+			const needed = resultsOffset + (CELL_RESULT_HEADER + maxCells * CELL_RESULT_STRIDE) * 4
+
+			if (needed > wasm.memory.buffer.byteLength) {
+				wasm.memory.grow(Math.ceil((needed - wasm.memory.buffer.byteLength) / 65_536))
+			}
+
+			new Uint8Array(wasm.memory.buffer, 0, bytes.length).set(bytes)
+
+			const count = wasm.scanCsvCells(
+				0,
+				bytes.length,
+				0x0a,
+				0x2c,
+				quote,
+				crlf,
+				insideQuotes,
+				cellStartUnits,
+				cellHasQuote,
+				previousByte,
+				resultsOffset,
+				maxCells
+			)
+
+			const block = new Int32Array(wasm.memory.buffer, resultsOffset, CELL_RESULT_HEADER + count * CELL_RESULT_STRIDE)
+			const cells: Array<[number, number, number]> = []
+
+			for (let i = 0; i < count; i++) {
+				const base = CELL_RESULT_HEADER + i * CELL_RESULT_STRIDE
+
+				cells.push([block[base]!, block[base + 1]!, block[base + 2]!])
+			}
+
+			return {
+				cursor: block[0]!,
+				units: block[1]!,
+				insideQuotes: block[2]!,
+				cellStartUnits: block[3]!,
+				cellHasQuote: block[4]!,
+				cells,
+			}
+		}
+
+		test("emits cells with row-end flags and leaves the tail open", async () => {
+			const result = await scan(encoder.encode("a,bb\ncc,d"))
+
+			expect(result.cells).toEqual([
+				[0, 1, 0],
+				[2, 4, CELL_FLAG_ROW_END],
+				[5, 7, 0],
+			])
+
+			expect(result).toMatchObject({ cursor: 9, units: 9, insideQuotes: 0, cellStartUnits: 8, cellHasQuote: 0 })
+		})
+
+		test("a delimiter inside quotes is data, and the cell is flagged", async () => {
+			const result = await scan(encoder.encode('"x,y",z\n'))
+
+			expect(result.cells).toEqual([
+				[0, 5, CELL_FLAG_HAS_QUOTE],
+				[6, 7, CELL_FLAG_ROW_END],
+			])
+
+			expect(result.insideQuotes).toBe(0)
+		})
+
+		test("crlf drops the carriage return from the cell end, but not at EOF", async () => {
+			const withCr = await scan(encoder.encode("a\r\nb\r"))
+
+			expect(withCr.cells).toEqual([[0, 1, CELL_FLAG_ROW_END]])
+			expect(withCr.cellStartUnits).toBe(3)
+			expect(withCr.units).toBe(5)
+
+			const raw = await scan(encoder.encode("a\r\nb\r"), { crlf: 0 })
+
+			expect(raw.cells).toEqual([[0, 2, CELL_FLAG_ROW_END]])
+		})
+
+		test("a row delimiter at window start consults previous_byte for the carriage return", async () => {
+			const result = await scan(encoder.encode("\nb"), { previousByte: 0x0d, cellStartUnits: -3 })
+
+			// The open cell began three units before this window, and the CR is the unit just before the LF.
+			expect(result.cells).toEqual([[-3, -1, CELL_FLAG_ROW_END]])
+		})
+
+		test("counts UTF-16 units: 2- and 3-byte sequences are one unit, 4-byte are two", async () => {
+			const result = await scan(encoder.encode("é,한,😀,z\n"))
+
+			expect(result.cells).toEqual([
+				[0, 1, 0],
+				[2, 3, 0],
+				[4, 6, 0],
+				[7, 8, CELL_FLAG_ROW_END],
+			])
+
+			expect(result.units).toBe(9)
+		})
+
+		test("a continuation byte at window start counts zero units", async () => {
+			const bytes = encoder.encode("😀,a")
+
+			// Split the emoji: the first window is its first two bytes, the second window the rest.
+			const first = await scan(bytes.subarray(0, 2), { maxCells: 64 })
+
+			expect(first.units).toBe(2)
+			expect(first.cells).toEqual([])
+
+			const second = await scan(bytes.subarray(2), { cellStartUnits: -2 })
+
+			// The remaining two continuation bytes contribute zero (already counted in `first`),
+			// leaving only "," and "a": 1 + 1 = 2. `first.units + second.units` must equal the
+			// full string's UTF-16 length ("😀,a".length === 4), which 2 + 2 satisfies and 2 + 3
+			// would not.
+			expect(second.units).toBe(2)
+			expect(second.cells).toEqual([[-2, 0, 0]])
+		})
+
+		test("stops when max_cells is reached, with the cursor just past the delimiter that filled it", async () => {
+			const result = await scan(encoder.encode("a,b,c\n"), { maxCells: 1 })
+
+			expect(result.cells).toEqual([[0, 1, 0]])
+			expect(result).toMatchObject({ cursor: 2, units: 2, cellStartUnits: 2 })
+		})
+
+		test("carries an open quoted cell across calls", async () => {
+			const first = await scan(encoder.encode('"ab'))
+
+			expect(first).toMatchObject({ cursor: 3, units: 3, insideQuotes: 1, cellStartUnits: 0, cellHasQuote: 1 })
+
+			const second = await scan(encoder.encode('c",d\n'), { insideQuotes: 1, cellStartUnits: -3, cellHasQuote: 1 })
+
+			expect(second.cells).toEqual([
+				[-3, 2, CELL_FLAG_HAS_QUOTE],
+				[3, 4, CELL_FLAG_ROW_END],
+			])
+		})
+
+		test("quote handling off treats the quote byte as data", async () => {
+			const result = await scan(encoder.encode('"a,b"\n'), { quote: -1 })
+
+			expect(result.cells).toEqual([
+				[0, 2, 0],
+				[3, 5, CELL_FLAG_ROW_END],
+			])
+		})
+
+		test("a window longer than 16 bytes with matches in every vector agrees with a scalar oracle", async () => {
+			// Quoted items must not embed a real comma: the oracle below splits on every comma in
+			// the raw text without tracking quote state, which is only valid when no quoted item's
+			// span actually contains one (quote-inside-comma masking has its own dedicated test
+			// above). This test's job is vector-boundary agreement across 200 varying-length items.
+			const text = Array.from({ length: 200 }, (_, i) => (i % 3 === 0 ? `"q${i}x"` : `c${i}é`)).join(",") + "\n"
+			const bytes = encoder.encode(text)
+			const result = await scan(bytes, { maxCells: 4096 })
+			const expected: Array<[number, number, number]> = []
+			let start = 0
+
+			for (let i = 0; i < text.length; i++) {
+				if (text[i] === ",") {
+					const cell = text.slice(start, i)
+
+					expected.push([start, i, cell.includes('"') ? CELL_FLAG_HAS_QUOTE : 0])
+					start = i + 1
+				}
+			}
+
+			expected.push([start, text.length - 1, CELL_FLAG_ROW_END])
+			expect(result.cells).toEqual(expected)
+		})
+	})
 })

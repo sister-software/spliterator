@@ -33,8 +33,9 @@ export async function loadWasmModule(): Promise<WasmDelimiterScanner | null> {
 		const findAllDelimiters = e.find_all_delimiters as WasmFindAllDelimiters
 		const findAllMatches = e.find_all_matches as WasmFindAllMatches
 		const scanDelimitedRanges = e.scan_delimited_ranges as WasmScanDelimitedRanges
+		const scanCsvCells = e.scan_csv_cells as WasmScanCsvCells
 
-		return { memory, findDelimiter, findAllDelimiters, findAllMatches, scanDelimitedRanges }
+		return { memory, findDelimiter, findAllDelimiters, findAllMatches, scanDelimitedRanges, scanCsvCells }
 	} catch {
 		return null
 	}
@@ -67,6 +68,22 @@ type WasmScanDelimitedRanges = (
 	mr: number
 ) => number
 
+// oxlint-disable-next-line eslint/max-params
+type WasmScanCsvCells = (
+	ho: number,
+	hl: number,
+	rowDelimiter: number,
+	columnDelimiter: number,
+	quote: number,
+	crlf: number,
+	insideQuotes: number,
+	cellStartUnits: number,
+	cellHasQuote: number,
+	previousByte: number,
+	ro: number,
+	mc: number
+) => number
+
 export interface WasmMemory {
 	readonly buffer: ArrayBuffer
 	grow(pages: number): number
@@ -78,6 +95,7 @@ export interface WasmDelimiterScanner {
 	findAllDelimiters: WasmFindAllDelimiters
 	findAllMatches: WasmFindAllMatches
 	scanDelimitedRanges: WasmScanDelimitedRanges
+	scanCsvCells: WasmScanCsvCells
 }
 
 /**
@@ -104,6 +122,14 @@ export const WASM_THRESHOLD = 512
 export const WASM_MAX_RESULTS = 4096
 
 /**
+ * Layout of `scan_csv_cells`'s result block: five header ints, then three per cell.
+ */
+export const CELL_RESULT_HEADER = 5
+export const CELL_RESULT_STRIDE = 3
+export const CELL_FLAG_ROW_END = 1
+export const CELL_FLAG_HAS_QUOTE = 2
+
+/**
  * State returned by the bounded, resumable range scanner.
  */
 export interface WasmRangeScanResult {
@@ -115,4 +141,29 @@ export interface WasmRangeScanResult {
 	scanCursor: number
 	pendingSliceStart: number
 	insideQuotes: boolean
+}
+
+/**
+ * One owned batch from the CSV cell scanner, rebased to absolute offsets by `CharacterSequence.scanCells`.
+ */
+export interface WasmCellScanResult {
+	/**
+	 * `[start, end, flags]` triples in UTF-16 units of the decoded source. A copy, safe to hold across further scans.
+	 */
+	cells: Int32Array
+	count: number
+	/**
+	 * Absolute byte offset the scan stopped at.
+	 */
+	scanCursor: number
+	/**
+	 * Absolute UTF-16 unit count at `scanCursor`.
+	 */
+	units: number
+	insideQuotes: boolean
+	/**
+	 * Absolute UTF-16 start of the cell open at `scanCursor`.
+	 */
+	cellStartUnits: number
+	cellHasQuote: boolean
 }
