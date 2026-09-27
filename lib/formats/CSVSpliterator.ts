@@ -9,6 +9,7 @@ import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "..
 import type { AsyncChunkIterator, AsyncDataResource } from "../internal/shared.js"
 import { type AdaptiveSourceInit, openDelimitedRows } from "../io/adaptive-source.js"
 import { AsyncSequence } from "../iterators/AsyncSequence.js"
+import { Sequence } from "../iterators/Sequence.js"
 import { normalizeColumnNames } from "./casing.js"
 import { splitRowColumns } from "./csv-columns.js"
 import {
@@ -68,6 +69,72 @@ export interface CSVSpliteratorInit extends SpliteratorInit, RowSpliteratorInit<
 	 * @default true
 	 */
 	crlf?: boolean
+}
+
+/**
+ * The row generator behind {@linkcode CSVSpliterator.from}, kept at module scope so `from` can hand it to a
+ * {@linkcode Sequence} while staying lazy — calling a generator function runs none of its body. `from` reads
+ * `this.ColumnDelimiter` on the way in, so a subclass's delimiter still wins.
+ */
+function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, defaultColumnDelimiter: number) {
+	const {
+		// ---
+		header = true,
+		// Without a header row there are no column names, so a row can only be an array.
+		// Declared before `normalizeKeys`, whose own default reads this one.
+		mode = header === false ? "array" : "object",
+		transformers: transformersInput = [],
+		// Matches `fromAsync`. These two defaulted differently until 4.0.1, so the same options
+		// object produced `row.some_name` from one entry point and `row["Some Name"]` from the other.
+		normalizeKeys = mode !== "array",
+		columnDelimiter: columnDelimiterInput = defaultColumnDelimiter,
+		enableQuoteHandling = true,
+		// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
+		// never carries a stray `\r` on Windows-lineage sources.
+		crlf = true,
+		take = Infinity,
+		drop = 0,
+		...rowInit
+	} = init
+
+	const emitter = CSVSpliteratorEmitters[mode]
+	let transformers: CSVTransformerEntry[] = []
+	let yieldCount = 0
+	const yieldLimit = take + drop
+
+	const decoder = new TextDecoder()
+	const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? defaultColumnDelimiter)
+
+	// Quote handling applies at both levels: rows must not split on newlines inside quotes,
+	// columns must not split on quoted column delimiters.
+	const rows = Spliterator.fromSync(source, { ...rowInit, crlf, enableQuoteHandling })
+
+	if (header) {
+		const result = rows.next()
+
+		if (result.done) return
+
+		const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling)
+		const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
+
+		transformers = bindTransformers(headers, transformersInput)
+	}
+
+	for (const row of rows) {
+		if (yieldCount < drop) {
+			yieldCount++
+
+			continue
+		}
+
+		if (yieldCount >= yieldLimit) break
+
+		const columns = splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling)
+
+		yield emitter ? emitter(columns, transformers) : columns
+
+		yieldCount++
+	}
 }
 
 /**
@@ -172,7 +239,7 @@ export abstract class CSVSpliterator {
 	public static from<T extends object = CSVSpliteratorEmittedRecord>(
 		source: CharacterSequenceInput,
 		options?: CSVSpliteratorInit & { mode?: "object"; header?: true }
-	): Generator<T>
+	): Sequence<T>
 	/**
 	 * @yields Each row as a 3-tuple [key, value, idx].
 	 */
@@ -180,7 +247,7 @@ export abstract class CSVSpliterator {
 	public static from<T extends RowTuple[] = RowTuple[]>(
 		source: CharacterSequenceInput,
 		options?: CSVSpliteratorInit & { mode: "entries" }
-	): Generator<T>
+	): Sequence<T>
 	/**
 	 * Given a byte array or string, yield each row as an array of columns.
 	 *
@@ -189,71 +256,14 @@ export abstract class CSVSpliterator {
 	public static from<T extends string[] = string[]>(
 		source: CharacterSequenceInput,
 		options?: CSVSpliteratorInit & ({ mode: "array" } | { mode?: "array"; header: false })
-	): Generator<T>
+	): Sequence<T>
 	/**
 	 * Given a byte array or string, yield each row as an array of columns.
 	 *
 	 * @yields Each row as an array of columns.
 	 */
-	public static *from(source: CharacterSequenceInput, init: CSVSpliteratorInit = {}) {
-		const {
-			// ---
-			header = true,
-			// Without a header row there are no column names, so a row can only be an array.
-			// Declared before `normalizeKeys`, whose own default reads this one.
-			mode = header === false ? "array" : "object",
-			transformers: transformersInput = [],
-			// Matches `fromAsync`. These two defaulted differently until 4.0.1, so the same options
-			// object produced `row.some_name` from one entry point and `row["Some Name"]` from the other.
-			normalizeKeys = mode !== "array",
-			columnDelimiter: columnDelimiterInput = this.ColumnDelimiter,
-			enableQuoteHandling = true,
-			// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
-			// never carries a stray `\r` on Windows-lineage sources.
-			crlf = true,
-			take = Infinity,
-			drop = 0,
-			...rowInit
-		} = init
-
-		const emitter = CSVSpliteratorEmitters[mode]
-		let transformers: CSVTransformerEntry[] = []
-		let yieldCount = 0
-		const yieldLimit = take + drop
-
-		const decoder = new TextDecoder()
-		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? this.ColumnDelimiter)
-
-		// Quote handling applies at both levels: rows must not split on newlines inside quotes,
-		// columns must not split on quoted column delimiters.
-		const rows = Spliterator.fromSync(source, { ...rowInit, crlf, enableQuoteHandling })
-
-		if (header) {
-			const result = rows.next()
-
-			if (result.done) return
-
-			const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling)
-			const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
-
-			transformers = bindTransformers(headers, transformersInput)
-		}
-
-		for (const row of rows) {
-			if (yieldCount < drop) {
-				yieldCount++
-
-				continue
-			}
-
-			if (yieldCount >= yieldLimit) break
-
-			const columns = splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling)
-
-			yield emitter ? emitter(columns, transformers) : columns
-
-			yieldCount++
-		}
+	public static from(source: CharacterSequenceInput, init: CSVSpliteratorInit = {}) {
+		return new Sequence(splitRows(source, init, this.ColumnDelimiter))
 	}
 
 	/**

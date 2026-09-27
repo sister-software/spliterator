@@ -64,7 +64,7 @@ Spliterator is an ESM TypeScript library (`"type": "module"`) for streaming deli
 
 The `mode` emitters and transformer-binding shared by `CSVSpliterator` and `XLSXSpliterator` live in `lib/formats/row-emitters.ts`, generalized over the cell type (CSV binds `string` with `""` for missing columns; XLSX binds typed cells with `null`).
 
-All high-level classes are abstract static-only (instantiation throws `TypeError`). They expose `from(syncSource)` and `fromAsync(asyncSource)` class methods. `from` returns a plain `Generator` (Node 24+ ships `Iterator.prototype` helpers natively); `fromAsync` returns an **`AsyncSequence`**.
+All high-level classes are abstract static-only (instantiation throws `TypeError`). They expose `from(syncSource)` and `fromAsync(asyncSource)` class methods. `from` returns a **`Sequence`**; `fromAsync` returns an **`AsyncSequence`**. Both are lazy and chainable, and neither engine class is one — `Spliterator.fromSync` returns a `Spliterator` (it keeps `position`, `toDecodedArray`, `Symbol.dispose`), and `Sequence.from(spliterator)` wraps it when the chain is wanted.
 
 ### `AsyncSequence` (`lib/iterators/AsyncSequence.ts`)
 
@@ -77,6 +77,16 @@ A lazy, chainable async iterator returned by every `fromAsync`. Core methods (`m
 - **Sources may be deferred** (`SequenceSource<T>` = iterable, async iterable, or a thunk returning either, possibly promised). The thunk form is what lets `fromAsync` return synchronously while its underlying open is async — and it means nothing touches the filesystem until the first pull.
 - **Single-shot**, matching the proposal's iterators.
 - Wrapping costs ~1.9× a bare async generator. On parsed rows that's 3–8%; on raw `Uint8Array` ranges it's most of the cost, so iterate `AsyncSpliterator` directly for scan-only work.
+
+### `Sequence` (`lib/iterators/Sequence.ts`)
+
+The synchronous sibling, returned by every `from`. Same design as `AsyncSequence` — op-list fusion, one hand-rolled `next()`, `closingWith` around the fusion barriers — and the same method names and arity, minus what only makes sense asynchronously (`parallelMap`, `parallelFilter`) and plus `toAsync()`, which hands the chain to an `AsyncSequence` to continue.
+
+- **The point is the extras, not the core.** Node ships `Iterator.prototype` helpers natively, so `map`/`filter`/`take`/`drop`/... were already free on a bare generator. What was not: `toMap`, `toSet`, `toSorted`, `chunks`, `toReadableStream`, `pipeThrough`. Re-implementing the core ops is what keeps those reachable mid-chain — a native helper returns an `Iterator Helper`, which has none of them, so `.map(f).toMap(g)` would not exist.
+- **The two classes are deliberate siblings, not a shared generic.** The sync `next()` has no `await`, no thenable test, and no sync/async upstream fork; folding them together would put that machinery back in the sync path. Keep edits mirrored by hand.
+- **Format `from()` methods delegate to a module-level generator** (`decodeRows`, `parseRows`, `splitRows`) and wrap it. Calling a generator function runs none of its body, so `from` stays as lazy as it was. `CSVSpliterator.from` reads `this.ColumnDelimiter` on the way in and passes it, because a private static cannot be reached through a subclass's `this` — that is what keeps `TSVSpliterator`/`PSVSpliterator` working.
+- **`Symbol.dispose` closes the sequence**, so `using rows = CSVSpliterator.from(...)` releases the source on scope exit.
+- **Wrapping costs 5–9% on parsed rows, 13–16% with three operators stacked.** Measured on Node 26 over 1M rows against the bare generator `from` used to return: `TextSpliterator` 138ms → 150ms → 160ms, `JSONSpliterator` 488ms → 511ms → 550ms. Against a generator doing no work at all it is 1.58× bare and 2.87× at three operators (11ms → 18ms → 33ms over 1M items) — the same shape as `AsyncSequence`, and the same conclusion: negligible once a row is parsed, most of the cost when it is not. For scan-only work iterate `Spliterator` directly.
 
 ### Adaptive bulk parsing (`lib/io/adaptive-source.ts`)
 

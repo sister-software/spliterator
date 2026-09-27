@@ -10,6 +10,7 @@ import {
 	Delimiters,
 	normalizeColumnNames,
 	PSVSpliterator,
+	type Sequence,
 	TSVSpliterator,
 	zipSync,
 } from "spliterator"
@@ -92,19 +93,19 @@ test("Object mode accepts an interface as its row type", async ({ expect }) => {
 		normalizeKeys: false,
 	})
 
-	expectTypeOf(syncRecords).toEqualTypeOf<Generator<TypedCSVRow>>()
+	expectTypeOf(syncRecords).toEqualTypeOf<Sequence<TypedCSVRow>>()
 
 	expectTypeOf(
 		CSVSpliterator.from<Record<string, string>>("Country,Location\nFR,PAR\n", { columnDelimiter: "," })
-	).toEqualTypeOf<Generator<Record<string, string>>>()
+	).toEqualTypeOf<Sequence<Record<string, string>>>()
 
 	expectTypeOf(
 		TSVSpliterator.from<TypedCSVRow>("Country\tLocation\nFR\tPAR\n", { mode: "object", normalizeKeys: false })
-	).toEqualTypeOf<Generator<TypedCSVRow>>()
+	).toEqualTypeOf<Sequence<TypedCSVRow>>()
 
 	expectTypeOf(
 		PSVSpliterator.from<TypedCSVRow>("Country|Location\nFR|PAR\n", { mode: "object", normalizeKeys: false })
-	).toEqualTypeOf<Generator<TypedCSVRow>>()
+	).toEqualTypeOf<Sequence<TypedCSVRow>>()
 
 	expectTypeOf(
 		TSVSpliterator.fromAsync<TypedCSVRow>(

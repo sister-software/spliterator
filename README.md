@@ -125,7 +125,15 @@ const cakes = await JSONSpliterator.fromAsync<Row>("menu.jsonl", { delimiter: "\
 
 Filtering happens while streaming, and `take(10)` closes the file handle instead of reading the rest. The operators fuse into a single pass rather than nesting one async generator per step, so chain depth is nearly free — doubling the operator count costs about 10%, where nesting would roughly double it. `flatMap`, `chunks`, `parallelMap`, and `parallelFilter` are the exceptions, since they need inner-iterator state.
 
-The synchronous `from` returns a plain generator, which already has the same helpers natively on Node 24+.
+The synchronous `from` returns a `Sequence` — the same thing without the promises, and what the native iterator helpers on `Iterator.prototype` do not give you: `toMap`, `toSet`, `toSorted`, and `chunks` stay available anywhere in the chain, not just at its head.
+
+```ts
+const priceByName = CSVSpliterator.from(csvBytes, { mode: "object" })
+	.filter((row) => row.category === "Ice Cream Cake")
+	.toMap((row) => [row.item_name, row.price])
+```
+
+`toAsync()` hands the chain to an `AsyncSequence` when you want `parallelMap` or an async callback the rest of the way.
 
 ### Reading from a stream
 

@@ -9,6 +9,7 @@ import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "..
 import type { AsyncDataResource } from "../internal/shared.js"
 import { type AdaptiveSourceInit, openDelimitedRows } from "../io/adaptive-source.js"
 import { AsyncSequence } from "../iterators/AsyncSequence.js"
+import { Sequence } from "../iterators/Sequence.js"
 import { type CommentInput, createCommentFilter } from "./comment-filter.js"
 
 export interface JSONSpliteratorInit {
@@ -23,6 +24,42 @@ export interface JSONSpliteratorInit {
 	 * still parsed. Block-comment syntax is not supported; see {@linkcode createCommentFilter} for why.
 	 */
 	comment?: CommentInput
+}
+
+/**
+ * The row generator behind {@linkcode JSONSpliterator.from}, kept at module scope so `from` can hand it to a
+ * {@linkcode Sequence} while staying lazy — calling a generator function runs none of its body.
+ */
+function* parseRows<T>(
+	source: CharacterSequenceInput,
+	{ comment, ...options }: SpliteratorInit & JSONSpliteratorInit = {}
+): Generator<T> {
+	const decoder = new TextDecoder()
+	const parseable = createCommentFilter(comment)
+	let rowCursor = 0
+
+	const spliterator = Spliterator.fromSync(source, options)
+
+	for (const row of spliterator) {
+		if (parseable && !parseable(row)) continue
+
+		let parsed: T
+
+		try {
+			const content = decoder.decode(row)
+
+			parsed = JSON.parse(content) as T
+		} catch (parsedError) {
+			const error = new SyntaxError(`Failed to parse JSON at row ${rowCursor}`)
+			error.cause = parsedError
+
+			throw error
+		}
+
+		yield parsed
+
+		rowCursor++
+	}
 }
 
 /**
@@ -58,36 +95,11 @@ export abstract class JSONSpliterator {
 		throw new TypeError("Static class cannot be instantiated. Did you mean `JSONSpliterator.from`?")
 	}
 
-	public static *from<T = unknown>(
+	public static from<T = unknown>(
 		source: CharacterSequenceInput,
-		{ comment, ...options }: SpliteratorInit & JSONSpliteratorInit = {}
-	): Generator<T> {
-		const decoder = new TextDecoder()
-		const parseable = createCommentFilter(comment)
-		let rowCursor = 0
-
-		const spliterator = Spliterator.fromSync(source, options)
-
-		for (const row of spliterator) {
-			if (parseable && !parseable(row)) continue
-
-			let parsed: T
-
-			try {
-				const content = decoder.decode(row)
-
-				parsed = JSON.parse(content) as T
-			} catch (parsedError) {
-				const error = new SyntaxError(`Failed to parse JSON at row ${rowCursor}`)
-				error.cause = parsedError
-
-				throw error
-			}
-
-			yield parsed
-
-			rowCursor++
-		}
+		init: SpliteratorInit & JSONSpliteratorInit = {}
+	): Sequence<T> {
+		return new Sequence(parseRows<T>(source, init))
 	}
 
 	/**

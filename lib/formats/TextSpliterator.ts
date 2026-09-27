@@ -9,6 +9,7 @@ import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "..
 import type { AsyncDataResource } from "../internal/shared.js"
 import { type AdaptiveSourceInit, openDelimitedRows } from "../io/adaptive-source.js"
 import { AsyncSequence } from "../iterators/AsyncSequence.js"
+import { Sequence } from "../iterators/Sequence.js"
 
 export interface TextSpliteratorInit {
 	/**
@@ -30,6 +31,37 @@ export interface TextSpliteratorInit {
 	ignoreBOM?: boolean
 }
 
+/**
+ * The row generator behind {@linkcode TextSpliterator.from}, kept at module scope so `from` can hand it to a
+ * {@linkcode Sequence} while staying lazy — calling a generator function runs none of its body.
+ */
+function* decodeRows(
+	source: CharacterSequenceInput,
+	{ encoding, fatal, ignoreBOM, ...options }: TextSpliteratorInit & SpliteratorInit = {}
+): Generator<string> {
+	const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
+	let rowCursor = 0
+
+	const spliterator = Spliterator.fromSync(source, options)
+
+	for (const row of spliterator) {
+		let decoded: string
+
+		try {
+			decoded = decoder.decode(row)
+		} catch (parsedError) {
+			const error = new SyntaxError(`Failed to decode data at row ${rowCursor}`)
+			error.cause = parsedError
+
+			throw error
+		}
+
+		yield decoded
+
+		rowCursor++
+	}
+}
+
 export abstract class TextSpliterator {
 	constructor() {
 		throw new TypeError("Static class cannot be instantiated. Did you mean `TextSpliterator.from`?")
@@ -45,31 +77,11 @@ export abstract class TextSpliterator {
 	 * @see {@linkcode TextSpliterator.fromAsync} for asynchronous iteration with decoding.
 	 * @see {@linkcode Spliterator.fromSync} for synchronous iteration without decoding.
 	 */
-	public static *from(
+	public static from(
 		source: CharacterSequenceInput,
-		{ encoding, fatal, ignoreBOM, ...options }: TextSpliteratorInit & SpliteratorInit = {}
-	): Generator<string> {
-		const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
-		let rowCursor = 0
-
-		const spliterator = Spliterator.fromSync(source, options)
-
-		for (const row of spliterator) {
-			let decoded: string
-
-			try {
-				decoded = decoder.decode(row)
-			} catch (parsedError) {
-				const error = new SyntaxError(`Failed to decode data at row ${rowCursor}`)
-				error.cause = parsedError
-
-				throw error
-			}
-
-			yield decoded
-
-			rowCursor++
-		}
+		init: TextSpliteratorInit & SpliteratorInit = {}
+	): Sequence<string> {
+		return new Sequence(decodeRows(source, init))
 	}
 
 	/**
