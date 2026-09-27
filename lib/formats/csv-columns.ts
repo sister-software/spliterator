@@ -139,7 +139,9 @@ function splitQuotedString(line: string, delimiter: string): string[] {
  * `startsWith` are intrinsics while the scan runs a generator per row.
  *
  * The SIMD scanner does not apply here either way: it engages at `WASM_THRESHOLD`, and a single row is far below it.
- * Row-level splitting, whose haystack is the whole buffer, is where that path earns its keep.
+ * Row-level splitting, whose haystack is the whole buffer, is where that path earns its keep. A source that is wholly
+ * in memory does not come through here at all by default: `csv-cells.ts` decodes it once and slices cells at the
+ * boundaries the kernel emits, and this module is the `columnScan: "rows"` reference it is checked against.
  */
 export function splitRowColumns(
 	row: Uint8Array,
