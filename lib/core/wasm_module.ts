@@ -1,7 +1,7 @@
 /**
+ * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
- * @copyright Sister Software
  */
 
 import { WASM_BASE64 } from "./wasm_base64.js"

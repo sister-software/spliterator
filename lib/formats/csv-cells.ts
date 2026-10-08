@@ -1,7 +1,7 @@
 /**
+ * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
- * @copyright Sister Software
  */
 
 import { CharacterSequence, type CellScanState } from "../core/CharacterSequence.js"

@@ -1,8 +1,8 @@
 /**
- * @license MIT
- * @file Oxfmt configuration for spliterator.
- * @author Teffen Ellis, et al.
  * @copyright Sister Software
+ * @license MIT
+ * @author Teffen Ellis, et al.
+ * @file oxfmt configuration for spliterator.
  */
 
 import { sisterSoftwareOxfmtConfig } from "@sister.software/oxfmt-config"

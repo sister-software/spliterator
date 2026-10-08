@@ -1,9 +1,11 @@
 /**
- * @license MIT
- * @author Teffen Ellis, et al. Tests that force the WASM SIMD path (haystacks >= WASM_THRESHOLD) to guard the native
- *   scanner against regressions: alignment, the shared-memory cache, and silent result truncation. The JS fallback is
- *   exercised by the other suites.
  * @copyright Sister Software
+ * @license MIT
+ * @author Teffen Ellis, et al.
+ *
+ * Tests that force the WASM SIMD path (haystacks >= WASM_THRESHOLD) to guard the
+ * native scanner against regressions: alignment, the shared-memory cache, and
+ * silent result truncation. The JS fallback is exercised by the other suites.
  */
 
 import { CharacterSequence, CSVSpliterator, Delimiters } from "spliterator"

@@ -1,7 +1,7 @@
 /**
+ * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
- * @copyright Sister Software
  */
 
 import { runPool, type PoolWorker } from "spliterator/parallel-map-runtime"

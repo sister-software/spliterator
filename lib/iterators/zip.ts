@@ -1,7 +1,7 @@
 /**
+ * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
- * @copyright Sister Software
  */
 
 export type Zipped<T, U> = [a: T | undefined, b: U | undefined, idx: number]

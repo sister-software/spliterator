@@ -1,9 +1,11 @@
 /**
- * @license MIT
- * @author Teffen Ellis, et al. Transport-agnostic core of `parallelMap` — a record-dispatch worker pool. `runPool`
- *   keeps every worker busy mapping batches pulled from one shared source, with no `worker_threads` dependency so it
- *   unit-tests against fake workers.
  * @copyright Sister Software
+ * @license MIT
+ * @author Teffen Ellis, et al.
+ *
+ * Transport-agnostic core of `parallelMap` — a record-dispatch worker pool. `runPool` keeps every
+ * worker busy mapping batches pulled from one shared source, with no `worker_threads` dependency so it
+ * unit-tests against fake workers.
  */
 
 import { mergeAsyncIterators } from "./merge-async-iterators.js"

@@ -1,8 +1,10 @@
 /**
- * @license MIT
- * @author Teffen Ellis, et al. Pool mechanics against fake workers — no threads. Real workers are exercised by
- *   `pooled-workers.test.ts`, following the same bottom-up split as the segment suites.
  * @copyright Sister Software
+ * @license MIT
+ * @author Teffen Ellis, et al.
+ *
+ * Pool mechanics against fake workers — no threads. Real workers are exercised by
+ * `pooled-workers.test.ts`, following the same bottom-up split as the segment suites.
  */
 
 import { WorkerPool, type PoolWorkerLike } from "spliterator"

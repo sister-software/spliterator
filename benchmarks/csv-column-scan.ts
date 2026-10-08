@@ -1,14 +1,17 @@
 /**
- * @license MIT
- * @author Teffen Ellis, et al. Benchmark: columnScan "auto" (one decode, one kernel pass, sliced cells) against "rows"
- *   (decode and split per row). Usage: node --expose-gc out/benchmarks/csv-column-scan.js Fixtures are generated in
- *   memory and written to the OS temp directory so the async path reads real files. Prints Node, CPU, revision, and
- *   min/median of the repetitions; RSS growth is sampled around each run. Retained-cell memory keeps one cell per row
- *   and samples the heap after a GC. It runs for a short cell (`id`) and for one long enough that V8 may slice it from
- *   its parent string (`name`, at least 13 characters), which is how a cell from the bulk path can keep the whole
- *   decoded source alive. Without `--expose-gc` the samples are taken without a collection and are noisy; the header
- *   line says which.
  * @copyright Sister Software
+ * @license MIT
+ * @author Teffen Ellis, et al.
+ * Benchmark: columnScan "auto" (one decode, one kernel pass, sliced cells) against "rows" (decode and split per row).
+ * Usage: node --expose-gc out/benchmarks/csv-column-scan.js
+ *
+ * Fixtures are generated in memory and written to the OS temp directory so the async path reads real files. Prints
+ * Node, CPU, revision, and min/median of the repetitions; RSS growth is sampled around each run.
+ *
+ * Retained-cell memory keeps one cell per row and samples the heap after a GC. It runs for a short cell (`id`) and for
+ * one long enough that V8 may slice it from its parent string (`name`, at least 13 characters), which is how a cell
+ * from the bulk path can keep the whole decoded source alive. Without `--expose-gc` the samples are taken without a
+ * collection and are noisy; the header line says which.
  */
 
 import { execSync } from "node:child_process"

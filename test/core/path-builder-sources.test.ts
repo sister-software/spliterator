@@ -1,10 +1,12 @@
 /**
- * @license MIT
- * @author Teffen Ellis, et al. `AsyncDataResource` includes `PathBuilderLike`, while a `PathBuilder` is callable.
- *   `typeof` is `"function"`, so every `typeof === "object"` guard in the dispatch chain sent the input down the wrong
- *   branch. The input fell through to byte parsing. `yarn demo` had been failing on this with "Invalid delimiter type".
- *   These tests cover every entry point that accepts a resource, including the demo's entry point.
  * @copyright Sister Software
+ * @license MIT
+ * @author Teffen Ellis, et al.
+ *
+ * `AsyncDataResource` includes `PathBuilderLike`, while a `PathBuilder` is callable. `typeof` is
+ * `"function"`, so every `typeof === "object"` guard in the dispatch chain sent the input down the wrong branch.
+ * The input fell through to byte parsing. `yarn demo` had been failing on this with "Invalid delimiter type".
+ * These tests cover every entry point that accepts a resource, including the demo's entry point.
  */
 
 import { AsyncSpliterator, CSVSpliterator, JSONSpliterator, Spliterator, TextSpliterator } from "spliterator"

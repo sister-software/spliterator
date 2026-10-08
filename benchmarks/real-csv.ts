@@ -1,8 +1,10 @@
 /**
- * @license MIT
- * @author Teffen Ellis, et al. Benchmark Spliterator against a real CSV without materializing the input. Usage: node
- *   out/benchmarks/real-csv.js <path> [repetitions]
  * @copyright Sister Software
+ * @license MIT
+ * @author Teffen Ellis, et al.
+ * Benchmark Spliterator against a real CSV without materializing the input.
+ *
+ * Usage: node out/benchmarks/real-csv.js <path> [repetitions]
  */
 
 import { stat } from "node:fs/promises"
