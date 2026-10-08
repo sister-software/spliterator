@@ -399,8 +399,8 @@ describe("validation", () => {
 		expect(() => Sequence.from(range(3)).take(-1)).toThrow(RangeError)
 	})
 
-	test("drop rejects a non-finite limit", () => {
-		expect(() => Sequence.from(range(3)).drop(Infinity)).toThrow(RangeError)
+	test("drop accepts Infinity and drops everything", () => {
+		expect(Sequence.from(range(3)).drop(Infinity).toArray()).toEqual([])
 	})
 
 	test("take(Infinity) leaves the sequence unbounded", () => {

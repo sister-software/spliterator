@@ -29,17 +29,23 @@ export function* zipSync<T, U>(a: Iterable<T>, b: Iterable<U>): Generator<Zipped
 
 	let index = 0
 
-	while (true) {
-		const { done: aDone, value: aValue } = aIterator.next()
-		const { done: bDone, value: bValue } = bIterator.next()
+	try {
+		while (true) {
+			const { done: aDone, value: aValue } = aIterator.next()
+			const { done: bDone, value: bValue } = bIterator.next()
 
-		if (aDone && bDone) {
-			break
+			if (aDone && bDone) {
+				break
+			}
+
+			yield [aValue, bValue, index]
+
+			index++
 		}
-
-		yield [aValue, bValue, index]
-
-		index++
+	} finally {
+		// An early exit closes both sides, so a file-backed iterable releases its handle.
+		aIterator.return?.()
+		bIterator.return?.()
 	}
 }
 
@@ -63,16 +69,21 @@ export async function* zipAsync<T, U>(
 
 	let index = 0
 
-	while (true) {
-		const { done: aDone, value: aValue } = await aIterator.next()
-		const { done: bDone, value: bValue } = await bIterator.next()
+	try {
+		while (true) {
+			const { done: aDone, value: aValue } = await aIterator.next()
+			const { done: bDone, value: bValue } = await bIterator.next()
 
-		if (aDone && bDone) {
-			break
+			if (aDone && bDone) {
+				break
+			}
+
+			yield [aValue, bValue, index]
+
+			index++
 		}
-
-		yield [aValue, bValue, index]
-
-		index++
+	} finally {
+		// An early exit closes both sides, so a file-backed iterable releases its handle.
+		await Promise.all([aIterator.return?.(), bIterator.return?.()])
 	}
 }

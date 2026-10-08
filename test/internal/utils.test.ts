@@ -4,10 +4,10 @@
  * @author Teffen Ellis, et al.
  */
 
-import { isIndexedIterable, isIterable, iterateInParallel, sumOf } from "spliterator"
+import { drain, isIndexedIterable, isIterable, sumOf } from "spliterator"
 import { expect, test } from "vitest"
 
-test("iterateInParallel: drains an async iterable to completion", async () => {
+test("drain: drains an async iterable to completion", async () => {
 	let drained = 0
 
 	async function* gen(): AsyncGenerator<number> {
@@ -23,7 +23,7 @@ test("iterateInParallel: drains an async iterable to completion", async () => {
 		}
 	}
 
-	await expect(iterateInParallel(counting())).resolves.toBeUndefined()
+	await expect(drain(counting())).resolves.toBeUndefined()
 	expect(drained).toBe(3)
 })
 

@@ -4,10 +4,12 @@
  * @author Teffen Ellis, et al.
  */
 
-import { ReadableStream, type ReadableWritablePair, type StreamPipeOptions } from "node:stream/web"
+import type { ReadableWritablePair, StreamPipeOptions } from "node:stream/web"
 
 // This type-only import resolves the `{@linkcode}` references and is erased at compile time.
 import type { fsConcurrency } from "spliterator/node/fs"
+
+import { loadNodeFs } from "../internal/node-modules.js"
 
 /**
  * A chainable operation in a fused pipeline.
@@ -119,7 +121,7 @@ async function* batchValues<T>(source: AsyncIterable<T>, size: number): AsyncGen
 function defaultConcurrency(): Promise<number> {
 	// Optimistic, like `importVendor` in `XLSXSpliterator`: outside Node the module fails to load. `.catch` rather than
 	// a rejection handler so a stub module whose `fsConcurrency` is missing or throws is also covered.
-	defaultConcurrencyPromise ??= import("spliterator/node/fs")
+	defaultConcurrencyPromise ??= loadNodeFs()
 		.then(({ fsConcurrency }) => fsConcurrency())
 		.catch(() => 4)
 
@@ -303,8 +305,11 @@ export interface ParallelMapSequenceOptions {
  * directly there.
  *
  * Single-shot, like the iterators the proposal specifies: iterating consumes the source.
+ *
+ * Calls to `next()` are not queued. Await each before the next, as `for await` and the stream adapters do; two pulls in
+ * flight at once would race on the operator state.
  */
-export class AsyncSequence<T> implements AsyncIterableIterator<T> {
+export class AsyncSequence<T> implements AsyncIterableIterator<T>, AsyncDisposable {
 	readonly #source: SequenceSource<unknown>
 	readonly #ops: readonly Op[]
 
@@ -424,8 +429,9 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	public drop(limit: number): AsyncSequence<T> {
 		const normalized = Math.trunc(limit)
 
-		if (!Number.isFinite(normalized) || normalized < 0) {
-			throw new RangeError(`drop(${limit}): limit must be a non-negative finite number`)
+		// `Infinity` is allowed, as the proposal allows it: it drops everything.
+		if (Number.isNaN(normalized) || normalized < 0) {
+			throw new RangeError(`drop(${limit}): limit must be a non-negative number`)
 		}
 
 		return this.#derive<T>({ kind: OP_DROP, limit: normalized })
@@ -532,7 +538,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 	}
 
 	/**
-	 * Returns a copy of an array with its elements sorted.
+	 * Returns a copy of the sequence's values, sorted.
 	 *
 	 * @param compareFn A function that defines the sort order. If omitted, the elements are sorted in ascending, ASCII
 	 *   character order.
@@ -756,7 +762,17 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 			if (budgets[index]! <= 0) return this.#finish()
 		}
 
-		const upstream = await this.#openUpstream()
+		let upstream: AsyncIterator<unknown> | Iterator<unknown>
+
+		try {
+			upstream = await this.#openUpstream()
+		} catch (error) {
+			// A source that cannot open is not retried: the next pull reports done rather than invoking the thunk again.
+			this.#done = true
+
+			throw error
+		}
+
 		const isSync = upstream === this.#syncUpstream
 
 		try {
@@ -852,6 +868,13 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T> {
 
 	[Symbol.asyncIterator](): AsyncIterableIterator<T> {
 		return this
+	}
+
+	/**
+	 * Close the sequence, so `await using rows = CSVSpliterator.fromAsync(...)` releases the source on scope exit.
+	 */
+	public async [Symbol.asyncDispose](): Promise<void> {
+		await this.#finish()
 	}
 
 	//#endregion

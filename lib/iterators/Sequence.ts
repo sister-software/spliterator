@@ -4,7 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import { ReadableStream, type ReadableWritablePair, type StreamPipeOptions } from "node:stream/web"
+import type { ReadableWritablePair, StreamPipeOptions } from "node:stream/web"
 
 import { AsyncSequence } from "./AsyncSequence.js"
 
@@ -212,8 +212,9 @@ export class Sequence<T> implements IterableIterator<T>, Disposable {
 	public drop(limit: number): Sequence<T> {
 		const normalized = Math.trunc(limit)
 
-		if (!Number.isFinite(normalized) || normalized < 0) {
-			throw new RangeError(`drop(${limit}): limit must be a non-negative finite number`)
+		// `Infinity` is allowed, as the proposal allows it: it drops everything.
+		if (Number.isNaN(normalized) || normalized < 0) {
+			throw new RangeError(`drop(${limit}): limit must be a non-negative number`)
 		}
 
 		return this.#derive<T>({ kind: OP_DROP, limit: normalized })
@@ -484,7 +485,16 @@ export class Sequence<T> implements IterableIterator<T>, Disposable {
 			if (budgets[index]! <= 0) return this.#finish()
 		}
 
-		const upstream = this.#openUpstream()
+		let upstream: Iterator<unknown>
+
+		try {
+			upstream = this.#openUpstream()
+		} catch (error) {
+			// A source that cannot open is not retried: the next pull reports done rather than invoking the thunk again.
+			this.#done = true
+
+			throw error
+		}
 
 		try {
 			outer: for (;;) {

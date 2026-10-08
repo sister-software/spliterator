@@ -5,9 +5,9 @@
  */
 
 /**
- * Convenience function to await an async iterable.
+ * Drain an async iterable, discarding its values. The iterable is pulled sequentially to completion.
  */
-export async function iterateInParallel<T>(asyncIterable: AsyncIterable<T>): Promise<void> {
+export async function drain<T>(asyncIterable: AsyncIterable<T>): Promise<void> {
 	for await (const _ of asyncIterable) {
 		/* empty */
 	}
