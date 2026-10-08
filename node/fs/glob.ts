@@ -36,7 +36,7 @@ interface GlobCommonOptions {
 	/**
 	 * Yield only non-directory entries.
 	 *
-	 * @default false
+	 * @default true
 	 */
 	onlyFiles?: boolean
 
@@ -77,7 +77,7 @@ export interface GlobStringOptions extends GlobCommonOptions {
 	/**
 	 * Yield absolute paths instead of paths relative to `cwd`.
 	 *
-	 * @default true
+	 * @default false
 	 */
 	absolute?: boolean
 }

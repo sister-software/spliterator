@@ -21,7 +21,7 @@ const rootHelp = [
 	"  csv                           Split a CSV file into JSONL format.",
 	"  parallel                      Run commands concurrently over delimited input.",
 	"",
-	"Sister Software, AGPL-3.0",
+	"Sister Software, MIT",
 	"https://sister.software",
 ].join("\n")
 

@@ -94,6 +94,8 @@ export async function run(args: string[]): Promise<void> {
 		header: Boolean(values.header),
 		transformers,
 		columnDelimiter: values["column-delimiter"] as string,
+		skipEmpty: Boolean(values["skip-empty"]),
+		debug: Boolean(values.debug),
 		take,
 		drop,
 	} satisfies CSVSpliteratorInit & AsyncSpliteratorInit)

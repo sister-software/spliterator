@@ -29,7 +29,9 @@ gh workflow run publish.yml -f mode=prepare -f version=minor
 gh workflow run publish.yml -f mode=publish
 ```
 
-The package manager is **yarn** (v4). Node >= 20.18.1 is required. Compiled output goes to `out/`.
+The package manager is **yarn** (v4). Node >= 24 is required. Compiled output goes to `out/`.
+
+**Source is TypeScript only, tests and fixtures included.** `*.js` and `*.mjs` are gitignored. Worker handler fixtures are `.ts` files loaded by path; Node strips types natively on the supported floor, so nothing compiles them first.
 
 ## Architecture
 
@@ -155,7 +157,10 @@ The package's public entry points:
 
 - `.` → `out/index.js` — all public symbols
 - `./node/fs` → `out/node/fs/index.js` — Node file helpers (dynamically imported by core)
-- `./casing` → `out/lib/formats/casing.js` — the casing helpers alone, with no `node:` import anywhere in their static chain. Browser-bundled consumers (mailwoman's codex and core) import from here rather than the root, whose static chain reaches `node:stream/web`.
+- `./web` → `out/web.js` — the browser-safe surface: everything in the root minus `XLSXSpliterator`, `createNewlineWriter`, and the worker-thread primitives. Its static graph reaches no bare specifier at all.
+- `./casing` → `out/lib/formats/casing.js` — the casing helpers alone. Browser-bundled consumers (mailwoman's codex and core) import from here or from `./web`.
+
+**No entry point statically imports a `node:` module.** `test/package/static-graph.test.ts` walks the compiled graph of the root, `./web`, and `./casing` and fails on one. The root once reached `node:stream/web` and `node:worker_threads`, which made Vite print "externalized for browser compatibility" for every consumer that imported `TextSpliterator` from `"spliterator"`. Bundlers also follow a dynamic `import("literal")` and a `new URL("literal", import.meta.url)` into chunks, so those are not an escape either: every Node-only module and worker entry URL goes through `lib/internal/node-modules.ts`, whose `loadHidden` imports a variable specifier under `@vite-ignore`/`webpackIgnore`. `ReadableStream` is the global, and `createNewlineWriter` loads `node:fs` through `process.getBuiltinModule` because it must stay synchronous. Node-typed imports (`import type`) are fine, they are erased.
 
 Plus four worker-runtime subpaths (`./merge-async-iterators`, `./parallel-map-runtime`, `./segment-runtime`, `./segment-workers`), which exist so worker entry modules can import them by specifier rather than by relative path.
 
@@ -167,7 +172,7 @@ Examples import test helpers by relative path (`../test/support/utils.js`), not 
 
 Tests use **vitest** and live in `test/`. Fixtures are in `test/fixtures/`. The `test/support/utils.ts` helper loads fixture files and pre-computes `String.prototype.split` results for parity comparisons.
 
-The parallel-parsing layers are tested bottom-up so the worker protocol is verified without spawning threads: `runSegment` (`test/parallel/segment-runtime.test.ts`) and `workerToIterable` (`test/parallel/workerToIterable.test.ts`) are pure/main-thread; `computeSegments` (`test/parallel/segments.test.ts`) and `asMany` (`test/parallel/asMany.test.ts`) run against temp fixtures and assert the boundary invariant + parity vs sequential parse. Only `test/parallel/asManyWorkers.test.ts` spawns real workers — it uses plain-ESM fixture handlers in `test/fixtures/segment-handlers/` (loaded by file path, not compiled) and covers parity, the `Uint8Array` transfer path, the path-required `TypeError`, and a throwing handler rejecting the iterator.
+The parallel-parsing layers are tested bottom-up so the worker protocol is verified without spawning threads: `runSegment` (`test/parallel/segment-runtime.test.ts`) and `workerToIterable` (`test/parallel/workerToIterable.test.ts`) are pure/main-thread; `computeSegments` (`test/parallel/segments.test.ts`) and `asMany` (`test/parallel/asMany.test.ts`) run against temp fixtures and assert the boundary invariant + parity vs sequential parse. Only `test/parallel/asManyWorkers.test.ts`, `pooled-workers.test.ts`, `parallelMapWorkers.test.ts` and `worker-regressions.test.ts` spawn real workers — they use TypeScript fixture handlers in `test/fixtures/segment-handlers/` and `parallel-handlers/` (loaded by file path) and cover parity, the `Uint8Array` transfer path, the path-required `TypeError`, a throwing handler rejecting the iterator, and the lifecycle edges: an omitted delimiter, early exit from a pooled call, two calls sharing a small pool, disposal mid-spawn, a worker that exits without finishing, and an idle pooled worker that throws.
 
 ## Non-obvious Gotchas
 

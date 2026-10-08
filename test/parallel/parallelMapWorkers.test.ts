@@ -32,7 +32,7 @@ describe("parallelMapWorkers", () => {
 	test("maps every item across the worker pool (completion order ⇒ set)", async () => {
 		const got = await collect(
 			parallelMapWorkers<number, number>(range(200), {
-				worker: join(handlerDir, "double.js"),
+				worker: join(handlerDir, "double.ts"),
 				concurrency: 4,
 				batchSize: 16,
 			})
@@ -46,7 +46,7 @@ describe("parallelMapWorkers", () => {
 
 		const got = await collect(
 			parallelMapWorkers<number, Uint8Array>(range(100), {
-				worker: join(handlerDir, "evens-as-bytes.js"),
+				worker: join(handlerDir, "evens-as-bytes.ts"),
 				concurrency: 4,
 				batchSize: 8,
 			})
@@ -58,7 +58,7 @@ describe("parallelMapWorkers", () => {
 
 	test("a throwing handler rejects the iterator", async () => {
 		await expect(
-			collect(parallelMapWorkers(range(50), { worker: join(handlerDir, "throws.js"), concurrency: 2 }))
+			collect(parallelMapWorkers(range(50), { worker: join(handlerDir, "throws.ts"), concurrency: 2 }))
 		).rejects.toThrow(/boom/)
 	})
 })

@@ -17,7 +17,7 @@ import {
 /**
  * Create a readable stream from a file system source.
  *
- * If the source is not a string or URL, this function will return `process.stdin`.
+ * Anything but a non-empty string path reads `process.stdin`, which must not be a TTY.
  */
 export async function createReadStream(source: unknown, highWaterMark: number): Promise<AsyncChunkIterator> {
 	if (typeof source !== "string" || !source) {

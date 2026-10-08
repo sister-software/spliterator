@@ -19,7 +19,7 @@
 
 Spliterator scans for delimiters rather than materializing lines, so a parse costs one pass over the bytes and a queue of `[start, end]` ranges. An embedded WebAssembly SIMD scanner does the scanning — roughly 5–6 GB/s for multi-byte delimiters against ~600 MB/s for the JavaScript fallback — with no extra files, fetches, or configuration. Files small enough that setup dominates are read whole and parsed synchronously instead, automatically.
 
-Every `fromAsync` returns an `AsyncSequence`: a lazy, chainable async iterator matching the [async iterator helpers proposal][helpers], fused into a single pass so chain depth is nearly free. Early exit closes the file handle. The core is isomorphic, Node file I/O lives behind a subpath, and a CLI ships in the box. Every export carries TSDoc, so your editor is the reference.
+Every `fromAsync` returns an `AsyncSequence`: a lazy, chainable async iterator matching the [async iterator helpers proposal][helpers], fused into a single pass so chain depth is nearly free. Early exit closes the file handle. The core is isomorphic: nothing under the root entry statically imports a Node module, Node file I/O lives behind the `spliterator/node/fs` subpath, and `spliterator/web` exports the browser-safe surface alone. A CLI ships in the box. Every export carries TSDoc, so your editor is the reference.
 
 [helpers]: https://github.com/tc39/proposal-async-iterator-helpers
 
@@ -95,9 +95,11 @@ interface Person {
 const reader = CSVSpliterator.fromAsync<Person>("people.csv")
 
 for await (const columns of reader) {
-	console.log(columns) // { full_name: "Morgan", occupation: "Developer", age: 30 }, etc.
+	console.log(columns) // { full_name: "Morgan", occupation: "Developer", age: "30" }, etc.
 }
 ```
+
+A type parameter only tells the type checker what to expect. The cells are still strings, so give `age` a `transformers` entry to turn it into a number. Cells are trimmed by default, header included; RFC 4180 counts that whitespace as part of the field, so pass `trim: false` for byte parity.
 
 For tab-separated files, reach for `TSVSpliterator`. It accepts the same options as `CSVSpliterator` and defaults `columnDelimiter` to a tab, so you can omit it for the common case:
 
@@ -137,7 +139,7 @@ const priceByName = CSVSpliterator.from(csvBytes, { mode: "object" })
 
 ### Reading from a stream
 
-All included Spliterators implement the `Generator` and `AsyncGenerator` interfaces, so you can use them in `for...of` and `for await...of` loops, as well the web-native [ReadableStreams](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream), so you can use them in `for await...of` loops, as well as piping them through transformations to avoid nested and partially materialized streams.
+Every `Sequence` and `AsyncSequence` is an iterator, so it works in `for...of` and `for await...of` loops, and each converts to a web-native [ReadableStream](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream) with `toReadableStream()`, so it can be piped through transformations without nesting or partially materializing streams.
 
 ```ts
 import { JSONSpliterator } from "spliterator"
@@ -376,7 +378,7 @@ A pool smaller than `concurrency` bounds the real parallelism — segments queue
 
 ### SIMD acceleration
 
-Spliterator ships a small WebAssembly SIMD scanner that accelerates delimiter and quote scanning (roughly 5–6× over the JavaScript scanner for multi-byte delimiters, more for column splitting). It is embedded in the package — no extra files, fetches, or configuration.
+Spliterator ships a small WebAssembly SIMD scanner that accelerates delimiter and quote scanning (roughly 5–6 GB/s against ~600 MB/s for the JavaScript scanner on multi-byte delimiters, and 8–17× on `searchAll`). It is embedded in the package — no extra files, fetches, or configuration.
 
 The module loads **asynchronously**. Asynchronous parsing (`fromAsync`, streams) picks it up automatically once loaded. Purely synchronous parsing that finishes in a single tick would otherwise complete before the module is ready and transparently use the JavaScript scanner — to opt in, await it first:
 

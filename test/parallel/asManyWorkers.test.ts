@@ -31,7 +31,7 @@ describe("asManyWorkers", () => {
 		const got: string[] = []
 
 		for await (const r of AsyncSpliterator.asManyWorkers<string>(file, {
-			worker: join(handlerDir, "uppercase.js"),
+			worker: join(handlerDir, "uppercase.ts"),
 			delimiter: "\n",
 			concurrency: 4,
 		})) {
@@ -46,7 +46,7 @@ describe("asManyWorkers", () => {
 		const lines: string[] = []
 
 		for await (const bytes of AsyncSpliterator.asManyWorkers<Uint8Array>(file, {
-			worker: join(handlerDir, "to-json-bytes.js"),
+			worker: join(handlerDir, "to-json-bytes.ts"),
 			delimiter: "\n",
 			concurrency: 4,
 		})) {
@@ -67,7 +67,7 @@ describe("asManyWorkers", () => {
 		await expect(
 			(async () => {
 				for await (const _ of AsyncSpliterator.asManyWorkers(file, {
-					worker: join(handlerDir, "throws.js"),
+					worker: join(handlerDir, "throws.ts"),
 					delimiter: "\n",
 					concurrency: 2,
 				})) {

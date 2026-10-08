@@ -71,7 +71,7 @@ describe("pooled asManyWorkers", () => {
 		const { out, peakLeased } = await collectWatching(
 			pool,
 			AsyncSpliterator.asManyWorkers<string>(file, {
-				worker: join(segmentHandlers, "uppercase.js"),
+				worker: join(segmentHandlers, "uppercase.ts"),
 				delimiter: "\n",
 				concurrency: 4,
 				pool,
@@ -87,7 +87,7 @@ describe("pooled asManyWorkers", () => {
 
 		const first = await collect(
 			AsyncSpliterator.asManyWorkers<string>(file, {
-				worker: join(segmentHandlers, "uppercase.js"),
+				worker: join(segmentHandlers, "uppercase.ts"),
 				delimiter: "\n",
 				concurrency: 4,
 				pool,
@@ -98,7 +98,7 @@ describe("pooled asManyWorkers", () => {
 
 		const second = await collect(
 			AsyncSpliterator.asManyWorkers<string>(file, {
-				worker: join(segmentHandlers, "uppercase.js"),
+				worker: join(segmentHandlers, "uppercase.ts"),
 				delimiter: "\n",
 				concurrency: 4,
 				pool,
@@ -117,7 +117,7 @@ describe("pooled asManyWorkers", () => {
 		const runOnce = () =>
 			collect(
 				AsyncSpliterator.asManyWorkers<number>(file, {
-					worker: join(segmentHandlers, "call-counter.js"),
+					worker: join(segmentHandlers, "call-counter.ts"),
 					delimiter: "\n",
 					concurrency: 1,
 					pool,
@@ -140,7 +140,7 @@ describe("pooled asManyWorkers", () => {
 		const { out, peakLeased } = await collectWatching(
 			pool,
 			AsyncSpliterator.asManyWorkers<string>(file, {
-				worker: join(segmentHandlers, "uppercase.js"),
+				worker: join(segmentHandlers, "uppercase.ts"),
 				delimiter: "\n",
 				concurrency: 6,
 				pool,
@@ -158,7 +158,7 @@ describe("pooled asManyWorkers", () => {
 
 		const got = await collect(
 			AsyncSpliterator.asManyWorkers<Uint8Array>(file, {
-				worker: join(segmentHandlers, "to-json-bytes.js"),
+				worker: join(segmentHandlers, "to-json-bytes.ts"),
 				delimiter: "\n",
 				concurrency: 3,
 				pool,
@@ -175,7 +175,7 @@ describe("pooled asManyWorkers", () => {
 		await expect(
 			collect(
 				AsyncSpliterator.asManyWorkers(file, {
-					worker: join(segmentHandlers, "throws.js"),
+					worker: join(segmentHandlers, "throws.ts"),
 					delimiter: "\n",
 					concurrency: 2,
 					pool,
@@ -188,7 +188,7 @@ describe("pooled asManyWorkers", () => {
 
 		const recovered = await collect(
 			AsyncSpliterator.asManyWorkers<string>(file, {
-				worker: join(segmentHandlers, "uppercase.js"),
+				worker: join(segmentHandlers, "uppercase.ts"),
 				delimiter: "\n",
 				concurrency: 2,
 				pool,
@@ -204,7 +204,7 @@ describe("pooled asManyWorkers", () => {
 		await expect(
 			collect(
 				AsyncSpliterator.asManyWorkers(file, {
-					worker: join(segmentHandlers, "uppercase.js"),
+					worker: join(segmentHandlers, "uppercase.ts"),
 					delimiter: "\n",
 					concurrency: 1,
 					pool,
@@ -222,7 +222,7 @@ describe("pooled parallelMapWorkers", () => {
 		const { out, peakLeased } = await collectWatching(
 			pool,
 			parallelMapWorkers<number, number>([1, 2, 3, 4, 5, 6, 7, 8], {
-				worker: join(parallelHandlers, "double.js"),
+				worker: join(parallelHandlers, "double.ts"),
 				concurrency: 3,
 				pool,
 			})
@@ -239,7 +239,7 @@ describe("pooled parallelMapWorkers", () => {
 		const { out, peakLeased } = await collectWatching(
 			pool,
 			parallelMapWorkers<number, number>([1, 2, 3, 4], {
-				worker: join(parallelHandlers, "double.js"),
+				worker: join(parallelHandlers, "double.ts"),
 				// Deliberately larger than the pool: asking for eight leases from a pool of two could
 				// only be satisfied by workers this very call is holding.
 				concurrency: 8,
@@ -257,7 +257,7 @@ describe("pooled parallelMapWorkers", () => {
 
 		const mapped = await collect(
 			parallelMapWorkers<number, number>([1, 2, 3], {
-				worker: join(parallelHandlers, "double.js"),
+				worker: join(parallelHandlers, "double.ts"),
 				concurrency: 2,
 				pool,
 			})
@@ -265,7 +265,7 @@ describe("pooled parallelMapWorkers", () => {
 
 		const parsed = await collect(
 			AsyncSpliterator.asManyWorkers<string>(file, {
-				worker: join(segmentHandlers, "uppercase.js"),
+				worker: join(segmentHandlers, "uppercase.ts"),
 				delimiter: "\n",
 				concurrency: 2,
 				pool,

@@ -124,18 +124,10 @@ async function main(): Promise<void> {
 	const crlf = new Uint8Array([Delimiters.CarriageReturn, Delimiters.LineFeed])
 	const bmhSearcher = new BmhSearcher(crlf)
 
-	// Warm up WASM: CharacterSequence.search() triggers #ensureWasm() on first
-	// call with multi-byte + large haystack, which loads the module async.
-	// We call it once, wait, then it's ready for all subsequent calls.
+	// A timer here measured the JS fallback on a slow machine and still printed parity. Await the load instead.
 	console.log("Warming up WASM module...")
 
-	const warmup = new Uint8Array(5000).fill(65) // 'A'
-
-	new CharacterSequence(crlf).search(warmup)
-
-	await new Promise((resolve) => {
-		setTimeout(resolve, 100)
-	})
+	await CharacterSequence.whenReady()
 
 	// Verify WASM loaded by checking if a second search hits the SIMD path
 	// (no way to check private static field, but parity check below confirms)
