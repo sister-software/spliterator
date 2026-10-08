@@ -4,8 +4,9 @@
  * @author Teffen Ellis, et al.
  */
 
-import { ReadableStream, type ReadableWritablePair, type StreamPipeOptions } from "node:stream/web"
+import type { ReadableWritablePair, StreamPipeOptions } from "node:stream/web"
 
+import { loadNodeFs } from "../internal/node-modules.js"
 import {
 	isPathBuilderLike,
 	type AsyncChunkIterator,
@@ -17,6 +18,7 @@ import { computeSegments, type SegmentOptions } from "../parallel/segments.js"
 import { BufferController } from "./BufferController.js"
 import { CharacterSequence, type CharacterSequenceInput, Delimiters } from "./CharacterSequence.js"
 import { IndexQueue } from "./IndexQueue.js"
+import { WASM_MAX_RESULTS } from "./wasm_module.js"
 
 const noop = () => void 0
 const sharedEncoder = new TextEncoder()
@@ -117,7 +119,7 @@ export interface AsyncSpliteratorInit extends SpliteratorInit {
 	/**
 	 * Whether to automatically dispose of the source once the iterator is done.
 	 *
-	 * @default true
+	 * @default false
 	 */
 	autoDispose?: boolean
 }
@@ -180,7 +182,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 			return new AsyncSpliterator(source, init)
 		}
 
-		return import("spliterator/node/fs").then(async ({ createChunkIterator }) => {
+		return loadNodeFs().then(async ({ createChunkIterator }) => {
 			const chunkIterator = await createChunkIterator(source, {
 				highWaterMark: init.highWaterMark,
 			})
@@ -220,14 +222,9 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	 * Dispose of the spliterator, closing the file handle if necessary.
 	 */
 	public async [Symbol.asyncDispose](): Promise<void> {
-		this.#indices.clear()
+		await this.#finalize()
+
 		this.#controller.clear()
-
-		await this.#closeReader()
-
-		if (this.#autoDispose) {
-			await this.#source[Symbol.asyncDispose]?.()
-		}
 	}
 
 	/**
@@ -393,11 +390,6 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	 */
 	#yieldCount = 0
 
-	// /**
-	//  * The current byte index to perform read operations from.
-	//  */
-	// #readPosition: number
-
 	/**
 	 * Whether to output debug information.
 	 */
@@ -476,6 +468,42 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 		}
 
 		if (!this.#enableQuoteHandling) {
+			if (this.#needle.length > 1) {
+				// One staged scan per fill. A per-row `search` would stage the same bytes once per row.
+				// `searchAll` returns the completed records plus the unterminated tail, which `#fill`
+				// owns at EOF.
+				// Bytes before the cursor were scanned by an earlier fill, less the `length - 1` that a split
+				// delimiter could begin in; rescanning a record from its start on every read would be
+				// quadratic in the record's size.
+				let scanStart = Math.max(this.#pendingSliceStart, this.#searchCursor - (this.#needle.length - 1))
+
+				for (;;) {
+					const ranges = this.#needle.searchAll(this.#controller.bytes, scanStart, searchEnd, true)
+					const completed = ranges.length - 1
+
+					for (let i = 0; i < completed; i++) {
+						const start = i === 0 ? this.#pendingSliceStart : ranges[i]![0]
+						const end = ranges[i]![1]
+						const byteRange: ByteRange = [start, this.#trimEnd(start, end)]
+
+						this.#log("Found byte range", byteRange)
+						this.#indices.enqueue(byteRange)
+
+						this.#pendingSliceStart = end + this.#needle.length
+					}
+
+					// A result that filled the kernel's buffer may leave delimiters unscanned after its tail; resume
+					// from the tail until a scan comes back with room to spare.
+					if (ranges.length < WASM_MAX_RESULTS) break
+
+					scanStart = ranges[completed]![0]
+				}
+
+				this.#searchCursor = searchEnd
+
+				return
+			}
+
 			while (this.#searchCursor <= searchEnd) {
 				const delimiterIndex = this.#needle.search(this.#controller.bytes, this.#searchCursor, searchEnd)
 
@@ -599,9 +627,33 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 		} catch {
 			// The reader may already be closed. Closing it again has no work to do.
 		}
+
+		// A Node readable's async iterator is a generator: `return()` before the first pull skips its `finally`, so
+		// the stream is never destroyed and a file handle opened for it is left to the collector, which Node 24 treats
+		// as an error. Destroying the stream itself is idempotent and covers that case. A web stream is cancelled.
+		const source = this.#source as { destroy?: () => void; cancel?: () => Promise<void> }
+
+		if (typeof source.destroy === "function") {
+			source.destroy()
+		} else if (typeof source.cancel === "function") {
+			await source.cancel().catch(() => undefined)
+		}
 	}
 
-	async #finalize(): Promise<IteratorReturnResult<undefined>> {
+	/**
+	 * Resolved on the first finalization and returned by every later one, so `return()`, `asyncDispose` and the terminal
+	 * `next()` close the reader and dispose the source exactly once between them.
+	 */
+	#finalized: Promise<IteratorReturnResult<undefined>> | undefined
+
+	#finalize(): Promise<IteratorReturnResult<undefined>> {
+		this.#done = true
+		this.#indices.clear()
+
+		return (this.#finalized ??= this.#finalizeOnce())
+	}
+
+	async #finalizeOnce(): Promise<IteratorReturnResult<undefined>> {
 		await this.#closeReader()
 
 		if (this.#debug) {
@@ -632,6 +684,13 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 
 	//#region Iterator Methods
 
+	/**
+	 * Pull the next range.
+	 *
+	 * The yielded value is a **view** into the read buffer, valid until the next pull: the buffer is compacted in place
+	 * as reading proceeds, and cleared on dispose. Decode or `slice()` a range before pulling again to keep it.
+	 * {@linkcode toArray} copies for you.
+	 */
 	public async next(): Promise<IteratorResult<R>> {
 		// Loop rather than recurse: a long run of skipped (empty or dropped) ranges would
 		// otherwise grow the call stack one frame per skip and overflow.
@@ -683,10 +742,12 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	/**
 	 * Collect all the byte ranges from the file.
 	 *
+	 * Each range is copied, because a range {@linkcode next} yields is a view that the next pull may overwrite.
+	 *
 	 * **This method will read the entire file into memory.**
 	 */
 	public toArray(): Promise<R[]> {
-		return Array.fromAsync(this)
+		return Array.fromAsync(this, (range) => (range as Uint8Array).slice() as unknown as R)
 	}
 
 	/**
@@ -728,7 +789,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	 * ```ts
 	 * const spliterator = await AsyncSpliterator.from("data.csv")
 	 *
-	 * const textStream = spliterator.pipeTo(new TextDecoderStream())
+	 * const textStream = spliterator.pipeThrough(new TextDecoderStream())
 	 * ```
 	 *
 	 * @see {@linkcode toReadableStream} to first convert the spliterator to a readable stream.
@@ -771,7 +832,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	 * @returns One `AsyncSpliterator` per non-empty segment, possibly fewer than `concurrency`.
 	 */
 	public static async asMany(source: AsyncDataResource, options: SegmentOptions): Promise<AsyncSpliterator[]> {
-		const { createChunkIterator } = await import("spliterator/node/fs")
+		const { createChunkIterator } = await loadNodeFs()
 		const segments = await computeSegments(source, options)
 
 		return Promise.all(

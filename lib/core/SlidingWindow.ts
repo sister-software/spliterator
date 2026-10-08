@@ -26,8 +26,6 @@ export interface SlidingWindowInit {
 
 /**
  * A sliding window that iterates over an in-memory buffer, yielding byte ranges.
- *
- * @see {@link AsyncSlidingWindow} for an asynchronous version.
  */
 export class SlidingWindow<T extends TypedArray> implements IterableIterator<ByteRange> {
 	buffer: T

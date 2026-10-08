@@ -142,8 +142,6 @@ export class CharacterSequence extends Uint8Array {
 	#skipIndex: number[]
 
 	static #wasmScanner: WasmDelimiterScanner | null | undefined
-	static #wasmHaystack: Uint8Array | null = null
-	static #wasmPatternOffset = 0
 	static #wasmReadyPromise: Promise<WasmDelimiterScanner | null> | undefined
 
 	static #loadWasm(): Promise<WasmDelimiterScanner | null> {
@@ -202,23 +200,18 @@ export class CharacterSequence extends Uint8Array {
 			const wasm = CharacterSequence.#wasmScanner
 
 			if (wasm) {
-				// Cache the *entire* haystack at offset 0 (so WASM byte `i` === `haystack[i]`),
-				// keyed by identity. This keeps repeated searches over the same source (the
-				// Spliterator fill loop) copy-free while staying correct for any start/end — the
-				// previous "copy [start,end)" scheme mis-mapped offsets when start !== 0 and
-				// silently ignored a shrinking `end`.
-				if (haystack !== CharacterSequence.#wasmHaystack) {
-					const fullLen = haystack.length
-					const totalNeeded = fullLen + sequenceLength
-					ensureWasmCapacity(wasm.memory, totalNeeded)
-					const buffer = new Uint8Array(wasm.memory.buffer, 0, totalNeeded)
-					buffer.set(haystack, 0)
-					buffer.set(this, fullLen)
-					CharacterSequence.#wasmHaystack = haystack
-					CharacterSequence.#wasmPatternOffset = fullLen
-				}
+				// `[start, end)` is staged on every call. An identity-keyed cache of the whole haystack was tried and
+				// scanned stale bytes: `BufferController` appends into the same `Uint8Array` in place, so the same
+				// object carries new contents from one fill to the next. Callers that search many times over one
+				// buffer use `searchAll` over a window instead, which stages once per window.
+				const haystackLen = end - start
+				const totalNeeded = haystackLen + sequenceLength
+				ensureWasmCapacity(wasm.memory, totalNeeded)
+				const buffer = new Uint8Array(wasm.memory.buffer, 0, totalNeeded)
+				buffer.set(haystack.subarray(start, end), 0)
+				buffer.set(this, haystackLen)
 
-				const result = wasm.findDelimiter(start, end - start, CharacterSequence.#wasmPatternOffset, sequenceLength)
+				const result = wasm.findDelimiter(0, haystackLen, haystackLen, sequenceLength)
 
 				return result >= 0 ? start + result : -1
 			}
@@ -228,7 +221,6 @@ export class CharacterSequence extends Uint8Array {
 			}
 		}
 
-		CharacterSequence.#wasmHaystack = null
 		let startIndex = start
 
 		while (startIndex <= end - sequenceLength) {
@@ -245,7 +237,15 @@ export class CharacterSequence extends Uint8Array {
 		return -1
 	}
 
-	public searchAll(haystack: Uint8Array, start = 0, end = haystack.length): ByteRange[] {
+	/**
+	 * Every delimited range in `[start, end)`: the completed records, then the unterminated tail after the last delimiter
+	 * (empty when the haystack ends on one).
+	 *
+	 * With `allowPartial`, a window denser than the kernel's result capacity returns the records it completed plus the
+	 * tail from the last consumed delimiter, instead of rescanning the window in JavaScript. A caller that resumes from
+	 * the tail's start, as the engines' fill loops do, loses nothing and pays one kernel pass per window.
+	 */
+	public searchAll(haystack: Uint8Array, start = 0, end = haystack.length, allowPartial = false): ByteRange[] {
 		const sequenceLength = this.length
 		const haystackLen = end - start
 
@@ -260,8 +260,6 @@ export class CharacterSequence extends Uint8Array {
 				const buffer = new Uint8Array(wasm.memory.buffer, 0, totalNeeded)
 				buffer.set(haystack.subarray(start, end), 0)
 				buffer.set(this, haystackLen)
-				// Writing the new haystack invalidates the cached search() input.
-				CharacterSequence.#wasmHaystack = null
 
 				const count = wasm.findAllDelimiters(
 					0,
@@ -282,6 +280,18 @@ export class CharacterSequence extends Uint8Array {
 				// A full results buffer may indicate that trailing delimiters were dropped.
 				// Use the uncapped JS scan instead of returning truncated results.
 				if (count < WASM_MAX_RESULTS) return ranges
+
+				if (allowPartial) {
+					// A full buffer holds either `max` records, or `max - 1` records and the tail. A record is always
+					// followed by its delimiter, so only the tail can end at `end`.
+					const lastEnd = ranges.at(-1)![1]
+
+					if (lastEnd !== end) {
+						ranges.push([lastEnd + sequenceLength, end])
+					}
+
+					return ranges
+				}
 			}
 
 			if (CharacterSequence.#wasmScanner === undefined) {
@@ -369,7 +379,6 @@ export class CharacterSequence extends Uint8Array {
 
 		ensureWasmCapacity(wasm.memory, totalNeeded)
 		new Uint8Array(wasm.memory.buffer, 0, windowLength).set(haystack.subarray(windowStart, end))
-		CharacterSequence.#wasmHaystack = null
 
 		const count = wasm.scanDelimitedRanges(
 			0,
@@ -448,8 +457,6 @@ export class CharacterSequence extends Uint8Array {
 
 		ensureWasmCapacity(wasm.memory, totalNeeded)
 		new Uint8Array(wasm.memory.buffer, 0, windowLength).set(haystack.subarray(windowStart, end))
-		// The haystack cache belongs to `search()`; staging over offset 0 invalidates it.
-		CharacterSequence.#wasmHaystack = null
 
 		const previousByte = windowStart > 0 ? haystack[windowStart - 1]! : -1
 
@@ -506,7 +513,8 @@ export class CharacterSequence extends Uint8Array {
 		const quoteLen = quotePattern.length
 		const haystackLen = end - start
 
-		if (delimiterLen === 0 || haystackLen === 0) return []
+		// An empty quote pattern would make the kernel report a match at `i32::MAX`.
+		if (!delimiterLen || !quoteLen || !haystackLen) return []
 
 		const wasm = CharacterSequence.#wasmScanner
 
@@ -521,8 +529,6 @@ export class CharacterSequence extends Uint8Array {
 			buffer.set(haystack.subarray(start, end), 0)
 			buffer.set(this, haystackLen)
 			buffer.set(quotePattern, haystackLen + delimiterLen)
-			// Writing the new haystack invalidates the cached search() input.
-			CharacterSequence.#wasmHaystack = null
 
 			const count = wasm.findAllMatches(
 				0,
@@ -605,8 +611,21 @@ export class CharacterSequence extends Uint8Array {
 		return new TextDecoder(encoding).decode(this)
 	}
 
+	/**
+	 * `slice`, `subarray`, `map` and friends build plain `Uint8Array`s. The species default would call this constructor
+	 * with a length, which it would read as a one-byte delimiter.
+	 */
+	static get [Symbol.species](): Uint8ArrayConstructor {
+		return Uint8Array
+	}
+
 	constructor(input: CharacterSequenceInput = Delimiters.LineFeed) {
 		const bytes = normalizeCharacterInput(input)
+
+		if (!bytes.length) {
+			throw new TypeError("A delimiter must be at least one byte. An empty delimiter would never advance.")
+		}
+
 		super(bytes)
 		// `new Array(256).fill(…)` rather than `Array.from({length: 256}, …)` produces the same result without a
 		// per-entry callback, and this runs for every sequence constructed.

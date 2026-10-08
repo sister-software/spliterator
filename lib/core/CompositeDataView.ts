@@ -232,7 +232,8 @@ export class CompositeDataView<Chunk extends TypedArray = TypedArray>
 	}
 
 	/**
-	 * Returns a view into the underlying chunks without copying data.
+	 * Returns a view over the requested range. A range inside one chunk is a view without copying; a range spanning
+	 * chunks is copied into a fresh array.
 	 */
 	public subarray(
 		/**

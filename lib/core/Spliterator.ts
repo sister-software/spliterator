@@ -4,6 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
+import { loadNodeFs } from "../internal/node-modules.js"
 import {
 	isFileHandleLike,
 	isPathBuilderLike,
@@ -30,6 +31,12 @@ export type { AsyncSpliteratorInit, SpliteratorInit }
  * small enough that a source of any size stays bounded per call.
  */
 const QUOTE_SCAN_WINDOW = 64 * 1024
+
+/**
+ * Bytes handed to `searchAll` per plain multi-byte scan call. Each call stages its window into the SIMD kernel once,
+ * where a per-row `search` would stage the remainder of the source on every row.
+ */
+const MULTI_BYTE_SCAN_WINDOW = 64 * 1024
 
 /**
  * A byte stream delimiting iterator.
@@ -109,7 +116,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 		}
 
 		if (isPathBuilderLike(source) || source instanceof URL || isFileHandleLike(source)) {
-			return import("spliterator/node/fs").then(async ({ createChunkIterator }) => {
+			return loadNodeFs().then(async ({ createChunkIterator }) => {
 				let chunkIterator: AsyncChunkIterator
 
 				try {
@@ -185,7 +192,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	}
 
 	/**
-	 * Dispose of the spliterator, closing the file handle if necessary.
+	 * Dispose of the spliterator, releasing its queued ranges. The source is the caller's buffer and is left alone.
 	 */
 	public [Symbol.dispose](): void {
 		this.#indices.clear()
@@ -196,7 +203,8 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 
 		this.#needle = new CharacterSequence(init.delimiter)
 
-		this.#readPosition = init.position ?? 0
+		this.#readPosition = Math.min(Math.max(0, init.position ?? 0), source.byteLength)
+		this.#startPosition = this.#readPosition
 		this.#scanCursor = this.#readPosition
 
 		this.#highWaterMark = Math.max(this.#needle.length * 4, 4096)
@@ -235,6 +243,11 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 * The byte sequence to search for, i.e. an encoded delimiter.
 	 */
 	readonly #needle: CharacterSequence
+
+	/**
+	 * Where iteration began, clamped to the source. A source that yields no range is emitted from here, not from zero.
+	 */
+	readonly #startPosition: number
 
 	/**
 	 * The byte sequence for a double quote.
@@ -361,11 +374,11 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 		if (this.#readPosition < sourceByteLength) {
 			this.#indices.enqueue([this.#readPosition, sourceByteLength])
 		} else if (this.#yieldCount === 0 && lastByteRange === undefined) {
-			// The scan found and yielded no range, such as for an empty source. Emit the whole buffer as
-			// a single field. A run of all-empty fields that `skipEmpty` dropped has a defined
-			// `lastByteRange`, so it falls through to the trailing-delimiter case instead of
-			// resurfacing the entire delimiter run as one (non-empty) row.
-			this.#indices.enqueue([0, sourceByteLength])
+			// The scan found and yielded no range, such as for an empty source. Emit the remainder from
+			// the starting position as a single field. A run of all-empty fields that `skipEmpty`
+			// dropped has a defined `lastByteRange`, so it falls through to the trailing-delimiter
+			// case instead of resurfacing the entire delimiter run as one (non-empty) row.
+			this.#indices.enqueue([this.#startPosition, sourceByteLength])
 		} else {
 			// Emit an empty field for a trailing delimiter (match String.split). `#fill` always
 			// leaves the tail after the last consumed delimiter to this method, in both the plain
@@ -393,12 +406,58 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	}
 
 	/**
+	 * The plain multi-byte path: one `searchAll` per window, so the kernel stages each byte once. `searchAll` returns the
+	 * records it completed plus the unterminated tail, which the next window rescans from, so a delimiter straddling the
+	 * window edge is found then. A record longer than the window is resolved with one unbounded `search` from its start.
+	 */
+	#fillMultiByte(): void {
+		const sourceByteLength = this.#source.byteLength
+		const needleLength = this.#needle.length
+
+		while (this.#readPosition < sourceByteLength && this.#indices.byteLength < this.#highWaterMark) {
+			const windowEnd = Math.min(sourceByteLength, this.#readPosition + MULTI_BYTE_SCAN_WINDOW)
+			const ranges = this.#needle.searchAll(this.#source, this.#readPosition, windowEnd, true)
+			// The last range is the tail after the final delimiter in the window; `#drain` owns it at the end of the source.
+			const completed = ranges.length - 1
+
+			if (completed === 0) {
+				if (windowEnd >= sourceByteLength) return
+
+				const delimiterIndex = this.#needle.search(this.#source, this.#readPosition)
+
+				if (delimiterIndex === -1) return
+
+				this.#indices.enqueue([this.#readPosition, this.#trimEnd(this.#readPosition, delimiterIndex)])
+				this.#readPosition = delimiterIndex + needleLength
+				this.#scanCursor = this.#readPosition
+
+				continue
+			}
+
+			for (let i = 0; i < completed; i++) {
+				const [start, end] = ranges[i]!
+
+				this.#indices.enqueue([start, this.#trimEnd(start, end)])
+				this.#readPosition = end + needleLength
+			}
+
+			this.#scanCursor = this.#readPosition
+		}
+	}
+
+	/**
 	 * Fill the buffer with data and search for delimiters.
 	 */
 	#fill(): void {
 		const sourceByteLength = this.#source.byteLength
 
 		if (!this.#enableQuoteHandling) {
+			if (this.#needle.length > 1) {
+				this.#fillMultiByte()
+
+				return
+			}
+
 			while (this.#readPosition < sourceByteLength && this.#indices.byteLength < this.#highWaterMark) {
 				const delimiterIndex = this.#needle.search(this.#source, this.#readPosition)
 
