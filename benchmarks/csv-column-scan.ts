@@ -1,7 +1,8 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
+ *
  * Benchmark: columnScan "auto" (one decode, one kernel pass, sliced cells) against "rows" (decode and split per row).
  * Usage: node --expose-gc out/benchmarks/csv-column-scan.js
  *

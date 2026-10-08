@@ -1,8 +1,9 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
- * @file Default command — iterate over a file, line by line.
+ * @copyright Sister Software
+ *
+ * Default command — iterate over a file, line by line.
  */
 
 import { resolve as resolvePath } from "node:path"

@@ -1,9 +1,10 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  *
- * Lifecycle edges of the worker layer: omitted options, early exit, shared pools, and workers that die.
+ * Lifecycle edges of the worker layer: omitted options, early exit, shared pools,
+ * and workers that die.
  */
 
 import { mkdtempSync, writeFileSync } from "node:fs"

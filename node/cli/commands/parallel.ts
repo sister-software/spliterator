@@ -1,8 +1,9 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
- * @file Run commands concurrently over delimited records or record-aligned blocks.
+ * @copyright Sister Software
+ *
+ * Run commands concurrently over delimited records or record-aligned blocks.
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"

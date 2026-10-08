@@ -1,15 +1,19 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  *
- * @file `smartSnakeCase` over scripts that have no case.
+ * `smartSnakeCase` broke headers in scripts without letter case:
  *
- *   A caseless script takes the all-caps branch, because `toUpperCase()` is the identity on Korean, Japanese, Chinese,
- *   Hebrew and Arabic. That branch used `\W`, which is `[^A-Za-z0-9_]` in JavaScript with or without the `u` flag, so
- *   every character of such a header was replaced: `영업상태명` became `_`, and a file of Korean headers became `_`,
- *   `__2`, `__3` … once `normalizeColumnNames` de-duplicated the collisions. The header was not renamed, it was
- *   destroyed, and every value in the file became unreachable by name.
+ * - For Korean/Chinese/Japanese/Hebrew/Arabic, `toUpperCase()` changes nothing.
+ * - That sent text through the ALL-CAPS path.
+ * - That path used `\W` (`[^A-Za-z0-9_]`), which treated those characters as non-word.
+ * - So every character was replaced.
+ * - `영업상태명` became `_`.
+ * - Multiple headers collapsed to `_`, then `normalizeColumnNames` renamed them to `__2`, `__3`, etc.
+ * - Original header names were lost, so values could not be looked up by name.
+ *
+ * The tests in this file ensure that we correctly handle headers in scripts without letter case.
  */
 
 import {

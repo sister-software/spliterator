@@ -1,10 +1,12 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  *
- * The pooled path with real threads. `worker-pool.test.ts` covers the pool's mechanics against fakes.
- * this is the only place where the pooled wire protocol runs in a worker.
+ * The pooled path with real threads.
+ * This is the only place where the pooled wire protocol runs in a worker.
+ *
+ * `worker-pool.test.ts` covers the pool's mechanics against fakes.
  */
 
 import { mkdtempSync, writeFileSync } from "node:fs"

@@ -1,7 +1,8 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
+ *
  * Benchmark: WASM searchAll vs Spliterator for CSV column splitting.
  * Usage: node out/benchmarks/csv-columns.js
  */

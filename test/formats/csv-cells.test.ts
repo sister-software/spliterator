@@ -1,11 +1,16 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  *
- * The fast cell scan against two oracles: the reference row path (`columnScan: "rows"` is what `CSVSpliterator` will
- * offer; here it is `Spliterator.fromSync` rows split by `splitRowColumns`), and, for the shape of the contract, a
- * String-derived expectation. Windows and batches are shrunk so every boundary case crosses one.
+ * Fast CSV cell scan test.
+ *
+ * We compare results to a trusted row-based parser:
+ * `Spliterator.fromSync` rows, then `splitRowColumns`.
+ *
+ * We also verify expected output shape from strings.
+ *
+ * Window and batch sizes are kept small so edge cases cross boundaries.
  */
 
 import { CharacterSequence, Spliterator } from "spliterator"
@@ -22,12 +27,10 @@ interface Case {
 	columnDelimiter?: number
 }
 
-// `csv-cells.js` and `csv-columns.js` are not re-exported from the package root, so they must be reached by relative
-// path into the compiled output (per AGENTS.md) rather than through `"spliterator"`. A *static* import of a path
-// under `out/` makes tsc -b treat the generated `.d.ts` there as a root input of this project (rootDir is the whole
-// project, which contains outDir) — a second `tsc -b` run then fails with TS5055 "would overwrite input file"
-// because the emit target is that same file. Building the specifiers at runtime keeps them non-literal `import()`s,
-// which tsc does not resolve statically, avoiding the cycle. The imported members are untyped as a result.
+// Why dynamic import paths here:
+// 1) `csv-cells.js` and `csv-columns.js` are not exported from `"spliterator"`.
+// 2) Static imports from `out/` break `tsc -b` on the second build (TS5055 overwrite conflict).
+// 3) Runtime-built `import()` paths are not statically resolved by TypeScript, so no build cycle.
 let scanCsvCells: (
 	source: Uint8Array,
 	text: string,

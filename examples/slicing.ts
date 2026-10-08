@@ -1,10 +1,10 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  *
- * Split a large file into delimiter-aligned segments and parse each independently. All segments
- * share the event loop here; see `AsyncSpliterator.asManyWorkers` for the worker-thread version.
+ * Split a large file into delimiter-aligned segments and parse each independently.
+ * All segments share the event loop here; see `AsyncSpliterator.asManyWorkers` for the worker-thread version.
  */
 
 import * as fs from "node:fs/promises"

@@ -1,8 +1,9 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
- * @file Command to split a CSV file into JSONL format.
+ * @copyright Sister Software
+ *
+ * Command to split a CSV file into JSONL format.
  */
 
 import { resolve as resolvePath } from "node:path"

@@ -1,10 +1,10 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  *
- * Runs inside a worker thread (spawned by runSegmentWorkers). Reads its segment via its own handle,
- * runs the user handler per record, and posts batched results to the parent with ack backpressure.
+ * Runs inside a worker thread (spawned by runSegmentWorkers).
+ * Reads its segment via its own handle, runs the user handler per record, and posts batched results to the parent with ack backpressure.
  */
 
 import { parentPort, workerData } from "node:worker_threads"

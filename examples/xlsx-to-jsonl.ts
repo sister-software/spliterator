@@ -1,10 +1,8 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
- */
-
-/**
+ * @copyright Sister Software
+ *
  * Convert an XLSX workbook to JSONL, typing columns on the way through.
  *
  * The workbook is the UN World Population Prospects 2024 "Demographic Indicators (compact)" release — 26 MB, two sheets

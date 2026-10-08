@@ -1,10 +1,11 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  *
- * Top-level state, to observe that a pooled worker imports the handler once and keeps it across
- * calls — the documented difference from the spawn-per-call path.
+ * Top-level counter for tests.
+ * Pooled workers keep this value between calls.
+ * Spawn-per-call workers reset it each time.
  */
 
 let records = 0

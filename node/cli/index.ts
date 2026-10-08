@@ -2,9 +2,10 @@
 
 /**
  * @license MIT
- * @file CLI entry point for the Spliterator library.
  * @author Teffen Ellis, et al.
  * @copyright Sister Software
+ *
+ * CLI entry point for the Spliterator library.
  */
 
 import { createRequire } from "node:module"

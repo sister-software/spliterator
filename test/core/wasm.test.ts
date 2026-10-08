@@ -1,11 +1,11 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  *
- * Tests that force the WASM SIMD path (haystacks >= WASM_THRESHOLD) to guard the
- * native scanner against regressions: alignment, the shared-memory cache, and
- * silent result truncation. The JS fallback is exercised by the other suites.
+ * Tests for the WASM SIMD path only (haystacks >= WASM_THRESHOLD).
+ * Protects against regressions in alignment, shared-memory cache, and silent truncation.
+ * JS fallback behavior is tested in other suites.
  */
 
 import { CharacterSequence, CSVSpliterator, Delimiters } from "spliterator"
@@ -27,15 +27,11 @@ describe("WASM SIMD scanner", () => {
 		}
 	})
 
-	// `wasm_module.ts` is not re-exported from the package root, so it must be reached by
-	// relative path into the compiled output (per AGENTS.md, the way `benchmarks/` reaches
-	// internals) rather than through `"spliterator"`. A *static* import of a path under `out/`
-	// makes tsc -b treat the generated `.d.ts` there as a root input of this project (rootDir is
-	// the whole project, which contains outDir) — a second `tsc -b` run then fails with
-	// TS5055 "would overwrite input file" because the emit target is that same file. Building
-	// the specifier at runtime keeps it a non-literal `import()`, which tsc does not resolve
-	// statically, avoiding the cycle. The imported members are untyped as a result.
-	// Shared by the `scan_csv_cells` and `CharacterSequence.scanCells` describe blocks below.
+	// Why dynamic import here:
+	// - `wasm_module.ts` is internal, so we load it from `../../out/...`, not from `"spliterator"`.
+	// - Static import from `out/` breaks repeated `tsc -b` runs (TS5055: output becomes input).
+	// - Runtime-built path keeps `import()` non-static, so tsc skips that cycle.
+	// Shared by the `scan_csv_cells` and `CharacterSequence.scanCells` blocks below.
 	let loadWasmModule: () => Promise<WasmDelimiterScanner | null>
 	let CELL_RESULT_HEADER: number
 	let CELL_RESULT_STRIDE: number
