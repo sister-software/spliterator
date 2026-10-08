@@ -68,6 +68,7 @@ schema/generated
 # Agents
 .claude/settings.local.json
 .pi/
+docs/superpowers
 
 
 ## Example data downloads
