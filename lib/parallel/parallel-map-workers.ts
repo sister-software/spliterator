@@ -4,8 +4,9 @@
  * @author Teffen Ellis, et al.
  */
 
-import { Worker } from "node:worker_threads"
+import type { Worker } from "node:worker_threads"
 
+import { loadWorkerThreads, siblingUrl } from "../internal/node-modules.js"
 import { type PoolWorker, runPool } from "./parallel-map-runtime.js"
 import type { WorkerLease, WorkerPool } from "./worker-pool.js"
 
@@ -57,6 +58,8 @@ export interface ParallelMapWorkersOptions {
  */
 function leaseHandle<T, R>(lease: WorkerLease, handlerUrl: string): PoolWorker<T, R> {
 	let pending: { resolve: (results: R[]) => void; reject: (error: Error) => void } | null = null
+	// A failure that arrives between batches is kept, so the next `process` rejects instead of posting to a dead worker.
+	let failure: Error | undefined
 
 	const settle = (fn: (p: NonNullable<typeof pending>) => void) => {
 		if (!pending) return
@@ -64,6 +67,11 @@ function leaseHandle<T, R>(lease: WorkerLease, handlerUrl: string): PoolWorker<T
 		const p = pending
 		pending = null
 		fn(p)
+	}
+
+	const fail = (error: Error) => {
+		failure ??= error
+		settle((p) => p.reject(error))
 	}
 
 	lease.onMessage((raw) => {
@@ -76,18 +84,21 @@ function leaseHandle<T, R>(lease: WorkerLease, handlerUrl: string): PoolWorker<T
 		}
 	})
 
-	lease.onError((error) => settle((p) => p.reject(error)))
+	lease.onError(fail)
 
 	// Opens the lease so the worker knows which handler to use and resets its per-call item index.
 	lease.post({ type: "map", leaseId: lease.id, handlerUrl })
 
 	return {
 		process(batch) {
+			if (failure) return Promise.reject(failure)
+
 			return new Promise<R[]>((resolve, reject) => {
 				pending = { resolve, reject }
 				lease.post({ type: "items", leaseId: lease.id, batch })
 			})
 		},
+		release: () => lease.release(),
 	}
 }
 
@@ -96,12 +107,19 @@ function leaseHandle<T, R>(lease: WorkerLease, handlerUrl: string): PoolWorker<T
  */
 function workerHandle<T, R>(worker: Worker): PoolWorker<T, R> {
 	let pending: { resolve: (results: R[]) => void; reject: (error: Error) => void } | null = null
+	// A failure that arrives between batches is kept, so the next `process` rejects instead of posting to a dead worker.
+	let failure: Error | undefined
 
 	const settle = (fn: (p: NonNullable<typeof pending>) => void) => {
 		if (!pending) return
 		const p = pending
 		pending = null
 		fn(p)
+	}
+
+	const fail = (error: Error) => {
+		failure ??= error
+		settle((p) => p.reject(error))
 	}
 
 	worker.on("message", (msg: { type: "result"; results: R[] } | { type: "error"; message: string }) => {
@@ -112,12 +130,15 @@ function workerHandle<T, R>(worker: Worker): PoolWorker<T, R> {
 		}
 	})
 
-	worker.on("error", (error: unknown) =>
-		settle((p) => p.reject(error instanceof Error ? error : new Error(String(error))))
-	)
+	worker.on("error", (error: unknown) => fail(error instanceof Error ? error : new Error(String(error))))
+
+	// A worker that dies mid-batch (a handler that calls `process.exit`, an OOM) never posts a result.
+	worker.on("exit", (code) => fail(new Error(`Worker exited with code ${code} before returning its batch.`)))
 
 	return {
 		process(batch) {
+			if (failure) return Promise.reject(failure)
+
 			return new Promise<R[]>((resolve, reject) => {
 				pending = { resolve, reject }
 				worker.postMessage({ type: "batch", batch })
@@ -158,7 +179,7 @@ export function parallelMapWorkers<T, R = unknown>(
 
 	const requested = Math.max(1, Math.floor(options.concurrency))
 	const batchSize = options.batchSize ?? 64
-	const entryUrl = new URL("./parallel-map-worker-entry.js", import.meta.url)
+	const entryUrl = siblingUrl("./parallel-map-worker-entry.js", import.meta.url)
 	const workers: Worker[] = []
 
 	if (options.pool && options.workerData !== undefined) {
@@ -167,30 +188,27 @@ export function parallelMapWorkers<T, R = unknown>(
 		)
 	}
 
-	async function* runPooled(sharedPool: WorkerPool): AsyncIterableIterator<R> {
+	function runPooled(sharedPool: WorkerPool): AsyncIterableIterator<R> {
 		// More leases than the pool holds would wait on workers that can only come free when this call
-		// finishes, so the request is clamped rather than allowed to hang.
+		// finishes, so the request is clamped. Each slot acquires its own lease when its loop starts and
+		// releases it when the loop ends, so a call begins with whatever the pool has free: two calls
+		// sharing a pool smaller than their combined concurrency each hold some workers and progress,
+		// where acquiring every lease up front left both waiting on the other.
 		const concurrency = Math.min(requested, sharedPool.size)
-		const leases: WorkerLease[] = []
 
-		try {
-			for (let i = 0; i < concurrency; i++) {
-				leases.push(await sharedPool.acquire())
-			}
+		const slots = Array.from({ length: concurrency }, () => async () => {
+			const lease = await sharedPool.acquire()
 
-			yield* runPool(
-				leases.map((lease) => leaseHandle<T, R>(lease, handlerUrl)),
-				source,
-				batchSize
-			)
-		} finally {
-			for (const lease of leases) {
-				lease.release()
-			}
-		}
+			return leaseHandle<T, R>(lease, handlerUrl)
+		})
+
+		return runPool(slots, source, batchSize)
 	}
 
 	async function* run(): AsyncIterableIterator<R> {
+		// Lazy: keeps `node:worker_threads` out of the root's static graph for browser bundlers.
+		const { Worker } = await loadWorkerThreads()
+
 		try {
 			const slots = Array.from({ length: requested }, () => {
 				const worker = new Worker(entryUrl, { workerData: { handlerUrl, userData: options.workerData } })

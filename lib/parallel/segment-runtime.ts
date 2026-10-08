@@ -18,6 +18,12 @@ export interface RunSegmentIO {
 	post: (batch: unknown[], transfer: ArrayBuffer[]) => void
 	waitForAck: () => Promise<void>
 	inFlight: () => number
+	/**
+	 * Polled before each record. Once true the loop stops, the open batch is discarded, and `records` is closed through
+	 * its iterator's `return()`. A pooled worker uses it when the consumer leaves early, because the worker outlives the
+	 * call and cannot simply be terminated.
+	 */
+	isCancelled?: () => boolean
 }
 
 /**
@@ -38,12 +44,17 @@ export async function runSegment(io: RunSegmentIO): Promise<void> {
 			await io.waitForAck()
 		}
 
+		// A cancel wakes the wait above; nothing is posted after it.
+		if (io.isCancelled?.()) return
+
 		io.post(batch, transfer)
 		batch = []
 		transfer = []
 	}
 
 	for await (const record of io.records) {
+		if (io.isCancelled?.()) break
+
 		const result = await io.handleRecord(record, { index, segmentIndex: io.segmentIndex })
 
 		index++
@@ -60,6 +71,8 @@ export async function runSegment(io: RunSegmentIO): Promise<void> {
 			await flush()
 		}
 	}
+
+	if (io.isCancelled?.()) return
 
 	await flush()
 }

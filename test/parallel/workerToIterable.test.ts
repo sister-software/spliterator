@@ -11,13 +11,13 @@ import { describe, expect, test } from "vitest"
  * A fake worker we can drive by emitting messages.
  */
 function fakeWorker() {
-	const handlers: Record<string, ((arg: never) => void)[]> = { message: [], error: [] }
+	const handlers: Record<string, ((arg: never) => void)[]> = { message: [], error: [], exit: [] }
 
 	return {
-		on(event: "message" | "error", cb: (arg: never) => void) {
+		on(event: "message" | "error" | "exit", cb: (arg: never) => void) {
 			handlers[event]!.push(cb)
 		},
-		emit(event: "message" | "error", arg: unknown) {
+		emit(event: "message" | "error" | "exit", arg: unknown) {
 			for (const cb of handlers[event]!) {
 				cb(arg as never)
 			}

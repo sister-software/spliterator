@@ -4,9 +4,10 @@
  * @author Teffen Ellis, et al.
  */
 
-import { Worker } from "node:worker_threads"
+import type { Worker } from "node:worker_threads"
 
 import type { CharacterSequenceInput } from "../core/CharacterSequence.js"
+import { loadWorkerThreads, siblingUrl } from "../internal/node-modules.js"
 import { isPathBuilderLike, toPathString, type AsyncDataResource, type ByteRange } from "../internal/shared.js"
 import { mergeAsyncIterators } from "./merge-async-iterators.js"
 import { computeSegments } from "./segments.js"
@@ -17,6 +18,7 @@ export { mergeAsyncIterators } from "./merge-async-iterators.js"
 export interface MinimalWorker {
 	on(event: "message", cb: (msg: unknown) => void): void
 	on(event: "error", cb: (err: Error) => void): void
+	on(event: "exit", cb: (code: number) => void): void
 }
 
 type WorkerMessage<R> = { type: "batch"; records: R[] } | { type: "done" } | { type: "error"; message: string }
@@ -56,6 +58,16 @@ export function workerToIterable<R>(worker: MinimalWorker, onBatchConsumed: () =
 
 	worker.on("error", (err) => {
 		error = err
+		done = true
+		signal()
+	})
+
+	// A worker that dies without posting `done` (a handler that calls `process.exit`, an OOM) would otherwise
+	// leave the drain waiting forever.
+	worker.on("exit", (code) => {
+		if (done) return
+
+		error = new Error(`Worker exited with code ${code} before finishing its segment.`)
 		done = true
 		signal()
 	})
@@ -136,7 +148,7 @@ export interface AsManyWorkersOptions {
  * Present a pooled lease as the minimal worker {@linkcode workerToIterable} drains, translating the lease-scoped
  * protocol into the single-use one so the drain logic is shared and tested once.
  */
-function leaseAsWorker(lease: WorkerLease): MinimalWorker {
+function leaseAsWorker(lease: WorkerLease, onSettled: () => void): MinimalWorker {
 	return {
 		on(event: string, callback: (payload: never) => void): void {
 			if (event === "message") {
@@ -146,8 +158,10 @@ function leaseAsWorker(lease: WorkerLease): MinimalWorker {
 					if (message.type === "records") {
 						;(callback as (m: unknown) => void)({ type: "batch", records: message.records })
 					} else if (message.type === "done") {
+						onSettled()
 						;(callback as (m: unknown) => void)({ type: "done" })
 					} else if (message.type === "failed") {
+						onSettled()
 						;(callback as (m: unknown) => void)({ type: "error", message: message.message })
 					}
 				})
@@ -155,10 +169,22 @@ function leaseAsWorker(lease: WorkerLease): MinimalWorker {
 				return
 			}
 
-			lease.onError(callback as unknown as (error: Error) => void)
+			if (event === "error") {
+				lease.onError((error) => {
+					onSettled()
+					;(callback as (e: Error) => void)(error)
+				})
+			}
+
+			// The lease reports a worker exit through `onError`.
 		},
 	} as MinimalWorker
 }
+
+/**
+ * How long a cancelled pooled segment may take to acknowledge before its worker is discarded rather than reused.
+ */
+const CANCEL_GRACE_MS = 2000
 
 /**
  * Spawn one worker per delimiter-aligned segment, each running the `worker` handler module over its own handle, and
@@ -199,17 +225,24 @@ export async function* runSegmentWorkers<R>(
 		const leases: WorkerLease[] = []
 
 		try {
-			// Acquiring is sequential by necessity: a pool smaller than the segment count hands workers
-			// out as they come free, so awaiting all of them up front would deadlock. Each segment takes
-			// its lease when one is available and releases it on completion.
+			// Each segment takes its lease when one is available and releases it on completion, so a pool
+			// smaller than the segment count serves segments as workers come free.
 			const iterables = segments.map(([start, end], segmentIndex) => {
 				return (async function* (): AsyncIterableIterator<R> {
 					const lease = await pool.acquire()
 
 					leases.push(lease)
 
+					let settled = false
+					let wakeSettled: (() => void) | undefined
+
+					const onSettled = () => {
+						settled = true
+						wakeSettled?.()
+					}
+
 					try {
-						const drain = workerToIterable<R>(leaseAsWorker(lease), () =>
+						const drain = workerToIterable<R>(leaseAsWorker(lease, onSettled), () =>
 							lease.post({ type: "ack", leaseId: lease.id })
 						)
 
@@ -220,7 +253,7 @@ export async function* runSegmentWorkers<R>(
 							source: sourcePath,
 							start,
 							end,
-							delimiter: options.delimiter ?? null,
+							delimiter: options.delimiter,
 							segmentIndex,
 							batchSize,
 							maxInFlight,
@@ -228,6 +261,31 @@ export async function* runSegmentWorkers<R>(
 
 						yield* drain
 					} finally {
+						// Leaving early: the worker is still reading its range, and it outlives this call. Tell it to
+						// stop and wait for the `done` that follows, so the next lease finds the worker idle rather
+						// than mid-segment. One that does not answer is discarded instead of reused.
+						if (!settled) {
+							lease.post({ type: "cancel", leaseId: lease.id })
+
+							let grace: NodeJS.Timeout | undefined
+
+							const acknowledged = await Promise.race([
+								new Promise<true>((resolve) => {
+									wakeSettled = () => resolve(true)
+								}),
+								new Promise<false>((resolve) => {
+									grace = setTimeout(() => resolve(false), CANCEL_GRACE_MS)
+								}),
+							])
+
+							// A pending timer would keep the process alive for the full grace period after a clean cancel.
+							clearTimeout(grace)
+
+							if (!acknowledged) {
+								lease.discard()
+							}
+						}
+
 						lease.release()
 					}
 				})()
@@ -245,7 +303,9 @@ export async function* runSegmentWorkers<R>(
 	}
 
 	const workers: Worker[] = []
-	const entryUrl = new URL("./segment-worker-entry.js", import.meta.url)
+	const entryUrl = siblingUrl("./segment-worker-entry.js", import.meta.url)
+	// Lazy: keeps `node:worker_threads` out of the root's static graph for browser bundlers.
+	const { Worker } = await loadWorkerThreads()
 
 	try {
 		const iterables = segments.map(([start, end], segmentIndex) => {
@@ -255,7 +315,7 @@ export async function* runSegmentWorkers<R>(
 					handlerUrl,
 					start,
 					end,
-					delimiter: options.delimiter ?? null,
+					delimiter: options.delimiter,
 					segmentIndex,
 					batchSize,
 					maxInFlight,

@@ -14,6 +14,7 @@
 import { parentPort, workerData } from "node:worker_threads"
 
 import { AsyncSpliterator } from "../core/AsyncSpliterator.js"
+import { loadNodeFs } from "../internal/node-modules.js"
 import type { ParallelHandler } from "./parallel-map-workers.js"
 import { runSegment, type SegmentHandler } from "./segment-runtime.js"
 
@@ -47,7 +48,15 @@ interface AckMessage {
 	leaseId: number
 }
 
-type Incoming = SegmentLease | MapLease | ItemsMessage | AckMessage
+/**
+ * The consumer left before the segment finished. The worker stops reading, closes its handle, and posts `done`.
+ */
+interface CancelMessage {
+	type: "cancel"
+	leaseId: number
+}
+
+type Incoming = SegmentLease | MapLease | ItemsMessage | AckMessage | CancelMessage
 
 const port = parentPort!
 
@@ -65,6 +74,9 @@ function loadHandler(handlerUrl: string, exportName: "handleRecord" | "handleIte
 		pending = import(handlerUrl).then((mod: Record<string, unknown>) => mod[exportName] ?? mod.default)
 
 		handlers.set(key, pending)
+
+		// A failed import is not cached: the next lease retries rather than inheriting a transient failure.
+		pending.catch(() => handlers.delete(key))
 	}
 
 	return pending
@@ -81,7 +93,7 @@ function fail(leaseId: number, error: unknown): void {
 /**
  * Per-lease ack state for segment work. Cleared when the lease completes so a late ack cannot credit the next one.
  */
-let activeSegment: { leaseId: number; acked: number; wake?: () => void } | undefined
+let activeSegment: { leaseId: number; acked: number; cancelled: boolean; wake?: () => void } | undefined
 
 /**
  * Per-lease item index for map work, so `ctx.index` still counts within a single call rather than across the worker's
@@ -99,16 +111,16 @@ async function runSegmentLease(message: SegmentLease): Promise<void> {
 			throw new TypeError(`Worker module ${message.handlerUrl} has no handleRecord export.`)
 		}
 
-		const state = { leaseId, acked: 0, wake: undefined as (() => void) | undefined }
+		const state = { leaseId, acked: 0, cancelled: false, wake: undefined as (() => void) | undefined }
 		activeSegment = state
 
 		let posted = 0
 
-		const { createChunkIterator } = await import("spliterator/node/fs")
+		const { createChunkIterator } = await loadNodeFs()
 		const chunkIterator = await createChunkIterator(message.source, { start: message.start, end: message.end - 1 })
 
 		const records = new AsyncSpliterator(chunkIterator, {
-			delimiter: message.delimiter as never,
+			delimiter: (message.delimiter ?? undefined) as never,
 			autoDispose: true,
 		})
 
@@ -126,7 +138,9 @@ async function runSegmentLease(message: SegmentLease): Promise<void> {
 				new Promise<void>((resolve) => {
 					state.wake = resolve
 				}),
-			inFlight: () => posted - state.acked,
+			// A cancelled segment never waits on an ack the parent will not send.
+			inFlight: () => (state.cancelled ? 0 : posted - state.acked),
+			isCancelled: () => state.cancelled,
 		})
 
 		port.postMessage({ type: "done", leaseId })
@@ -195,6 +209,15 @@ port.on("message", (raw: unknown) => {
 			if (activeSegment?.leaseId !== message.leaseId) return
 
 			activeSegment.acked++
+			activeSegment.wake?.()
+			activeSegment.wake = undefined
+
+			return
+
+		case "cancel":
+			if (activeSegment?.leaseId !== message.leaseId) return
+
+			activeSegment.cancelled = true
 			activeSegment.wake?.()
 			activeSegment.wake = undefined
 	}

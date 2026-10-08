@@ -10,6 +10,7 @@
 import { parentPort, workerData } from "node:worker_threads"
 
 import { AsyncSpliterator } from "../core/AsyncSpliterator.js"
+import { loadNodeFs } from "../internal/node-modules.js"
 import { runSegment, type SegmentHandler } from "./segment-runtime.js"
 
 interface WorkerData {
@@ -50,9 +51,13 @@ async function main(): Promise<void> {
 		return
 	}
 
-	const { createChunkIterator } = await import("spliterator/node/fs")
+	const { createChunkIterator } = await loadNodeFs()
 	const chunkIterator = await createChunkIterator(data.source, { start: data.start, end: data.end - 1 })
-	const records = new AsyncSpliterator(chunkIterator, { delimiter: data.delimiter as never, autoDispose: true })
+
+	const records = new AsyncSpliterator(chunkIterator, {
+		delimiter: (data.delimiter ?? undefined) as never,
+		autoDispose: true,
+	})
 
 	return runSegment({
 		records,

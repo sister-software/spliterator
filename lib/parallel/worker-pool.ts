@@ -4,6 +4,8 @@
  * @author Teffen Ellis, et al.
  */
 
+import { loadWorkerThreads, siblingUrl } from "../internal/node-modules.js"
+
 /**
  * The slice of `worker_threads.Worker` the pool depends on. Narrow enough that the pool's mechanics test against fakes
  * without spawning threads, matching how the rest of the worker protocol is covered.
@@ -31,7 +33,16 @@ export interface WorkerLease {
 
 	post(message: unknown, transfer?: readonly ArrayBuffer[]): void
 	onMessage(handler: (message: unknown) => void): void
+	/**
+	 * A thrown error, or the worker exiting while leased. The worker is terminated and not reused.
+	 */
 	onError(handler: (error: Error) => void): void
+
+	/**
+	 * Mark the worker unfit for reuse, for example when it did not acknowledge a cancellation. It is terminated on
+	 * {@linkcode release}.
+	 */
+	discard(): void
 
 	/**
 	 * Return the worker to the pool. Idempotent.
@@ -76,6 +87,10 @@ interface PooledEntry {
 	 * Set when the worker has failed and must not be handed out again.
 	 */
 	broken: boolean
+	/**
+	 * Held by a lease right now. An idle worker that dies is evicted directly; a leased one is evicted on release.
+	 */
+	leased: boolean
 }
 
 /**
@@ -120,12 +135,16 @@ export class WorkerPool implements AsyncDisposable {
 	/**
 	 * Acquires waiting for a worker to come free, in arrival order.
 	 */
-	readonly #waiting: Array<(entry: PooledEntry) => void> = []
+	readonly #waiting: Array<{ resolve: (entry: PooledEntry) => void; reject: (error: unknown) => void }> = []
 
 	#leaseCounter = 0
 	#disposed = false
 	#disposal: Promise<void> | undefined
 	#outstanding = 0
+	/**
+	 * Acquires that have not yet been handed a worker. Disposal waits for these as well as for held leases.
+	 */
+	#arriving = 0
 	#drained: (() => void) | undefined
 
 	constructor(options: WorkerPoolOptions) {
@@ -137,9 +156,9 @@ export class WorkerPool implements AsyncDisposable {
 		this.#createWorker =
 			options.createWorker ??
 			(async () => {
-				const { Worker } = await import("node:worker_threads")
+				const { Worker } = await loadWorkerThreads()
 
-				return new Worker(new URL("./pool-worker-entry.js", import.meta.url), {
+				return new Worker(siblingUrl("./pool-worker-entry.js", import.meta.url), {
 					workerData: { userData: workerData },
 				}) as unknown as PoolWorkerLike
 			})
@@ -167,7 +186,29 @@ export class WorkerPool implements AsyncDisposable {
 			throw new Error("WorkerPool has been disposed.")
 		}
 
-		const entry = this.#idle.pop() ?? (this.#all.size < this.#size ? await this.#spawn() : await this.#waitForIdle())
+		// Counted from the request, so a disposal that starts during a spawn or a wait drains this acquire too
+		// instead of terminating a pool with a worker still arriving.
+		this.#arriving++
+
+		let entry: PooledEntry
+
+		try {
+			entry = this.#idle.pop() ?? (this.#all.size < this.#size ? await this.#spawn() : await this.#waitForIdle())
+		} catch (error) {
+			this.#arriving--
+			this.#settle()
+
+			throw error
+		}
+
+		this.#arriving--
+
+		if (this.#disposed) {
+			this.#idle.push(entry)
+			this.#settle()
+
+			throw new Error("WorkerPool has been disposed.")
+		}
 
 		this.#outstanding++
 
@@ -200,16 +241,26 @@ export class WorkerPool implements AsyncDisposable {
 	}
 
 	#drain(): Promise<void> {
-		if (this.#outstanding === 0) return Promise.resolve()
+		if (this.#outstanding === 0 && this.#arriving === 0) return Promise.resolve()
 
 		return new Promise<void>((resolve) => {
 			this.#drained = resolve
 		})
 	}
 
+	/**
+	 * Resolve a pending disposal once nothing is held and nothing is arriving.
+	 */
+	#settle(): void {
+		if (this.#outstanding === 0 && this.#arriving === 0) {
+			this.#drained?.()
+			this.#drained = undefined
+		}
+	}
+
 	async #spawn(): Promise<PooledEntry> {
 		// Reserve the slot before awaiting, so concurrent acquires cannot both decide there is room.
-		const reservation: PooledEntry = { worker: undefined as unknown as PoolWorkerLike, broken: false }
+		const reservation: PooledEntry = { worker: undefined as unknown as PoolWorkerLike, broken: false, leased: false }
 
 		this.#all.add(reservation)
 
@@ -221,6 +272,7 @@ export class WorkerPool implements AsyncDisposable {
 			}
 
 			reservation.worker = worker
+			this.#watch(reservation)
 
 			return reservation
 		} catch (error) {
@@ -230,9 +282,34 @@ export class WorkerPool implements AsyncDisposable {
 		}
 	}
 
+	/**
+	 * Listeners for the worker's whole life, not one lease's. Between leases nothing else is listening, and an `error`
+	 * event with no listener is an uncaught exception in the parent. A worker that errors or exits is never handed out
+	 * again: evicted now if idle, on release if leased.
+	 */
+	#watch(entry: PooledEntry): void {
+		const evict = () => {
+			entry.broken = true
+
+			if (entry.leased) return
+
+			const idleIndex = this.#idle.indexOf(entry)
+
+			if (idleIndex !== -1) {
+				this.#idle.splice(idleIndex, 1)
+			}
+
+			this.#all.delete(entry)
+			void entry.worker.terminate()
+		}
+
+		entry.worker.on("error", evict as (payload: never) => void)
+		entry.worker.on("exit", evict as (payload: never) => void)
+	}
+
 	#waitForIdle(): Promise<PooledEntry> {
-		return new Promise<PooledEntry>((resolve) => {
-			this.#waiting.push(resolve)
+		return new Promise<PooledEntry>((resolve, reject) => {
+			this.#waiting.push({ resolve, reject })
 		})
 	}
 
@@ -243,14 +320,12 @@ export class WorkerPool implements AsyncDisposable {
 		if (entry.broken) {
 			this.#all.delete(entry)
 
-			// A waiter must never receive the worker that just died. Spawn its replacement instead.
+			// A waiter must never receive the worker that just died. Spawn its replacement instead, and if
+			// that fails tell the waiter, because no later release is guaranteed to come.
 			if (this.#waiting.length && this.#all.size < this.#size) {
 				const waiter = this.#waiting.shift()!
 
-				void this.#spawn().then(waiter, () => {
-					// Spawning failed. Put the waiter back so a later release can satisfy it.
-					this.#waiting.unshift(waiter)
-				})
+				void this.#spawn().then(waiter.resolve, waiter.reject)
 			}
 
 			return
@@ -259,7 +334,7 @@ export class WorkerPool implements AsyncDisposable {
 		const waiter = this.#waiting.shift()
 
 		if (waiter) {
-			waiter(entry)
+			waiter.resolve(entry)
 
 			return
 		}
@@ -270,6 +345,8 @@ export class WorkerPool implements AsyncDisposable {
 	#lease(entry: PooledEntry): WorkerLease {
 		const id = ++this.#leaseCounter
 		let released = false
+
+		entry.leased = true
 		let onMessage: ((message: unknown) => void) | undefined
 		let onError: ((error: Error) => void) | undefined
 
@@ -293,8 +370,13 @@ export class WorkerPool implements AsyncDisposable {
 			onError?.(error instanceof Error ? error : new Error(String(error)))
 		}
 
+		const exitListener = (code: number): void => {
+			errorListener(new Error(`Worker exited with code ${code} while leased.`))
+		}
+
 		entry.worker.on("message", messageListener as (payload: never) => void)
 		entry.worker.on("error", errorListener as (payload: never) => void)
+		entry.worker.on("exit", exitListener as (payload: never) => void)
 
 		return {
 			id,
@@ -305,21 +387,23 @@ export class WorkerPool implements AsyncDisposable {
 			onError: (handler) => {
 				onError = handler
 			},
+			discard: () => {
+				entry.broken = true
+				void entry.worker.terminate()
+			},
 			release: () => {
 				if (released) return
 
 				released = true
+				entry.leased = false
 
 				entry.worker.off("message", messageListener as (payload: never) => void)
 				entry.worker.off("error", errorListener as (payload: never) => void)
+				entry.worker.off("exit", exitListener as (payload: never) => void)
 
 				this.#outstanding--
 				this.#recycle(entry)
-
-				if (this.#outstanding === 0) {
-					this.#drained?.()
-					this.#drained = undefined
-				}
+				this.#settle()
 			},
 		}
 	}
