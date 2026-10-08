@@ -1,7 +1,7 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 /**
@@ -36,6 +36,6 @@ export async function* mergeAsyncIterators<R>(sources: Array<AsyncIterable<R>>):
 			void promise.catch(() => {})
 		}
 
-		await Promise.allSettled(Array.from(pending.keys(), (it) => it.return?.()))
+		await Promise.allSettled(Array.from(pending.keys(), (it) => Promise.resolve(it.return?.())))
 	}
 }

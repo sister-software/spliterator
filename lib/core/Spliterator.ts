@@ -1,7 +1,7 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 import { loadNodeFs } from "../internal/node-modules.js"
@@ -55,7 +55,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 * @param init - The initialization options for the generator.
 	 * @see {@linkcode AsyncSpliterator} for usage.
 	 */
-	public static fromAsync = AsyncSpliterator.from
+	public static fromAsync = AsyncSpliterator.from.bind(AsyncSpliterator)
 
 	/**
 	 * Create a spliterator from an iterable resource such as a **buffer, array, or string**.
@@ -176,7 +176,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 *
 	 * @see {@linkcode count} for synchronous byte sources.
 	 */
-	public static countAsync = AsyncSpliterator.count
+	public static countAsync = AsyncSpliterator.count.bind(AsyncSpliterator)
 
 	/**
 	 * Create a new delimited generator from a data resource.
@@ -335,7 +335,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 
 	//#region Private Methods
 
-	#log: (...args: any[]) => void
+	#log: (...args: unknown[]) => void
 
 	#finalize(): IteratorReturnResult<undefined> {
 		if (this.#debug) {

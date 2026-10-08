@@ -1,15 +1,15 @@
 /**
- * @copyright Sister Software
  * @license MIT
- * @author Teffen Ellis, et al.
- *
- * Tests that force the WASM SIMD path (haystacks >= WASM_THRESHOLD) to guard the
- * native scanner against regressions: alignment, the shared-memory cache, and
- * silent result truncation. The JS fallback is exercised by the other suites.
+ * @author Teffen Ellis, et al. Tests that force the WASM SIMD path (haystacks >= WASM_THRESHOLD) to guard the native
+ *   scanner against regressions: alignment, the shared-memory cache, and silent result truncation. The JS fallback is
+ *   exercised by the other suites.
+ * @copyright Sister Software
  */
 
 import { CharacterSequence, CSVSpliterator, Delimiters } from "spliterator"
 import { beforeAll, describe, expect, test } from "vitest"
+
+import type { WasmDelimiterScanner } from "../../lib/core/wasm_module.js"
 
 const encoder = new TextEncoder()
 
@@ -34,7 +34,7 @@ describe("WASM SIMD scanner", () => {
 	// the specifier at runtime keeps it a non-literal `import()`, which tsc does not resolve
 	// statically, avoiding the cycle. The imported members are untyped as a result.
 	// Shared by the `scan_csv_cells` and `CharacterSequence.scanCells` describe blocks below.
-	let loadWasmModule: () => Promise<any>
+	let loadWasmModule: () => Promise<WasmDelimiterScanner | null>
 	let CELL_RESULT_HEADER: number
 	let CELL_RESULT_STRIDE: number
 	let CELL_FLAG_ROW_END: number

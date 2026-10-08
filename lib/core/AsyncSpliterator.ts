@@ -1,7 +1,7 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 import type { ReadableWritablePair, StreamPipeOptions } from "node:stream/web"
@@ -404,7 +404,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 
 	//#region Private Methods
 
-	#log: (...args: any[]) => void
+	#log: (...args: unknown[]) => void
 
 	/**
 	 * Trim a carriage return immediately preceding a delimiter match, when {@linkcode SpliteratorInit.crlf} is set.

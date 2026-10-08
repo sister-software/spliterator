@@ -1,7 +1,7 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 import type { ReadableWritablePair, StreamPipeOptions } from "node:stream/web"
@@ -15,8 +15,8 @@ import { AsyncSequence } from "./AsyncSequence.js"
  * rather than here, so a sequence can describe its chain before anyone pulls from it.
  */
 type Op =
-	| { kind: typeof OP_MAP; fn: (value: any, counter: number) => unknown }
-	| { kind: typeof OP_FILTER; fn: (value: any, counter: number) => unknown }
+	| { kind: typeof OP_MAP; fn: (value: unknown, counter: number) => unknown }
+	| { kind: typeof OP_FILTER; fn: (value: unknown, counter: number) => unknown }
 	| { kind: typeof OP_TAKE; limit: number }
 	| { kind: typeof OP_DROP; limit: number }
 
@@ -176,7 +176,7 @@ export class Sequence<T> implements IterableIterator<T>, Disposable {
 	 * Transform each value. The callback receives `(value, counter)`.
 	 */
 	public map<U>(fn: (value: T, counter: number) => U): Sequence<U> {
-		return this.#derive<U>({ kind: OP_MAP, fn })
+		return this.#derive<U>({ kind: OP_MAP, fn: fn as (value: unknown, counter: number) => unknown })
 	}
 
 	/**
@@ -187,7 +187,7 @@ export class Sequence<T> implements IterableIterator<T>, Disposable {
 	public filter(predicate: (value: T, counter: number) => unknown): Sequence<T>
 
 	public filter(fn: (value: T, counter: number) => unknown): Sequence<T> {
-		return this.#derive<T>({ kind: OP_FILTER, fn })
+		return this.#derive<T>({ kind: OP_FILTER, fn: fn as (value: unknown, counter: number) => unknown })
 	}
 
 	/**

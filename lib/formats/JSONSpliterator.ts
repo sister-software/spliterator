@@ -1,11 +1,11 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 import type { CharacterSequenceInput } from "../core/CharacterSequence.js"
-import { type AsyncSpliteratorInit, Spliterator, type SpliteratorInit } from "../core/Spliterator.js"
+import { Spliterator, type SpliteratorInit } from "../core/Spliterator.js"
 import type { AsyncDataResource } from "../internal/shared.js"
 import { type AdaptiveSourceInit, openDelimitedRows } from "../io/adaptive-source.js"
 import { AsyncSequence } from "../iterators/AsyncSequence.js"

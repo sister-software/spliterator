@@ -1,14 +1,11 @@
 /**
- * @copyright Sister Software
  * @license MIT
- * @author Teffen Ellis, et al.
- *
- * Runs inside a pooled worker thread (spawned by `WorkerPool`). Unlike the single-use entries, this one takes no
- * assignment at construction: it idles until the parent leases it, serves that lease, and idles again.
- *
- * Handler modules are imported on demand and kept. That is deliberate — amortising a handler's top-level
- * initialisation across calls is the main reason a pool is worth having — and it is why a pooled worker can serve
- * leases for different handlers without respawning.
+ * @author Teffen Ellis, et al. Runs inside a pooled worker thread (spawned by `WorkerPool`). Unlike the single-use
+ *   entries, this one takes no assignment at construction: it idles until the parent leases it, serves that lease, and
+ *   idles again. Handler modules are imported on demand and kept. That is deliberate — amortising a handler's top-level
+ *   initialisation across calls is the main reason a pool is worth having — and it is why a pooled worker can serve
+ *   leases for different handlers without respawning.
+ * @copyright Sister Software
  */
 
 import { parentPort, workerData } from "node:worker_threads"

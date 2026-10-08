@@ -1,8 +1,8 @@
 /**
- * @copyright Sister Software
  * @license MIT
- * @author Teffen Ellis, et al.
  * @file Declarative command metadata, parsing, validation, and help rendering.
+ * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 import { parseArgs } from "node:util"

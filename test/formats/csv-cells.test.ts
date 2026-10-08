@@ -1,11 +1,10 @@
 /**
- * @copyright Sister Software
  * @license MIT
- * @author Teffen Ellis, et al.
- *
- * The fast cell scan against two oracles: the reference row path (`columnScan: "rows"` is what `CSVSpliterator` will
- * offer; here it is `Spliterator.fromSync` rows split by `splitRowColumns`), and, for the shape of the contract, a
- * String-derived expectation. Windows and batches are shrunk so every boundary case crosses one.
+ * @author Teffen Ellis, et al. The fast cell scan against two oracles: the reference row path (`columnScan: "rows"` is
+ *   what `CSVSpliterator` will offer; here it is `Spliterator.fromSync` rows split by `splitRowColumns`), and, for the
+ *   shape of the contract, a String-derived expectation. Windows and batches are shrunk so every boundary case crosses
+ *   one.
+ * @copyright Sister Software
  */
 
 import { CharacterSequence, Spliterator } from "spliterator"

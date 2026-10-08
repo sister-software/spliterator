@@ -1,7 +1,7 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 import type { WriteStream } from "node:fs"
@@ -21,7 +21,7 @@ export interface WriteLineCallback {
 	/**
 	 * Write a chunk to the file, terminated with a newline. The chunk should not contain one itself.
 	 */
-	(chunk: any, encoding: BufferEncoding): Promise<void>
+	(chunk: string | Uint8Array, encoding: BufferEncoding): Promise<void>
 }
 
 export interface NewlineWriter extends AsyncDisposable {
@@ -52,7 +52,7 @@ export function createNewlineWriter(filePath: PathBuilderLike): NewlineWriter {
 	const { createWriteStream } = process.getBuiltinModule("node:fs")
 	const writer = createWriteStream(filePath.toString())
 
-	const write: WriteLineCallback = (content: any, encoding?: BufferEncoding) => {
+	const write: WriteLineCallback = (content: string | Uint8Array, encoding?: BufferEncoding) => {
 		return new Promise((resolve, reject) => {
 			const settle = (error: Error | null | undefined): void => {
 				if (error) {

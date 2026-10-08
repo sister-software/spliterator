@@ -1,14 +1,13 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 import { CharacterSequence } from "../core/CharacterSequence.js"
 import { type AsyncSpliteratorInit, Spliterator } from "../core/Spliterator.js"
 import { loadNodeFs } from "../internal/node-modules.js"
 import type { AsyncChunkIterator, AsyncDataResource } from "../internal/shared.js"
-import type { AsyncSequence } from "../iterators/AsyncSequence.js"
 
 /**
  * Byte length at or below which a source is read whole and parsed synchronously.
@@ -75,7 +74,7 @@ async function bulk<R>(
  * Take the delimited rows of `source`, reading it whole when it is small enough to be worth the memory and streaming it
  * otherwise.
  *
- * @returns A potentially async iterable compatible with {@linkcode AsyncSequence}.
+ * @returns A potentially async iterable compatible with `AsyncSequence`.
  */
 export async function openDelimitedRows(
 	source: AsyncDataResource | AsyncChunkIterator,

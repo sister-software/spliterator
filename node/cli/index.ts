@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * @copyright Sister Software
  * @license MIT
- * @author Teffen Ellis, et al.
  * @file CLI entry point for the Spliterator library.
+ * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 import { createRequire } from "node:module"

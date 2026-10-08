@@ -1,7 +1,7 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 import { AsyncSequence, Sequence } from "spliterator"
@@ -352,6 +352,7 @@ describe("fusion barriers", () => {
 
 	test("flatMap passes a counter and accepts any iterable", () => {
 		const result = Sequence.from(["ab", "cd"])
+			// oxlint-disable-next-line typescript/no-misused-spread -- code-point spread is the intent: split the string into chars
 			.flatMap((value, counter) => (counter === 0 ? [...value] : new Set(value)))
 			.toArray()
 

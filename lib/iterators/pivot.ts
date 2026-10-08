@@ -1,7 +1,7 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 /**
@@ -19,7 +19,7 @@
  * @category Collections
  * @category Object
  */
-export function pivot<T extends PropertyKey, C extends (value: T) => Promise<unknown> | unknown>(
+export function pivot<T extends PropertyKey, C extends (value: T) => unknown>(
 	/**
 	 * The iterable to pivot.
 	 */

@@ -1,7 +1,7 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 import { AsyncSequence, parallelFilter } from "spliterator"
@@ -551,7 +551,7 @@ describe("parallelFilter", () => {
 		let seen = 0
 		let collectedMidStream = 0
 
-		for await (const payload of AsyncSequence.from(payloads()).parallelFilter(async (p) => p.i % 2 === 0, {
+		for await (const _payload of AsyncSequence.from(payloads()).parallelFilter(async (p) => p.i % 2 === 0, {
 			concurrency: 4,
 		})) {
 			seen++

@@ -1,13 +1,13 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
-export type SegmentHandler = (
-	record: Uint8Array,
-	ctx: { index: number; segmentIndex: number }
-) => unknown | Promise<unknown>
+/**
+ * The handler may return a value synchronously or as a promise; `undefined` skips the record.
+ */
+export type SegmentHandler = (record: Uint8Array, ctx: { index: number; segmentIndex: number }) => unknown
 
 export interface RunSegmentIO {
 	records: AsyncIterable<Uint8Array>

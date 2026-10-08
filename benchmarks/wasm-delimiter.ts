@@ -1,13 +1,11 @@
 /**
- * @copyright Sister Software
  * @license MIT
- * @author Teffen Ellis, et al.
- * Benchmark: WASM SIMD vs JS Boyer-Moore-Horspool for multi-byte delimiter scanning.
- * Usage: node out/benchmarks/wasm-delimiter.js
+ * @author Teffen Ellis, et al. Benchmark: WASM SIMD vs JS Boyer-Moore-Horspool for multi-byte delimiter scanning.
+ *   Usage: node out/benchmarks/wasm-delimiter.js
+ * @copyright Sister Software
  */
 
 import { CharacterSequence, Delimiters } from "../index.js"
-import type { WasmDelimiterScanner } from "../lib/core/wasm_module.js"
 
 interface BenchmarkResult {
 	label: string

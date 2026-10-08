@@ -1,11 +1,9 @@
 /**
- * @copyright Sister Software
  * @license MIT
- * @author Teffen Ellis, et al.
- *
- * A long run of consecutive delimiters enqueues many empty ranges in a single fill
- * (empty ranges don't count toward the high-water mark). With `skipEmpty`, the engine
- * must skip them without recursing once per range, or it overflows the stack.
+ * @author Teffen Ellis, et al. A long run of consecutive delimiters enqueues many empty ranges in a single fill (empty
+ *   ranges don't count toward the high-water mark). With `skipEmpty`, the engine must skip them without recursing once
+ *   per range, or it overflows the stack.
+ * @copyright Sister Software
  */
 
 import { AsyncSpliterator, Spliterator } from "spliterator"

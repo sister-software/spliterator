@@ -1,15 +1,13 @@
 /**
- * @copyright Sister Software
  * @license MIT
+ * @file `smartSnakeCase` over scripts that have no case. A caseless script takes the all-caps branch, because
+ *   `toUpperCase()` is the identity on Korean, Japanese, Chinese, Hebrew and Arabic. That branch used `\W`, which is
+ *   `[^A-Za-z0-9_]` in JavaScript with or without the `u` flag, so every character of such a header was replaced:
+ *   `영업상태명` became `_`, and a file of Korean headers became `_`, `__2`, `__3` … once `normalizeColumnNames`
+ *   de-duplicated the collisions. The header was not renamed, it was destroyed, and every value in the file became
+ *   unreachable by name.
  * @author Teffen Ellis, et al.
- *
- * @file `smartSnakeCase` over scripts that have no case.
- *
- *   A caseless script takes the all-caps branch, because `toUpperCase()` is the identity on Korean, Japanese, Chinese,
- *   Hebrew and Arabic. That branch used `\W`, which is `[^A-Za-z0-9_]` in JavaScript with or without the `u` flag, so
- *   every character of such a header was replaced: `영업상태명` became `_`, and a file of Korean headers became `_`,
- *   `__2`, `__3` … once `normalizeColumnNames` de-duplicated the collisions. The header was not renamed, it was
- *   destroyed, and every value in the file became unreachable by name.
+ * @copyright Sister Software
  */
 
 import {

@@ -1,12 +1,13 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 import type { ReadableWritablePair, StreamPipeOptions } from "node:stream/web"
 
 // This type-only import resolves the `{@linkcode}` references and is erased at compile time.
+// eslint-disable-next-line no-unused-vars
 import type { fsConcurrency } from "spliterator/node/fs"
 
 import { loadNodeFs } from "../internal/node-modules.js"
@@ -17,9 +18,11 @@ import { loadNodeFs } from "../internal/node-modules.js"
  * Ops are **descriptors** rather than closures over iteration state. `take` and `drop` counters live in the iterator,
  * rather than here, so a sequence can describe its chain before anyone pulls from it.
  */
+type OpFn = (value: unknown, counter: number) => unknown
+
 type Op =
-	| { kind: typeof OP_MAP; fn: (value: any, counter: number) => unknown }
-	| { kind: typeof OP_FILTER; fn: (value: any, counter: number) => unknown }
+	| { kind: typeof OP_MAP; fn: OpFn }
+	| { kind: typeof OP_FILTER; fn: OpFn }
 	| { kind: typeof OP_TAKE; limit: number }
 	| { kind: typeof OP_DROP; limit: number }
 
@@ -393,7 +396,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T>, AsyncDisposab
 	 * Transform each value. The callback receives `(value, counter)` and may return a promise.
 	 */
 	public map<U>(fn: (value: T, counter: number) => U | PromiseLike<U>): AsyncSequence<U> {
-		return this.#derive<U>({ kind: OP_MAP, fn })
+		return this.#derive<U>({ kind: OP_MAP, fn: fn as OpFn })
 	}
 
 	/**
@@ -404,7 +407,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T>, AsyncDisposab
 	public filter(predicate: (value: T, counter: number) => unknown): AsyncSequence<T>
 
 	public filter(fn: (value: T, counter: number) => unknown): AsyncSequence<T> {
-		return this.#derive<T>({ kind: OP_FILTER, fn })
+		return this.#derive<T>({ kind: OP_FILTER, fn: fn as OpFn })
 	}
 
 	/**
@@ -819,7 +822,11 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T>, AsyncDisposab
 						}
 
 						case OP_TAKE: {
-							if (budgets[i]! <= 0) return this.#finish()
+							if (budgets[i]! <= 0) {
+								const finalResult = await this.#finish()
+
+								return finalResult
+							}
 
 							budgets[i]!--
 

@@ -1,25 +1,19 @@
 /**
- * @copyright Sister Software
  * @license MIT
- * @author Teffen Ellis, et al.
+ * @author Teffen Ellis, et al. Quote-aware splitting + CRLF normalization + chunk normalization. These behaviors were
+ *   redefined after the 2026-07-08 mailwoman readline migration audit found the original `enableQuoteHandling`
+ *   implementation emitted quoted contents as separate slices (mis-parsing every real CSV), the async engine ignored
+ *   the flag entirely, CRLF sources leaked `\r` into fields (readline's `crlfDelay` was transparent), and string-chunk
+ *   streams silently produced garbage bytes. Contract under test:
  *
- *   Quote-aware splitting + CRLF normalization + chunk normalization.
- *
- *   These behaviors were redefined after the 2026-07-08 mailwoman readline migration audit found
- *   the original `enableQuoteHandling` implementation emitted quoted contents as separate slices
- *   (mis-parsing every real CSV), the async engine ignored the flag entirely, CRLF sources leaked
- *   `\r` into fields (readline's `crlfDelay` was transparent), and string-chunk streams silently
- *   produced garbage bytes.
- *
- *   Contract under test:
- *
- *   - `Spliterator`/`AsyncSpliterator` + `enableQuoteHandling`: delimiters inside double-quoted
- *       regions do not split. Emitted slices keep their quotes verbatim.
- *   - `CSVSpliterator` + `enableQuoteHandling`: quote-aware rows and columns. Wrapping quotes are
- *       stripped, doubled quotes unescaped, empty fields preserved.
- *   - `crlf`: a `\r` immediately preceding a delimiter is treated as part of the delimiter.
- *       Default `false` at the core, default `true` for `CSVSpliterator` rows (RFC 4180).
+ *   - `Spliterator`/`AsyncSpliterator` + `enableQuoteHandling`: delimiters inside double-quoted regions do not split.
+ *     Emitted slices keep their quotes verbatim.
+ *   - `CSVSpliterator` + `enableQuoteHandling`: quote-aware rows and columns. Wrapping quotes are stripped, doubled
+ *     quotes unescaped, empty fields preserved.
+ *   - `crlf`: a `\r` immediately preceding a delimiter is treated as part of the delimiter. Default `false` at the core,
+ *     default `true` for `CSVSpliterator` rows (RFC 4180).
  *   - `AsyncSpliterator` accepts string chunks (UTF-8 encoded) instead of silently mis-reading.
+ * @copyright Sister Software
  */
 
 import {
@@ -39,7 +33,7 @@ const decoder = new TextDecoder()
 /**
  * Wrap byte chunks as a plain async iterable to exercise the chunk-iterator path.
  */
-async function* chunksOf(...chunks: (Uint8Array | string)[]): AsyncGenerator<any> {
+async function* chunksOf(...chunks: (Uint8Array | string)[]): AsyncGenerator<Uint8Array | string> {
 	for (const chunk of chunks) {
 		yield chunk
 	}
@@ -415,7 +409,7 @@ describe("sync quote mode above the SIMD threshold", () => {
 		const sync = Array.from(Spliterator.fromSync(bytes, { enableQuoteHandling: true }), (row) => decoder.decode(row))
 
 		const async = await Array.fromAsync(
-			await Spliterator.fromAsync(
+			Spliterator.fromAsync(
 				(async function* () {
 					yield bytes
 				})(),

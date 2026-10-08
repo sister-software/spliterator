@@ -1,11 +1,9 @@
 /**
- * @copyright Sister Software
  * @license MIT
- * @author Teffen Ellis, et al.
- *
- * Runs inside a worker thread (spawned by parallelMap). Imports the handler module once (top-level =
- * per-worker init), then maps each dispatched batch and posts the results back. Processes one batch at
- * a time — the pool never dispatches the next until this batch's result returns.
+ * @author Teffen Ellis, et al. Runs inside a worker thread (spawned by parallelMap). Imports the handler module once
+ *   (top-level = per-worker init), then maps each dispatched batch and posts the results back. Processes one batch at a
+ *   time — the pool never dispatches the next until this batch's result returns.
+ * @copyright Sister Software
  */
 
 import { parentPort, workerData } from "node:worker_threads"

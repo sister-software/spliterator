@@ -1,8 +1,8 @@
 /**
- * @copyright Sister Software
  * @license MIT
+ * @file Oxlint configuration for spliterator.
  * @author Teffen Ellis, et al.
- * @file oxlint configuration for spliterator.
+ * @copyright Sister Software
  */
 
 import { createOxlintConfig, DefaultIgnorePatterns } from "@sister.software/oxlint-config"

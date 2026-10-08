@@ -1,7 +1,7 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 import { mkdtempSync, readFileSync } from "node:fs"
@@ -63,7 +63,7 @@ describe("createNewlineWriter", () => {
 		const file = join(dir, "empty.txt")
 
 		{
-			await using out = createNewlineWriter(file)
+			await using _out = createNewlineWriter(file)
 		}
 
 		expect(readFileSync(file, "utf8")).toBe("")

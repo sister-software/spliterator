@@ -1,9 +1,8 @@
 /**
- * @copyright Sister Software
  * @license MIT
- * @author Teffen Ellis, et al.
- *
- * Lifecycle edges of the worker layer: omitted options, early exit, shared pools, and workers that die.
+ * @author Teffen Ellis, et al. Lifecycle edges of the worker layer: omitted options, early exit, shared pools, and
+ *   workers that die.
+ * @copyright Sister Software
  */
 
 import { mkdtempSync, writeFileSync } from "node:fs"

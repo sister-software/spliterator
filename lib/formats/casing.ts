@@ -1,7 +1,7 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 import type { CamelCase, SnakeCase } from "type-fest"
@@ -73,11 +73,11 @@ export function smartSnakeCase(name: string): string {
 				// Replace everything that cannot be part of a key with underscores...
 				.replaceAll(NON_KEY_CHARACTER, "_")
 				// ...and then replace all sequences of underscores with a single underscore.
-				.replaceAll(/_{2,}/g, "_") as any
+				.replaceAll(/_{2,}/g, "_")
 		)
 	}
 
-	return snakeCase(normalizedName) as any
+	return snakeCase(normalizedName)
 }
 
 export function camelCase<T extends string>(name: T): CamelCase<T>
@@ -96,16 +96,16 @@ export function camelCase(name: string): string {
 
 			return (first >= "0" && first <= "9" ? "_" : "") + first.toLocaleUpperCase() + lower.slice(1)
 		})
-		.join("") as any
+		.join("")
 }
 
 /**
  * Converts a name to camelCase, unless the name is already in all caps.
  */
 export function smartCamelCase<T extends string>(name: T): T extends Uppercase<T> ? T : CamelCase<T> {
-	if (name.toUpperCase() === name) return name as any
+	if (name.toUpperCase() === name) return name as T extends Uppercase<T> ? T : CamelCase<T>
 
-	return camelCase(name) as any
+	return camelCase(name) as T extends Uppercase<T> ? T : CamelCase<T>
 }
 
 /**

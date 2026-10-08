@@ -1,16 +1,14 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
-
-import type { AsyncSequence } from "../../lib/iterators/AsyncSequence.js"
 
 /**
  * Libuv's threadpool size: the real ceiling on concurrent filesystem calls in Node.
  *
- * {@linkcode AsyncSequence.parallelMap} / {@linkcode AsyncSequence.parallelFilter} use this as their default
- * `concurrency` in Node. It reflects `UV_THREADPOOL_SIZE` (default 4), not CPU count.
+ * `AsyncSequence.parallelMap` / `AsyncSequence.parallelFilter` use this as their default `concurrency` in Node. It
+ * reflects `UV_THREADPOOL_SIZE` (default 4), not CPU count.
  */
 export function fsConcurrency(): number {
 	const raw = process.env.UV_THREADPOOL_SIZE

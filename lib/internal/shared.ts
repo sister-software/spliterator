@@ -1,7 +1,7 @@
 /**
- * @copyright Sister Software
  * @license MIT
  * @author Teffen Ellis, et al.
+ * @copyright Sister Software
  */
 
 // oxlint-disable-next-line no-restricted-imports
@@ -195,7 +195,8 @@ export function applyReaderPolyfill<T extends FileResourceLike>(file: T): assert
 
 			if (options.buffer) {
 				const destination = options.buffer as TypedArrayFallback<B>
-				destination.set(bytes as any, offset)
+				const target = destination as Uint8Array
+				target.set(bytes as Uint8Array, offset)
 
 				return destination
 			}
