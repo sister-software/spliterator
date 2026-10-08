@@ -29,7 +29,7 @@ gh workflow run publish.yml -f mode=prepare -f version=minor
 gh workflow run publish.yml -f mode=publish
 ```
 
-The package manager is **yarn** (v4). Node >= 24 is required. Compiled output goes to `out/`.
+The package manager is **yarn** (v4). Node >= 22.18 is required. Compiled output goes to `out/`.
 
 **Source is TypeScript only, tests and fixtures included.** `*.js` and `*.mjs` are gitignored. Worker handler fixtures are `.ts` files loaded by path; Node strips types natively on the supported floor, so nothing compiles them first.
 
