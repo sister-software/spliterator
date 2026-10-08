@@ -1,3 +1,28 @@
+## Spliterator tl;dr
+
+- Package manager: **yarn v4**
+- Runtime: **Node >= 22.18**
+- Language: **TypeScript only** (src + tests + fixtures)
+- Build output: `out/`
+- Module type: **ESM** (`"type": "module"`)
+
+---
+
+## Quick Workflow
+
+```bash
+yarn compile
+yarn test --run
+yarn lint
+```
+
+- Use `--run` with vitest (non-watch mode).
+- Use `bulkThreshold: 0` to force streaming behavior.
+- Use `WorkerPool` when repeating worker-heavy operations.
+
+For full details (architecture, sequence invariants, gotchas, exports, and performance notes),
+use the sections below.
+
 ## Commands
 
 ```bash
@@ -31,23 +56,44 @@ gh workflow run publish.yml -f mode=publish
 
 The package manager is **yarn** (v4). Node >= 22.18 is required. Compiled output goes to `out/`.
 
-**Source is TypeScript only, tests and fixtures included.** `*.js` and `*.mjs` are gitignored. Worker handler fixtures are `.ts` files loaded by path; Node strips types natively on the supported floor, so nothing compiles them first.
+**Source is TypeScript only, tests and fixtures included.** `*.js` and `*.mjs` are gitignored.
+Worker handler fixtures are `.ts` files loaded by path; Node strips types natively on the supported floor,
+so nothing compiles them first.
 
 ## Architecture
 
-Spliterator is an ESM TypeScript library (`"type": "module"`) for streaming delimited byte content (CSV, JSONL, TSV, etc.) without loading entire files into memory.
+Spliterator is an ESM TypeScript library (`"type": "module"`) for streaming delimited byte content
+(CSV, JSONL, TSV, etc.) without loading entire files into memory.
 
 ### Core layer (`lib/`)
 
-**`Spliterator`** (`lib/core/Spliterator.ts`) — The synchronous low-level engine. Takes a `Uint8Array` source and a delimiter, maintains an `IndexQueue` of `ByteRange` tuples `[start, end]`, and implements `IterableIterator`. The `#fill()` method scans for delimiter positions and enqueues byte ranges; `#drain()` handles the end-of-buffer edge case. Supports `drop`, `take`, `skipEmpty`, and `position` init options.
+**`Spliterator`** (`lib/core/Spliterator.ts`) — The synchronous low-level engine.
+Takes a `Uint8Array` source and a delimiter, maintains an `IndexQueue` of `ByteRange` tuples
+`[start, end]`, and implements `IterableIterator`. The `#fill()` method scans for delimiter
+positions and enqueues byte ranges.
+`#drain()` handles the end-of-buffer edge case. Supports `drop`, `take`, `skipEmpty`, and `position` init options.
 
 **`AsyncSpliterator`** (`lib/core/AsyncSpliterator.ts`) — The async counterpart. Reads chunks via an `AsyncChunkIterator`, appends them into a `BufferController` (a growable/compressible buffer), and searches for delimiters within. Implements `AsyncIterableIterator` and `AsyncDisposable`. Exposes `toReadableStream()` and `pipeThrough()` for web stream interop.
 
-- **`AsyncSpliterator.segments(source, { delimiter, concurrency, probeSize? })`** — Returns delimiter-aligned `[start, end)` byte ranges (`lib/parallel/segments.ts`) by probing small windows at each ideal boundary **in parallel** (`Promise.all`) and aligning each cut just past the next delimiter. The boundary primitive for parallel parsing — hand each range to a worker. Invariant: concatenating each segment's records reproduces the file exactly (no record split or duplicated).
+- **`AsyncSpliterator.segments(source, { delimiter, concurrency, probeSize? })`** — Returns
+  delimiter-aligned `[start, end)` byte ranges (`lib/parallel/segments.ts`) by probing small
+  windows at each ideal boundary **in parallel** (`Promise.all`) and aligning each cut just past
+  the next delimiter. The boundary primitive for parallel parsing — hand each range to a worker.
+  Invariant: concatenating each segment's records reproduces the file exactly (no record split or
+  duplicated).
 
 - **`AsyncSpliterator.asMany(source, { delimiter, concurrency })`** — `segments(...)` then one `AsyncSpliterator` per range via `createChunkIterator(source, { start, end: end - 1 })` (note `end` is inclusive in Node's `createReadStream`). All share the event loop (no threads).
 
-- **`AsyncSpliterator.asManyWorkers<R>(source, { worker, concurrency, batchSize?, maxInFlight? })`** — One `worker_threads` Worker per segment. The worker entry (`lib/parallel/segment-worker-entry.ts`) opens its own handle to its range and runs the `worker` handler module per record (`runSegment` in `lib/parallel/segment-runtime.ts`). Results stream back through `workerToIterable` (`lib/parallel/segment-workers.ts`) as **one merged async iterator** for a single-thread writer. Chunked batches, zero-copy `Uint8Array` transfer, bounded in-flight ack backpressure. The handler returns a value (cloned), a `Uint8Array` (transferred), or `undefined` (skipped); its module top-level runs once per worker (load models there). Requires a path/URL — file handles cannot cross threads. See `docs/superpowers/specs/2026-06-29-parallel-segment-parsing-design.md`.
+- **`AsyncSpliterator.asManyWorkers<R>(source, { worker, concurrency, batchSize?, maxInFlight? })`**
+  — One `worker_threads` Worker per segment. The worker entry
+  (`lib/parallel/segment-worker-entry.ts`) opens its own handle to its range and runs the
+  `worker` handler module per record (`runSegment` in `lib/parallel/segment-runtime.ts`). Results
+  stream back through `workerToIterable` (`lib/parallel/segment-workers.ts`) as **one merged async
+  iterator** for a single-thread writer. Chunked batches, zero-copy `Uint8Array` transfer,
+  bounded in-flight ack backpressure. The handler returns a value (cloned), a `Uint8Array`
+  (transferred), or `undefined` (skipped); its module top-level runs once per worker (load models
+  there). Requires a path/URL — file handles cannot cross threads. See
+  `docs/superpowers/specs/2026-06-29-parallel-segment-parsing-design.md`.
 
 **`BufferController`** (`lib/core/BufferController.ts`) — A growable `Uint8Array` wrapper used by `AsyncSpliterator`. Supports `set()` to append data, `compress()` to discard already-consumed bytes and shift the buffer, and `subarray()` to slice without copying.
 
@@ -55,14 +101,56 @@ Spliterator is an ESM TypeScript library (`"type": "module"`) for streaming deli
 
 **`CharacterSequence`** (`lib/core/CharacterSequence.ts`) — Encodes a delimiter string/bytes and provides `search`, `searchAll`, and `searchMatches` (two-pattern delimiter+quote) methods for scanning byte arrays. Defines the `Delimiters` enum (Newline, Comma, Tab, etc.). Single-byte delimiters use native `Uint8Array.indexOf`; everything else uses Boyer-Moore-Horspool, with a SIMD WASM fast path for haystacks ≥ `WASM_THRESHOLD`.
 
-**WASM SIMD scanner** (`wasm/`, `lib/core/wasm_module.ts`, `lib/core/wasm_base64.ts`) — A `#![no_std]` Rust crate (`wasm/src/lib.rs`) compiled with `+simd128` and embedded as base64 (`wasm/build.sh` regenerates `lib/core/wasm_base64.ts`; requires the `wasm32-unknown-unknown` target, `wasm-opt` optional). `loadWasmModule()` instantiates it lazily into a single shared `WebAssembly.Memory`. Because loading is **asynchronous**, synchronous parsing only uses SIMD if the caller first awaits `CharacterSequence.whenReady(): Promise<boolean>`; otherwise it transparently uses the JS scanner. All three scan methods write the haystack to offset 0 of the shared memory, so `searchAll`/`searchMatches` invalidate `search`'s identity-keyed cache, and result views are 4-byte aligned. A full result buffer (`WASM_MAX_RESULTS`) falls back to the uncapped JS scan rather than truncating. Exports `find_delimiter`, `find_all_delimiters`, `find_all_matches` (two-pattern delimiter+quote) and `scan_delimited_ranges` — the bounded, resumable primitive behind `scanRanges`, which carries quote state and emits completed ranges directly. Measured ~5–6 GB/s for multi-byte scanning against ~600 MB/s for the JS Boyer-Moore-Horspool fallback, and ~8–17× for `searchAll`.
+**WASM SIMD scanner** (`wasm/`, `lib/core/wasm_module.ts`, `lib/core/wasm_base64.ts`) — A
+`#![no_std]` Rust crate (`wasm/src/lib.rs`) compiled with `+simd128` and embedded as base64
+(`wasm/build.sh` regenerates `lib/core/wasm_base64.ts`; requires the `wasm32-unknown-unknown`
+target, `wasm-opt` optional). `loadWasmModule()` instantiates it lazily into a single shared
+`WebAssembly.Memory`. Because loading is **asynchronous**, synchronous parsing only uses SIMD if
+the caller first awaits `CharacterSequence.whenReady(): Promise<boolean>`; otherwise it
+transparently uses the JS scanner. All three scan methods write the haystack to offset 0 of the
+shared memory, so `searchAll`/`searchMatches` invalidate `search`'s identity-keyed cache, and
+result views are 4-byte aligned. A full result buffer (`WASM_MAX_RESULTS`) falls back to the
+uncapped JS scan rather than truncating. Exports `find_delimiter`, `find_all_delimiters`,
+`find_all_matches` (two-pattern delimiter+quote) and `scan_delimited_ranges` — the bounded,
+resumable primitive behind `scanRanges`, which carries quote state and emits completed ranges
+directly. Measured ~5–6 GB/s for multi-byte scanning against ~600 MB/s for the JS
+Boyer-Moore-Horspool fallback, and ~8–17× for `searchAll`.
 
 ### High-level spliterators (all static-class pattern)
 
-- **`TextSpliterator`** — Wraps `Spliterator`/`AsyncSpliterator`, decodes each yielded `Uint8Array` to a string via `TextDecoder`. **`trim` is on by default**: each row is trimmed after decoding and, with `skipEmpty` (also default), a whitespace-only row is dropped — so a CRLF file read on `\n` yields clean lines and `from(" a, b ,,c", { delimiter: "," })` is a list parser. `count`/`countAsync` test raw slices for ASCII whitespace to stay in agreement without decoding. Pass `trim: false` for byte parity.
+- **`TextSpliterator`** — Wraps `Spliterator`/`AsyncSpliterator`, decodes each yielded
+  `Uint8Array` to a string via `TextDecoder`. **`trim` is on by default**: each row is trimmed
+  after decoding and, with `skipEmpty` (also default), a whitespace-only row is dropped — so a
+  CRLF file read on `\n` yields clean lines and `from(" a, b ,,c", { delimiter: "," })` is a
+  list parser. `count`/`countAsync` test raw slices for ASCII whitespace to stay in agreement
+  without decoding. Pass `trim: false` for byte parity.
 - **`JSONSpliterator`** — Wraps `TextSpliterator`-style logic, additionally calls `JSON.parse` on each line.
-- **`CSVSpliterator`** — Two-level splitting: first splits rows (newline), then splits each row into columns (comma). Supports `mode: "array" | "object" | "entries"`, header normalization, and per-column transformers. **`trim` is on by default** and trims every column after unquoting, header cells included; RFC 4180 says that whitespace is part of the field, so pass `trim: false` for byte parity. **`columnScan: "auto"`** (default) parses a wholly in-memory source by decoding it once with a `fatal` decoder and slicing cells at boundaries the `scan_csv_cells` kernel emits in UTF-16 units; `"rows"` is the per-row path and the parity reference. `lib/formats/csv-cells.ts` drives the kernel in 64 KiB windows; `cellScanEligibility` lists the gates (single ASCII delimiters that differ, no CR delimiter, no `position`, under the string length cap, scanner loaded, valid UTF-8). The async path reaches it through the `bulkParser` argument of `openDelimitedRows`, so only sources the adaptive source reads whole take it. Measured (`node out/benchmarks/csv-column-scan.js`, Node 26, Ryzen 9 8945HS, 1M rows × 5 columns, min of 7): array 393ms → 220ms, object 766ms → 485ms, entries 1150ms → 793ms; quoted CRLF and mixed-UTF-8 fixtures within 10% of those; 8K-row sources 2× on the sync path (a 310 KB source streams on the async path, which is unchanged). The one cost is first-row latency, ~28ms on 40MB, because the whole source decodes on the first pull.
-- **`XLSXSpliterator`** — Reads/writes `.xlsx` workbooks via the **optional peer deps** `read-excel-file` / `write-excel-file` (dynamically imported; a missing module throws an error naming the package). Not a `CSVSpliterator` subclass — XLSX is a ZIP of XML, so there is no byte-delimiter machinery to inherit, and **both directions materialize the whole workbook** (no bounded-memory promise; prefer CSV when that matters). `fromAsync` mirrors CSV's option surface plus `sheet`, but cells arrive **typed** (`string | number | boolean | Date | null`); `from()` always throws (vendor is Promise-only). `write(rows)` accepts any (async) iterable of arrays or records (record keys become the header) and returns a lazy `toFile`/`toBuffer`/`toStream` handle. See `docs/superpowers/specs/2026-08-07-xlsx-support-design.md`.
+- **`CSVSpliterator`** — Two-level splitting: first splits rows (newline), then splits each row
+  into columns (comma). Supports `mode: "array" | "object" | "entries"`, header normalization,
+  and per-column transformers. **`trim` is on by default** and trims every column after
+  unquoting, header cells included; RFC 4180 says that whitespace is part of the field, so pass
+  `trim: false` for byte parity. **`columnScan: "auto"`** (default) parses a wholly in-memory
+  source by decoding it once with a `fatal` decoder and slicing cells at boundaries the
+  `scan_csv_cells` kernel emits in UTF-16 units; `"rows"` is the per-row path and the parity
+  reference. `lib/formats/csv-cells.ts` drives the kernel in 64 KiB windows; `cellScanEligibility`
+  lists the gates (single ASCII delimiters that differ, no CR delimiter, no `position`, under the
+  string length cap, scanner loaded, valid UTF-8). The async path reaches it through the
+  `bulkParser` argument of `openDelimitedRows`, so only sources the adaptive source reads whole
+  take it. Measured (`node out/benchmarks/csv-column-scan.js`, Node 26, Ryzen 9 8945HS, 1M rows ×
+  5 columns, min of 7): array 393ms → 220ms, object 766ms → 485ms, entries 1150ms → 793ms;
+  quoted CRLF and mixed-UTF-8 fixtures within 10% of those; 8K-row sources 2× on the sync path (a
+  310 KB source streams on the async path, which is unchanged). The one cost is first-row
+  latency, ~28ms on 40MB, because the whole source decodes on the first pull.
+- **`XLSXSpliterator`** — Reads/writes `.xlsx` workbooks via the **optional peer deps**
+  `read-excel-file` / `write-excel-file` (dynamically imported; a missing module throws an error
+  naming the package). Not a `CSVSpliterator` subclass — XLSX is a ZIP of XML, so there is no
+  byte-delimiter machinery to inherit, and **both directions materialize the whole workbook**
+  (no bounded-memory promise; prefer CSV when that matters). `fromAsync` mirrors CSV's option
+  surface plus `sheet`, but cells arrive **typed** (`string | number | boolean | Date | null`);
+  `from()` always throws (vendor is Promise-only). `write(rows)` accepts any (async) iterable of
+  arrays or records (record keys become the header) and returns a lazy
+  `toFile`/`toBuffer`/`toStream` handle. See
+  `docs/superpowers/specs/2026-08-07-xlsx-support-design.md`.
 
 The `mode` emitters and transformer-binding shared by `CSVSpliterator` and `XLSXSpliterator` live in `lib/formats/row-emitters.ts`, generalized over the cell type (CSV binds `string` with `""` for missing columns; XLSX binds typed cells with `null`).
 
@@ -114,7 +202,12 @@ Keyed off **per-row work**, not file size:
 
 Naming rule: **closure ⇒ caller's thread; module path ⇒ worker thread** (closures can't cross `postMessage`).
 
-**Reusing workers across calls.** `asManyWorkers` and `parallelMapWorkers` spawn and terminate their workers per call. Pass a `WorkerPool` (`lib/parallel/worker-pool.ts`) to keep them warm instead — measured **3.3–5.6×** on repeated calls over a 200KB file, and **0.98× on a 52MB file**, because startup only matters when it is a large share of the call. Ownership is explicit (`await using pool = new WorkerPool({ size })`); there is no implicit global.
+**Reusing workers across calls.** `asManyWorkers` and `parallelMapWorkers`
+spawn and terminate their workers per call.
+Pass a `WorkerPool` (`lib/parallel/worker-pool.ts`) to keep them warm instead.
+Measured **3.3–5.6×** on repeated calls over a 200KB file, and **0.98× on a 52MB file**,
+because startup only matters when it is a large share of the call.
+Ownership is explicit (`await using pool = new WorkerPool({ size })`).
 
 |                     | Caller's thread                                                   | Worker threads                                                |
 | ------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------- |
@@ -124,7 +217,15 @@ Naming rule: **closure ⇒ caller's thread; module path ⇒ worker thread** (clo
 
 ### Node.js adapter (`node/`)
 
-**`node/fs/`** — Node-specific file I/O, split by concern: `glob.ts` (`Globerator`), `reader.ts` (`createChunkIterator`, `readFileSize`, `readBytes`), `writer.ts` (`createFileWritableStream`), and `concurrency.ts` (`fsConcurrency`). `index.ts` is the public barrel, so consumers continue to import from `spliterator/node/fs`. `fsConcurrency` reports libuv's threadpool size from `UV_THREADPOOL_SIZE` (default 4 — the honest `concurrency` for `parallelMap`/`parallelFilter` over file paths; `availableParallelism()` counts CPUs, not I/O). The `CreateChunkIteratorOptions.end` field is **inclusive** (matches Node.js `createReadStream({ end })`). This subpath is dynamically imported (`import("spliterator/node/fs")`) within the core layer so the library stays isomorphic — the dynamic import only runs in Node environments.
+**`node/fs/`** — Node-specific file I/O, split by concern:
+
+- `glob.ts` (`Globerator`)
+- `reader.ts` (`createChunkIterator`, `readFileSize`, `readBytes`)
+- `writer.ts` (`createFileWritableStream`)
+- `concurrency.ts` (`fsConcurrency`)
+- `index.ts` is the public barrel, so consumers continue to import from `spliterator/node/fs`.
+- `fsConcurrency` reports libuv's threadpool size from `UV_THREADPOOL_SIZE` (default 4 `concurrency` for `parallelMap`/`parallelFilter` over file paths; `availableParallelism()` counts CPUs, not I/O). The `CreateChunkIteratorOptions.end` field is **inclusive** (matches Node.js `createReadStream({ end })`).
+  - This subpath is dynamically imported (`import("spliterator/node/fs")`) within the core layer so the library stays isomorphic — the dynamic import only runs in Node environments.
 
 **`node/cli/`** — The `spliterator` binary, built on Node's built-in `util.parseArgs` (no dependencies). `index.ts` dispatches on the first argument; each command in `node/cli/commands/` owns its `parseArgs` call, its `help` string, and a `run(args)` entry. Shared flags and coercion helpers live in `node/cli/utils.ts`.
 
