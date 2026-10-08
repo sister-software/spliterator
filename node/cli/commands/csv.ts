@@ -18,8 +18,8 @@ import {
 } from "spliterator"
 import { createFileWritableStream, createReadStream } from "spliterator/node/fs"
 
-import { type CommandSpec, parseCommand, renderCommandHelp } from "../spec.js"
-import { commonOptionSpecs, resolveIO, type SpliteratorFilter } from "../utils.js"
+import { type CommandSpec, parseCommand, renderCommandHelp } from "#cli/spec"
+import { commonOptionSpecs, resolveIO, type SpliteratorFilter } from "#cli/utils"
 
 const MODES = ["object", "array"] as const satisfies CSVOutputMode[]
 

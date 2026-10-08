@@ -7,7 +7,7 @@
 import { JSONSpliterator } from "spliterator"
 import { test } from "vitest"
 
-import { fixturesDirectory, loadFixture } from "../support/utils.js"
+import { fixturesDirectory, loadFixture } from "#test/support/utils"
 
 interface SuiteRow {
 	id: string

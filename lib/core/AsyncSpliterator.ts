@@ -6,19 +6,14 @@
 
 import type { ReadableWritablePair, StreamPipeOptions } from "node:stream/web"
 
-import { loadNodeFs } from "../internal/node-modules.js"
-import {
-	isPathBuilderLike,
-	type AsyncChunkIterator,
-	type AsyncDataResource,
-	type ByteRange,
-} from "../internal/shared.js"
-import { type AsManyWorkersOptions, runSegmentWorkers } from "../parallel/segment-workers.js"
-import { computeSegments, type SegmentOptions } from "../parallel/segments.js"
-import { BufferController } from "./BufferController.js"
-import { CharacterSequence, type CharacterSequenceInput, Delimiters } from "./CharacterSequence.js"
-import { IndexQueue } from "./IndexQueue.js"
-import { WASM_MAX_RESULTS } from "./wasm_module.js"
+import { BufferController } from "#core/BufferController"
+import { CharacterSequence, type CharacterSequenceInput, Delimiters } from "#core/CharacterSequence"
+import { IndexQueue } from "#core/IndexQueue"
+import { WASM_MAX_RESULTS } from "#core/wasm_module"
+import { loadNodeFs } from "#internal/node-modules"
+import { isPathBuilderLike, type AsyncChunkIterator, type AsyncDataResource, type ByteRange } from "#internal/shared"
+import { type AsManyWorkersOptions, runSegmentWorkers } from "#parallel/segment-workers"
+import { computeSegments, type SegmentOptions } from "#parallel/segments"
 
 const noop = () => void 0
 const sharedEncoder = new TextEncoder()

@@ -3,7 +3,7 @@
 	"compilerOptions": {
 		"forceConsistentCasingInFileNames": true,
 		"emitDeclarationOnly": false,
-		"allowImportingTsExtensions": false,
+		"rewriteRelativeImportExtensions": true,
 		"stripInternal": true,
 		"types": ["node"]
 	},

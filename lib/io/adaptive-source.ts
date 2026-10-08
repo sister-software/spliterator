@@ -4,10 +4,10 @@
  * @copyright Sister Software
  */
 
-import { CharacterSequence } from "../core/CharacterSequence.js"
-import { type AsyncSpliteratorInit, Spliterator } from "../core/Spliterator.js"
-import { loadNodeFs } from "../internal/node-modules.js"
-import type { AsyncChunkIterator, AsyncDataResource } from "../internal/shared.js"
+import { CharacterSequence } from "#core/CharacterSequence"
+import { type AsyncSpliteratorInit, Spliterator } from "#core/Spliterator"
+import { loadNodeFs } from "#internal/node-modules"
+import type { AsyncChunkIterator, AsyncDataResource } from "#internal/shared"
 
 /**
  * Byte length at or below which a source is read whole and parsed synchronously.

@@ -9,7 +9,7 @@ import * as fs from "node:fs"
 import { CSVSpliterator, Delimiters, JSONSpliterator, Sequence, TextSpliterator, TSVSpliterator } from "spliterator"
 import { expect, test } from "vitest"
 
-import { fixturesDirectory } from "../support/utils.js"
+import { fixturesDirectory } from "#test/support/utils"
 
 interface CarvelRow {
 	item_name: string

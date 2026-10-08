@@ -4,7 +4,7 @@
  * @copyright Sister Software
  */
 
-import { zipSync } from "../iterators/zip.js"
+import { zipSync } from "#iterators/zip"
 
 /**
  * An output mode for row-emitting spliterators.

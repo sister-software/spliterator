@@ -8,7 +8,7 @@
 
 import { parseArgs } from "node:util"
 
-import { usageError } from "./utils.js"
+import { usageError } from "#cli/utils"
 
 type OptionValue = boolean | number | string
 

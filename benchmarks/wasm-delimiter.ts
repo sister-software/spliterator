@@ -7,7 +7,7 @@
  *   Usage: node out/benchmarks/wasm-delimiter.js
  */
 
-import { CharacterSequence, Delimiters } from "../index.js"
+import { CharacterSequence, Delimiters } from "spliterator"
 
 interface BenchmarkResult {
 	label: string

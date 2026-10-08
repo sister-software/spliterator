@@ -8,7 +8,7 @@ import { AsyncSpliterator, CSVSpliterator, JSONSpliterator, Spliterator, TextSpl
 import { readBytes, readFileSize } from "spliterator/node/fs"
 import { describe, expect, test } from "vitest"
 
-import { fixturesDirectory, loadFixture } from "../support/utils.js"
+import { fixturesDirectory, loadFixture } from "#test/support/utils"
 
 // `fixturesDirectory` is a PathBuilder, so calling it yields one too.
 const fixture = fixturesDirectory("phonetic-single-spaced.txt")

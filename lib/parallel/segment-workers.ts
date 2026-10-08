@@ -6,14 +6,14 @@
 
 import type { Worker } from "node:worker_threads"
 
-import type { CharacterSequenceInput } from "../core/CharacterSequence.js"
-import { loadWorkerThreads, siblingUrl } from "../internal/node-modules.js"
-import { isPathBuilderLike, toPathString, type AsyncDataResource, type ByteRange } from "../internal/shared.js"
-import { mergeAsyncIterators } from "./merge-async-iterators.js"
-import { computeSegments } from "./segments.js"
-import type { WorkerLease, WorkerPool } from "./worker-pool.js"
+import type { CharacterSequenceInput } from "#core/CharacterSequence"
+import { loadWorkerThreads, workerEntryUrl } from "#internal/node-modules"
+import { isPathBuilderLike, toPathString, type AsyncDataResource, type ByteRange } from "#internal/shared"
+import { mergeAsyncIterators } from "#parallel/merge-async-iterators"
+import { computeSegments } from "#parallel/segments"
+import type { WorkerLease, WorkerPool } from "#parallel/worker-pool"
 
-export { mergeAsyncIterators } from "./merge-async-iterators.js"
+export { mergeAsyncIterators } from "#parallel/merge-async-iterators"
 
 export interface MinimalWorker {
 	on(event: "message", cb: (msg: unknown) => void): void
@@ -303,7 +303,7 @@ export async function* runSegmentWorkers<R>(
 	}
 
 	const workers: Worker[] = []
-	const entryUrl = siblingUrl("./segment-worker-entry.js", import.meta.url)
+	const entryUrl = workerEntryUrl("#parallel/segment-worker-entry")
 	// Lazy: keeps `node:worker_threads` out of the root's static graph for browser bundlers.
 	const { Worker } = await loadWorkerThreads()
 

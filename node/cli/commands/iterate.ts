@@ -11,14 +11,14 @@ import { resolve as resolvePath } from "node:path"
 import { CharacterSequence, Spliterator } from "spliterator"
 import { createFileWritableStream, createReadStream } from "spliterator/node/fs"
 
-import { type CommandSpec, parseCommand, renderCommandHelp } from "../spec.js"
+import { type CommandSpec, parseCommand, renderCommandHelp } from "#cli/spec"
 import {
 	commonOptionSpecs,
 	resolveIO,
 	type LineTransformer,
 	type LineTransformerModuleExports,
 	type SpliteratorFilter,
-} from "../utils.js"
+} from "#cli/utils"
 
 export const spec = {
 	name: "",

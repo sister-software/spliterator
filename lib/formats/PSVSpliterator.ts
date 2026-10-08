@@ -4,8 +4,8 @@
  * @copyright Sister Software
  */
 
-import { Delimiters } from "../core/CharacterSequence.js"
-import { CSVSpliterator } from "./CSVSpliterator.js"
+import { Delimiters } from "#core/CharacterSequence"
+import { CSVSpliterator } from "#formats/CSVSpliterator"
 
 /**
  * A static class spliterator for pipe-separated values.

@@ -6,7 +6,7 @@
 
 import type { WriteStream } from "node:fs"
 
-import type { PathBuilderLike } from "../internal/shared.js"
+import type { PathBuilderLike } from "#internal/shared"
 
 /**
  * Callback for writing a line to a newline-delimited file.

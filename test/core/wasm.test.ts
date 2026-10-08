@@ -11,7 +11,7 @@
 import { CharacterSequence, CSVSpliterator, Delimiters } from "spliterator"
 import { beforeAll, describe, expect, test } from "vitest"
 
-import type { WasmDelimiterScanner } from "../../lib/core/wasm_module.js"
+import type { WasmDelimiterScanner } from "#core/wasm_module"
 
 const encoder = new TextEncoder()
 
@@ -39,7 +39,7 @@ describe("WASM SIMD scanner", () => {
 	let CELL_FLAG_HAS_QUOTE: number
 
 	beforeAll(async () => {
-		const wasmModulePath = "../../out/lib/core/wasm_module.js"
+		const wasmModulePath = "../../out/lib/core/wasm_module"
 
 		;({ loadWasmModule, CELL_RESULT_HEADER, CELL_RESULT_STRIDE, CELL_FLAG_ROW_END, CELL_FLAG_HAS_QUOTE } = await import(
 			wasmModulePath

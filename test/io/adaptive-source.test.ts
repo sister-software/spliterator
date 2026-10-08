@@ -17,7 +17,7 @@ import {
 } from "spliterator"
 import { describe, expect, test } from "vitest"
 
-import { fixturesDirectory } from "../support/utils.js"
+import { fixturesDirectory } from "#test/support/utils"
 
 const jsonlPath = fixturesDirectory("carvel.jsonl").toString()
 const csvPath = fixturesDirectory("carvel.csv").toString()

@@ -4,7 +4,7 @@
  * @copyright Sister Software
  */
 
-import type { ByteRange } from "../internal/shared.js"
+import type { ByteRange } from "#internal/shared"
 
 /**
  * Number of consumed slots (`start`/`end` values, i.e. 2 per dequeued tuple) the head pointer may advance before the

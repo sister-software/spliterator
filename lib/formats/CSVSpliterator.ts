@@ -9,15 +9,11 @@ import {
 	type CharacterSequenceInput,
 	Delimiters,
 	normalizeCharacterInput,
-} from "../core/CharacterSequence.js"
-import { Spliterator, type SpliteratorInit } from "../core/Spliterator.js"
-import type { AsyncChunkIterator, AsyncDataResource } from "../internal/shared.js"
-import { type AdaptiveSourceInit, openDelimitedRows } from "../io/adaptive-source.js"
-import { AsyncSequence } from "../iterators/AsyncSequence.js"
-import { Sequence } from "../iterators/Sequence.js"
-import { normalizeColumnNames } from "./casing.js"
-import { cellScanEligibility, decodeForCellScan, scanCsvCells } from "./csv-cells.js"
-import { splitRowColumns } from "./csv-columns.js"
+} from "#core/CharacterSequence"
+import { Spliterator, type SpliteratorInit } from "#core/Spliterator"
+import { normalizeColumnNames } from "#formats/casing"
+import { cellScanEligibility, decodeForCellScan, scanCsvCells } from "#formats/csv-cells"
+import { splitRowColumns } from "#formats/csv-columns"
 import {
 	bindTransformers,
 	createRowEmitters,
@@ -28,9 +24,13 @@ import {
 	type RowTransformerEntry,
 	type RowTransformerRecord,
 	type RowTuple,
-} from "./row-emitters.js"
+} from "#formats/row-emitters"
+import type { AsyncChunkIterator, AsyncDataResource } from "#internal/shared"
+import { type AdaptiveSourceInit, openDelimitedRows } from "#io/adaptive-source"
+import { AsyncSequence } from "#iterators/AsyncSequence"
+import { Sequence } from "#iterators/Sequence"
 
-export type { RowTuple } from "./row-emitters.js"
+export type { RowTuple } from "#formats/row-emitters"
 
 /**
  * An output mode for the CSV generator.

@@ -7,7 +7,7 @@
 import { TextSpliterator } from "spliterator"
 import { describe, test } from "vitest"
 
-import { fixturesDirectory, loadFixture } from "../support/utils.js"
+import { fixturesDirectory, loadFixture } from "#test/support/utils"
 
 test("count/countAsync support sync and async resources without consuming a later path parse", async ({ expect }) => {
 	const fixturePath = fixturesDirectory("phonetic-single-spaced.txt")

@@ -6,7 +6,7 @@
 
 import { CSVSpliterator } from "spliterator"
 
-import { fixturesDirectory } from "../test/support/utils.js"
+import { fixturesDirectory } from "#test/support/utils"
 
 const generator = CSVSpliterator.fromAsync(fixturesDirectory("carvel.csv"), {
 	mode: "object",

@@ -4,7 +4,7 @@
  * @copyright Sister Software
  */
 
-import { loadWorkerThreads, siblingUrl } from "../internal/node-modules.js"
+import { loadWorkerThreads, workerEntryUrl } from "#internal/node-modules"
 
 /**
  * The slice of `worker_threads.Worker` the pool depends on. Narrow enough that the pool's mechanics test against fakes
@@ -113,7 +113,7 @@ interface PooledEntry {
  * 	await using pool = new WorkerPool({ size: 4 })
  *
  * 	for (const path of paths) {
- * 		for await (const row of AsyncSpliterator.asManyWorkers(path, { worker: "./handler.js", concurrency: 4, pool })) {
+ * 		for await (const row of AsyncSpliterator.asManyWorkers(path, { worker: "./handler.ts", concurrency: 4, pool })) {
  * 			// ...
  * 		}
  * 	}
@@ -158,7 +158,7 @@ export class WorkerPool implements AsyncDisposable {
 			(async () => {
 				const { Worker } = await loadWorkerThreads()
 
-				return new Worker(siblingUrl("./pool-worker-entry.js", import.meta.url), {
+				return new Worker(workerEntryUrl("#parallel/pool-worker-entry"), {
 					workerData: { userData: workerData },
 				}) as unknown as PoolWorkerLike
 			})

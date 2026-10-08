@@ -8,7 +8,7 @@
  *  with no `worker_threads` dependency so it unit-tests against fake workers.
  */
 
-import { mergeAsyncIterators } from "./merge-async-iterators.js"
+import { mergeAsyncIterators } from "#parallel/merge-async-iterators"
 
 /**
  * One pool slot. `process` ships a batch to its worker and resolves with that batch's results.

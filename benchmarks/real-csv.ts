@@ -10,7 +10,7 @@
 
 import { stat } from "node:fs/promises"
 
-import { AsyncSpliterator, CharacterSequence, Delimiters } from "../index.js"
+import { AsyncSpliterator, CharacterSequence, Delimiters } from "spliterator"
 
 interface Result {
 	label: string

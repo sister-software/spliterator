@@ -10,10 +10,10 @@
 
 import { createRequire } from "node:module"
 
-import * as csv from "./commands/csv.js"
-import * as iterate from "./commands/iterate.js"
-import * as parallel from "./commands/parallel.js"
-import { usageError } from "./utils.js"
+import * as csv from "./commands/csv.ts"
+import * as iterate from "./commands/iterate.ts"
+import * as parallel from "./commands/parallel.ts"
+import { usageError } from "./utils.ts"
 
 const rootHelp = [
 	iterate.help,

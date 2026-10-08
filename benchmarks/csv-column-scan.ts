@@ -20,7 +20,7 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { cpus, tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { CharacterSequence, CSVSpliterator } from "../index.js"
+import { CharacterSequence, CSVSpliterator } from "spliterator"
 
 const REPS = 7
 const encoder = new TextEncoder()

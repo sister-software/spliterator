@@ -6,7 +6,7 @@
 
 import { expect, test } from "vitest"
 
-import { parseCommand, renderCommandHelp, type CommandSpec } from "../../node/cli/spec.js"
+import { parseCommand, renderCommandHelp, type CommandSpec } from "#cli/spec"
 
 const spec = {
 	name: "example",

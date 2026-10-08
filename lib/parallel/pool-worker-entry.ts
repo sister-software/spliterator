@@ -15,10 +15,10 @@
 
 import { parentPort, workerData } from "node:worker_threads"
 
-import { AsyncSpliterator } from "../core/AsyncSpliterator.js"
-import { loadNodeFs } from "../internal/node-modules.js"
-import type { ParallelHandler } from "./parallel-map-workers.js"
-import { runSegment, type SegmentHandler } from "./segment-runtime.js"
+import { AsyncSpliterator } from "#core/AsyncSpliterator"
+import { loadNodeFs } from "#internal/node-modules"
+import type { ParallelHandler } from "#parallel/parallel-map-workers"
+import { runSegment, type SegmentHandler } from "#parallel/segment-runtime"
 
 interface SegmentLease {
 	type: "segment"

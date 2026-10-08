@@ -11,7 +11,7 @@
 
 import { parentPort, workerData } from "node:worker_threads"
 
-import type { ParallelHandler } from "./parallel-map-workers.js"
+import type { ParallelHandler } from "#parallel/parallel-map-workers"
 
 interface WorkerData {
 	handlerUrl: string

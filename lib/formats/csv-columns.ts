@@ -4,8 +4,8 @@
  * @copyright Sister Software
  */
 
-import type { CharacterSequence } from "../core/CharacterSequence.js"
-import { Spliterator } from "../core/Spliterator.js"
+import type { CharacterSequence } from "#core/CharacterSequence"
+import { Spliterator } from "#core/Spliterator"
 
 export const DOUBLE_QUOTE_CODE = 0x22
 

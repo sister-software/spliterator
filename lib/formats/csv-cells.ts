@@ -4,9 +4,9 @@
  * @copyright Sister Software
  */
 
-import { CharacterSequence, type CellScanState } from "../core/CharacterSequence.js"
-import { CELL_FLAG_HAS_QUOTE, CELL_FLAG_ROW_END, CELL_RESULT_STRIDE, WASM_MAX_RESULTS } from "../core/wasm_module.js"
-import { normalizeCell, unquoteColumn } from "./csv-columns.js"
+import { CharacterSequence, type CellScanState } from "#core/CharacterSequence"
+import { CELL_FLAG_HAS_QUOTE, CELL_FLAG_ROW_END, CELL_RESULT_STRIDE, WASM_MAX_RESULTS } from "#core/wasm_module"
+import { normalizeCell, unquoteColumn } from "#formats/csv-columns"
 
 /**
  * Bytes staged into the kernel per call. The kernel copies `[cursor, end)` into WASM memory each time, so the window

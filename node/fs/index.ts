@@ -4,9 +4,9 @@
  * @copyright Sister Software
  */
 
-export * from "./concurrency.js"
-export * from "./glob.js"
-export * from "./reader.js"
-export * from "./writer.js"
+export * from "./concurrency.ts"
+export * from "./glob.ts"
+export * from "./reader.ts"
+export * from "./writer.ts"
 
-export { default } from "./reader.js"
+export { default } from "./reader.ts"

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url"
 
 import { expect, test } from "vitest"
 
-const cli = fileURLToPath(new URL("../../out/node/cli/index.js", import.meta.url))
+const cli = fileURLToPath(new URL("../../out/node/cli/index", import.meta.url))
 
 interface CliResult {
 	code: number | null

@@ -18,7 +18,7 @@ import {
 import { createChunkIterator } from "spliterator/node/fs"
 import { describe, expectTypeOf, test, vi } from "vitest"
 
-import { fixturesDirectory, loadFixture } from "../support/utils.js"
+import { fixturesDirectory, loadFixture } from "#test/support/utils"
 
 const fixturePath = fixturesDirectory("carvel.csv")
 const fixture = await loadFixture(fixturePath)

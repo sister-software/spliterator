@@ -94,9 +94,9 @@ beforeAll(async () => {
 })
 
 beforeAll(async () => {
-	const csvCellsPath = "../../out/lib/formats/csv-cells.js"
+	const csvCellsPath = "../../out/lib/formats/csv-cells"
 
-	const csvColumnsPath = "../../out/lib/formats/csv-columns.js"
+	const csvColumnsPath = "../../out/lib/formats/csv-columns"
 
 	;({ scanCsvCells } = await import(csvCellsPath))
 	;({ splitRowColumns } = await import(csvColumnsPath))

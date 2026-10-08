@@ -10,7 +10,7 @@ import { AsyncSpliterator, Spliterator } from "spliterator"
 import { createChunkIterator } from "spliterator/node/fs"
 import { test } from "vitest"
 
-import { fixturesDirectory, loadFixture } from "../support/utils.js"
+import { fixturesDirectory, loadFixture } from "#test/support/utils"
 
 test("count/countAsync have wc -l semantics without consuming a later file parse", async ({ expect }) => {
 	const fixturePath = fixturesDirectory("phonetic-single-spaced.txt")

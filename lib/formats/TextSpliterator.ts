@@ -4,12 +4,12 @@
  * @copyright Sister Software
  */
 
-import type { CharacterSequenceInput } from "../core/CharacterSequence.js"
-import { Spliterator, type SpliteratorInit } from "../core/Spliterator.js"
-import type { AsyncDataResource } from "../internal/shared.js"
-import { type AdaptiveSourceInit, openDelimitedRows } from "../io/adaptive-source.js"
-import { AsyncSequence } from "../iterators/AsyncSequence.js"
-import { Sequence } from "../iterators/Sequence.js"
+import type { CharacterSequenceInput } from "#core/CharacterSequence"
+import { Spliterator, type SpliteratorInit } from "#core/Spliterator"
+import type { AsyncDataResource } from "#internal/shared"
+import { type AdaptiveSourceInit, openDelimitedRows } from "#io/adaptive-source"
+import { AsyncSequence } from "#iterators/AsyncSequence"
+import { Sequence } from "#iterators/Sequence"
 
 export interface TextSpliteratorInit {
 	/**

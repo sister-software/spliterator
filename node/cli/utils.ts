@@ -4,7 +4,7 @@
  * @copyright Sister Software
  */
 
-import type { OptionSpec } from "./spec.js"
+import type { OptionSpec } from "#cli/spec"
 
 /**
  * Options accepted by every Spliterator command.

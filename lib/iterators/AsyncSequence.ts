@@ -10,7 +10,7 @@ import type { ReadableWritablePair, StreamPipeOptions } from "node:stream/web"
 // eslint-disable-next-line no-unused-vars
 import type { fsConcurrency } from "spliterator/node/fs"
 
-import { loadNodeFs } from "../internal/node-modules.js"
+import { loadNodeFs } from "#internal/node-modules"
 
 /**
  * A chainable operation in a fused pipeline.

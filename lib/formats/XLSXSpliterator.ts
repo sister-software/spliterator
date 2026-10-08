@@ -4,10 +4,7 @@
  * @copyright Sister Software
  */
 
-import { loadHidden, loadNodeStream, loadNodeUrl } from "../internal/node-modules.js"
-import type { AsyncChunkIterator } from "../internal/shared.js"
-import { AsyncSequence } from "../iterators/AsyncSequence.js"
-import { normalizeColumnNames } from "./casing.js"
+import { normalizeColumnNames } from "#formats/casing"
 import {
 	bindTransformers,
 	createRowEmitters,
@@ -18,7 +15,10 @@ import {
 	type RowTransformerEntry,
 	type RowTransformerRecord,
 	type RowTuple,
-} from "./row-emitters.js"
+} from "#formats/row-emitters"
+import { loadHidden, loadNodeStream, loadNodeUrl } from "#internal/node-modules"
+import type { AsyncChunkIterator } from "#internal/shared"
+import { AsyncSequence } from "#iterators/AsyncSequence"
 
 /**
  * A cell value as parsed from an XLSX sheet. XLSX cells arrive typed: numbers, booleans, and dates are values rather

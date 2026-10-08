@@ -4,8 +4,8 @@
  * @copyright Sister Software
  */
 
-import type { ByteRange, TypedArray } from "../internal/shared.js"
-import { CharacterSequence, type CharacterSequenceInput } from "./CharacterSequence.js"
+import { CharacterSequence, type CharacterSequenceInput } from "#core/CharacterSequence"
+import type { ByteRange, TypedArray } from "#internal/shared"
 
 export interface SlidingWindowInit {
 	/**

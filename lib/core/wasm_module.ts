@@ -4,7 +4,7 @@
  * @copyright Sister Software
  */
 
-import { WASM_BASE64 } from "./wasm_base64.js"
+import { WASM_BASE64 } from "#core/wasm_base64"
 
 type BufferSource = ArrayBuffer | ArrayBufferView
 

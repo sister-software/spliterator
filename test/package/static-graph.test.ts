@@ -18,10 +18,59 @@ import { describe, expect, test } from "vitest"
 const STATIC_SPECIFIER =
 	/^\s*(?:import|export)\b[^"'`;]*?\bfrom\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/gm
 
-const outDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../out")
+const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
+const outDir = resolve(packageDir, "out")
+
+type MapTarget = string | { default: string }
+
+const manifest = JSON.parse(await readFile(resolve(packageDir, "package.json"), "utf8")) as {
+	name: string
+	imports: Record<string, MapTarget>
+	exports: Record<string, MapTarget>
+}
 
 /**
- * Walks the static import graph from a compiled entry point and returns every bare (non-relative) specifier reached.
+ * Resolve a `#` import-map or self-package specifier to the compiled file a bundler would take. Returns `null` for
+ * anything else, which the walk reports as a bare specifier.
+ */
+function resolveInternal(specifier: string): string | null {
+	const selfPrefix = `${manifest.name}/`
+	const table = specifier.startsWith("#") ? manifest.imports : manifest.exports
+
+	const key = specifier.startsWith("#")
+		? specifier
+		: specifier === manifest.name
+			? "."
+			: specifier.startsWith(selfPrefix)
+				? `./${specifier.slice(selfPrefix.length)}`
+				: null
+
+	if (key === null) return null
+
+	for (const [pattern, target] of Object.entries(table)) {
+		const file = typeof target === "string" ? target : target.default
+		const star = pattern.indexOf("*")
+
+		if (star === -1) {
+			if (pattern === key) return resolve(packageDir, file)
+
+			continue
+		}
+
+		const prefix = pattern.slice(0, star)
+		const suffix = pattern.slice(star + 1)
+
+		if (key.startsWith(prefix) && key.endsWith(suffix) && key.length >= pattern.length - 1) {
+			return resolve(packageDir, file.replace("*", key.slice(prefix.length, key.length - suffix.length)))
+		}
+	}
+
+	return null
+}
+
+/**
+ * Walks the static import graph from a compiled entry point, through relative, `#` import-map and self-package
+ * specifiers, and returns every bare specifier reached.
  */
 async function bareSpecifiersReachableFrom(entry: string): Promise<Set<string>> {
 	const seen = new Set<string>()
@@ -43,6 +92,14 @@ async function bareSpecifiersReachableFrom(entry: string): Promise<Set<string>> 
 
 			if (specifier.startsWith(".")) {
 				queue.push(resolve(dirname(file), specifier))
+
+				continue
+			}
+
+			const internal = resolveInternal(specifier)
+
+			if (internal) {
+				queue.push(internal)
 			} else {
 				bare.add(specifier)
 			}

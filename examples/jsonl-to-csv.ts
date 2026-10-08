@@ -6,7 +6,7 @@
 
 import { JSONSpliterator } from "spliterator"
 
-import { fixturesDirectory } from "../test/support/utils.js"
+import { fixturesDirectory } from "#test/support/utils"
 
 interface Row {
 	item_name: string

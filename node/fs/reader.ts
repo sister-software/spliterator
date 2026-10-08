@@ -12,7 +12,7 @@ import {
 	isFileHandleLike,
 	isPathBuilderLike,
 	toPathString,
-} from "../../lib/internal/shared.js"
+} from "#internal/shared"
 
 /**
  * Create a readable stream from a file system source.

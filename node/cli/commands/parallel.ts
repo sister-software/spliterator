@@ -16,8 +16,8 @@ import { pipeline } from "node:stream/promises"
 import { CharacterSequence, Spliterator } from "spliterator"
 import { createReadStream } from "spliterator/node/fs"
 
-import { type CommandSpec, parseCommand, renderCommandHelp } from "../spec.js"
-import { usageError } from "../utils.js"
+import { type CommandSpec, parseCommand, renderCommandHelp } from "#cli/spec"
+import { usageError } from "#cli/utils"
 
 type HaltMode = "never" | "soon" | "now"
 const haltModes = ["never", "soon", "now"] as const satisfies readonly HaltMode[]

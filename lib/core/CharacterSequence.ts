@@ -4,7 +4,6 @@
  * @copyright Sister Software
  */
 
-import type { ByteRange, PathBuilderLike } from "../internal/shared.js"
 import {
 	CELL_RESULT_HEADER,
 	CELL_RESULT_STRIDE,
@@ -16,7 +15,8 @@ import {
 	type WasmDelimiterScanner,
 	type WasmMemory,
 	type WasmRangeScanResult,
-} from "./wasm_module.js"
+} from "#core/wasm_module"
+import type { ByteRange, PathBuilderLike } from "#internal/shared"
 
 export function isArrayLike<T>(input: unknown): input is ArrayLike<T> {
 	return Boolean(input && typeof input === "object" && "length" in input)

@@ -4,23 +4,23 @@
  * @copyright Sister Software
  */
 
-import { loadNodeFs } from "../internal/node-modules.js"
+// oxlint-disable-next-line unicorn/prefer-export-from
+import { AsyncSpliterator, type AsyncSpliteratorInit, type SpliteratorInit } from "#core/AsyncSpliterator"
+import {
+	CharacterSequence,
+	Delimiters,
+	normalizeCharacterInput,
+	type CharacterSequenceInput,
+} from "#core/CharacterSequence"
+import { IndexQueue } from "#core/IndexQueue"
+import { loadNodeFs } from "#internal/node-modules"
 import {
 	isFileHandleLike,
 	isPathBuilderLike,
 	type AsyncChunkIterator,
 	type AsyncDataResource,
 	type ByteRange,
-} from "../internal/shared.js"
-// oxlint-disable-next-line unicorn/prefer-export-from
-import { AsyncSpliterator, type AsyncSpliteratorInit, type SpliteratorInit } from "./AsyncSpliterator.js"
-import {
-	CharacterSequence,
-	Delimiters,
-	normalizeCharacterInput,
-	type CharacterSequenceInput,
-} from "./CharacterSequence.js"
-import { IndexQueue } from "./IndexQueue.js"
+} from "#internal/shared"
 
 export { AsyncSpliterator }
 

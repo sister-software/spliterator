@@ -4,7 +4,7 @@
  * @copyright Sister Software
  */
 
-import { AsyncSequence, type ParallelMapSequenceOptions } from "../iterators/AsyncSequence.js"
+import { AsyncSequence, type ParallelMapSequenceOptions } from "#iterators/AsyncSequence"
 
 /**
  * Map an iterable through a callback with up to `concurrency` calls in flight. Values are yielded in **completion

@@ -6,7 +6,7 @@
 
 import type { ReadableWritablePair, StreamPipeOptions } from "node:stream/web"
 
-import { AsyncSequence } from "./AsyncSequence.js"
+import { AsyncSequence } from "#iterators/AsyncSequence"
 
 /**
  * A chainable operation in a fused pipeline.

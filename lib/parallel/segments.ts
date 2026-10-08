@@ -4,9 +4,9 @@
  * @copyright Sister Software
  */
 
-import { CharacterSequence, type CharacterSequenceInput } from "../core/CharacterSequence.js"
-import { loadNodeFs } from "../internal/node-modules.js"
-import type { AsyncDataResource, ByteRange } from "../internal/shared.js"
+import { CharacterSequence, type CharacterSequenceInput } from "#core/CharacterSequence"
+import { loadNodeFs } from "#internal/node-modules"
+import type { AsyncDataResource, ByteRange } from "#internal/shared"
 
 export interface SegmentOptions {
 	/**

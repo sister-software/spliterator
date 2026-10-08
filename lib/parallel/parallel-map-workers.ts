@@ -6,9 +6,9 @@
 
 import type { Worker } from "node:worker_threads"
 
-import { loadWorkerThreads, siblingUrl } from "../internal/node-modules.js"
-import { type PoolWorker, runPool } from "./parallel-map-runtime.js"
-import type { WorkerLease, WorkerPool } from "./worker-pool.js"
+import { loadWorkerThreads, workerEntryUrl } from "#internal/node-modules"
+import { type PoolWorker, runPool } from "#parallel/parallel-map-runtime"
+import type { WorkerLease, WorkerPool } from "#parallel/worker-pool"
 
 /**
  * Per-item handler a parallelMapWorkers worker module exports. `index` is per-worker monotonic.
@@ -179,7 +179,7 @@ export function parallelMapWorkers<T, R = unknown>(
 
 	const requested = Math.max(1, Math.floor(options.concurrency))
 	const batchSize = options.batchSize ?? 64
-	const entryUrl = siblingUrl("./parallel-map-worker-entry.js", import.meta.url)
+	const entryUrl = workerEntryUrl("#parallel/parallel-map-worker-entry")
 	const workers: Worker[] = []
 
 	if (options.pool && options.workerData !== undefined) {

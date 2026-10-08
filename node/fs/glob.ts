@@ -9,8 +9,8 @@ import { glob as globNative, stat } from "node:fs/promises"
 import { join, relative, resolve as resolvePath } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import type { PathBuilderLike } from "../../lib/internal/shared.js"
-import { AsyncSequence } from "../../lib/iterators/AsyncSequence.js"
+import type { PathBuilderLike } from "#internal/shared"
+import { AsyncSequence } from "#iterators/AsyncSequence"
 
 /**
  * A glob pattern, optionally expressed with a {@linkcode PathBuilder}.

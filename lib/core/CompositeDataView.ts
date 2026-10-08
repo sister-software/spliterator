@@ -4,7 +4,7 @@
  * @copyright Sister Software
  */
 
-import type { TypedArray } from "../internal/shared.js"
+import type { TypedArray } from "#internal/shared"
 
 /**
  * A generic mutable typed array.

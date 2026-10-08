@@ -27,11 +27,12 @@ export function loadHidden<T = unknown>(specifier: string): Promise<T> {
 }
 
 /**
- * Resolve a sibling module's URL without a bundler chasing it as an asset. Vite only rewrites `new URL(literal,
- * import.meta.url)`, so routing the path through a parameter is enough.
+ * The file URL of a worker entry named by its `#` import-map specifier, so the same specifier serves the source tree
+ * under the `node` condition and the compiled tree under `default`. Taking the specifier as a parameter keeps a bundler
+ * from chasing it as an asset.
  */
-export function siblingUrl(relativePath: string, base: string): URL {
-	return new URL(relativePath, base)
+export function workerEntryUrl(specifier: string): URL {
+	return new URL(import.meta.resolve(specifier))
 }
 
 const NODE_FS = "spliterator/node/fs"
