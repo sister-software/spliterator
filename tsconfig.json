@@ -4,7 +4,8 @@
 		"forceConsistentCasingInFileNames": true,
 		"emitDeclarationOnly": false,
 		"allowImportingTsExtensions": false,
-		"stripInternal": true
+		"stripInternal": true,
+		"types": ["node"]
 	},
 	"exclude": ["./out/**/*"]
 }
