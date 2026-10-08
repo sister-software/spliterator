@@ -4,6 +4,6 @@
  * @author Teffen Ellis, et al.
  */
 
-export function handleItem(x: number) {
-	return x * 2
+export function handleItem() {
+	process.exit(0)
 }

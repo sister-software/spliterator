@@ -6,8 +6,7 @@
 
 const dec = new TextDecoder()
 
-/** @param {Uint8Array} bytes */
-export function handleRecord(bytes) {
+export function handleRecord(bytes: Uint8Array) {
 	const s = dec.decode(bytes)
 
 	return s.length ? s.toUpperCase() : undefined

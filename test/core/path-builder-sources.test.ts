@@ -113,7 +113,7 @@ describe("PathBuilder sources", () => {
 	// resolves to a string before it ever gets there, so it must be accepted rather than rejected
 	// alongside genuinely un-transferable sources like a file handle.
 	test("asManyWorkers accepts a PathBuilder", async () => {
-		const handler = fixturesDirectory("segment-handlers")("uppercase.js")
+		const handler = fixturesDirectory("segment-handlers")("uppercase.ts")
 		const rows: string[] = []
 
 		for await (const row of AsyncSpliterator.asManyWorkers<string>(fixture, {

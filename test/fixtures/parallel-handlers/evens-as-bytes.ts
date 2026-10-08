@@ -6,8 +6,7 @@
 
 const enc = new TextEncoder()
 
-/** @param {number} x */
-export function handleItem(x) {
+export function handleItem(x: number) {
 	// Drop odds (filter); evens map to their decimal string as bytes (transferred).
 	if (x % 2 !== 0) return undefined
 

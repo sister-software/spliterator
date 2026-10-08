@@ -204,12 +204,17 @@ describe("openDelimitedRows", () => {
 
 		expect(Symbol.iterator in below).toBe(true)
 		expect(Symbol.asyncIterator in above).toBe(true)
+
+		// The streaming result opened a handle; left to the collector it is a hard error on Node 24.
+		await (above as AsyncIterableIterator<unknown>).return?.()
 	})
 
 	test("bulkThreshold 0 always streams", async () => {
 		const rows = await openDelimitedRows(jsonlPath, { delimiter: Delimiters.LineFeed, bulkThreshold: 0 })
 
 		expect(Symbol.asyncIterator in rows).toBe(true)
+
+		await (rows as AsyncIterableIterator<unknown>).return?.()
 	})
 })
 
@@ -251,6 +256,8 @@ describe("bulk parser hook", () => {
 
 		expect(Symbol.asyncIterator in rows).toBe(true)
 		expect(calls).toBe(0)
+
+		await (rows as AsyncIterableIterator<unknown>).return?.()
 	})
 
 	test("an empty stream and a single exhausted chunk take the bulk parser; two chunks stream", async () => {
@@ -279,6 +286,8 @@ describe("bulk parser hook", () => {
 		const streamed = await openDelimitedRows(csvPath, STREAMING, marker)
 
 		expect(Symbol.asyncIterator in streamed).toBe(true)
+
+		await (streamed as AsyncIterableIterator<unknown>).return?.()
 	})
 
 	test("the bulk parser is called after the scanner is ready", async () => {

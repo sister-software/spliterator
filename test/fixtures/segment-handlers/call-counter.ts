@@ -9,8 +9,7 @@
 
 let records = 0
 
-/** @param {Uint8Array} bytes */
-export function handleRecord(bytes) {
+export function handleRecord(bytes: Uint8Array) {
 	if (!bytes.length) return undefined
 
 	records++

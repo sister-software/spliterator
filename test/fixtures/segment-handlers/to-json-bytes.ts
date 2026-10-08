@@ -7,8 +7,7 @@
 const dec = new TextDecoder()
 const enc = new TextEncoder()
 
-/** @param {Uint8Array} bytes */
-export function handleRecord(bytes) {
+export function handleRecord(bytes: Uint8Array) {
 	const s = dec.decode(bytes)
 
 	if (!s.length) return undefined

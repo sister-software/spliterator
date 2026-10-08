@@ -72,3 +72,7 @@ schema/generated
 
 ## Example data downloads
 examples/data/
+
+# Source is TypeScript only; Node strips types natively on the supported floor.
+*.js
+*.mjs
