@@ -4,6 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
+import { loadHidden, loadNodeStream, loadNodeUrl } from "../internal/node-modules.js"
 import type { AsyncChunkIterator } from "../internal/shared.js"
 import { AsyncSequence } from "../iterators/AsyncSequence.js"
 import { normalizeColumnNames } from "./casing.js"
@@ -88,17 +89,38 @@ export interface XLSXWriteHandle {
 }
 
 /**
- * Wrap the optional peer dependency import so a missing module identifies the package to install.
+ * Import an optional peer dependency so a missing module identifies the package to install. The specifier goes through
+ * {@linkcode loadHidden} so a browser bundler does not try to resolve a peer the consumer never installed.
  */
-async function importVendor<T>(packageName: string, importer: () => Promise<T>): Promise<T> {
-	try {
-		return await importer()
-	} catch (error) {
+function importVendor<T>(specifier: `${string}/node`): Promise<T> {
+	const packageName = specifier.slice(0, -"/node".length)
+
+	return loadHidden<T>(specifier).catch((error) => {
+		if (!isModuleNotFound(error, specifier)) throw error
+
 		throw new Error(
 			`XLSXSpliterator requires the optional peer dependency "${packageName}". Install it to use this API.`,
 			{ cause: error }
 		)
-	}
+	})
+}
+
+/**
+ * Only a resolution failure for the vendor itself means the peer is missing. A syntax error or a missing transitive
+ * dependency inside the vendor is the vendor's problem and must surface as it is.
+ */
+function isModuleNotFound(error: unknown, specifier: string): boolean {
+	const e = error as { code?: unknown; message?: unknown }
+
+	if (e?.code !== "ERR_MODULE_NOT_FOUND" && e?.code !== "MODULE_NOT_FOUND") return false
+
+	if (typeof e.message !== "string") return false
+
+	// Node names the package it could not resolve: `Cannot find package 'x' imported from ...`. A missing transitive
+	// dependency of the vendor names that dependency instead, and must not be reported as the vendor missing.
+	const missing = /^Cannot find package '([^']+)'/.exec(e.message)?.[1]
+
+	return missing === specifier.split("/")[0]
 }
 
 /**
@@ -108,7 +130,7 @@ async function resolveVendorInput(source: XLSXSource) {
 	if (typeof source === "string") return source
 
 	if (source instanceof URL) {
-		const { fileURLToPath } = await import("node:url")
+		const { fileURLToPath } = await loadNodeUrl()
 
 		return fileURLToPath(source)
 	}
@@ -119,7 +141,7 @@ async function resolveVendorInput(source: XLSXSource) {
 		return Buffer.from(source.buffer, source.byteOffset, source.byteLength)
 	}
 
-	const { Readable } = await import("node:stream")
+	const { Readable } = await loadNodeStream()
 
 	return Readable.from(source)
 }
@@ -199,7 +221,7 @@ export abstract class XLSXSpliterator {
 		let transformers: XLSXTransformerEntry[] = []
 
 		const openRows = async (): Promise<Iterable<XLSXCellValue[]>> => {
-			const { readSheet } = await importVendor("read-excel-file", () => import("read-excel-file/node"))
+			const { readSheet } = await importVendor<typeof import("read-excel-file/node")>("read-excel-file/node")
 			const input = await resolveVendorInput(source)
 			const rows = (await readSheet(input, sheet)) as XLSXCellValue[][]
 
@@ -248,7 +270,9 @@ export abstract class XLSXSpliterator {
 		init: XLSXWriteInit = {}
 	): XLSXWriteHandle {
 		const open = async () => {
-			const { default: writeXlsxFile } = await importVendor("write-excel-file", () => import("write-excel-file/node"))
+			const { default: writeXlsxFile } =
+				await importVendor<typeof import("write-excel-file/node")>("write-excel-file/node")
+
 			const data = await materializeSheetData(source, init)
 
 			return writeXlsxFile(data, init.sheet === undefined ? undefined : { sheet: init.sheet })

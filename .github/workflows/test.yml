@@ -60,3 +60,4 @@ jobs:
           npm pack --dry-run
           test -f out/index.js || { echo "::error::out/index.js missing — compile did not produce the published entry"; exit 1; }
           test -f out/index.d.ts || { echo "::error::out/index.d.ts missing — no types would ship"; exit 1; }
+          test -f out/web.js || { echo "::error::out/web.js missing — the ./web entry would not ship"; exit 1; }

@@ -41,6 +41,10 @@
 		"out/index.d.ts.map",
 		"out/index.js.map",
 		"out/index.js",
+		"out/web.d.ts",
+		"out/web.d.ts.map",
+		"out/web.js.map",
+		"out/web.js",
 		"out/lib/**/*",
 		"out/node/**/*"
 	],
@@ -49,6 +53,7 @@
 		"./package.json": "./package.json",
 		".": "./out/index.js",
 		"./casing": "./out/lib/formats/casing.js",
+		"./web": "./out/web.js",
 		"./node/fs": "./out/node/fs/index.js",
 		"./merge-async-iterators": "./out/lib/parallel/merge-async-iterators.js",
 		"./parallel-map-runtime": "./out/lib/parallel/parallel-map-runtime.js",

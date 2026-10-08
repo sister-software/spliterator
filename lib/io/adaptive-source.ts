@@ -6,6 +6,7 @@
 
 import { CharacterSequence } from "../core/CharacterSequence.js"
 import { type AsyncSpliteratorInit, Spliterator } from "../core/Spliterator.js"
+import { loadNodeFs } from "../internal/node-modules.js"
 import type { AsyncChunkIterator, AsyncDataResource } from "../internal/shared.js"
 import type { AsyncSequence } from "../iterators/AsyncSequence.js"
 
@@ -110,7 +111,7 @@ export async function openDelimitedRows<R = Uint8Array>(
 	let size: number
 
 	try {
-		const { readFileSize } = await import("spliterator/node/fs")
+		const { readFileSize } = await loadNodeFs()
 
 		size = await readFileSize(source)
 	} catch {
@@ -122,7 +123,7 @@ export async function openDelimitedRows<R = Uint8Array>(
 		return Spliterator.fromAsync(source, init)
 	}
 
-	const { readBytes } = await import("spliterator/node/fs")
+	const { readBytes } = await loadNodeFs()
 
 	return bulk(await readBytes(source, 0, size), init, bulkParser)
 }

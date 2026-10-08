@@ -5,6 +5,7 @@
  */
 
 import { CharacterSequence, type CharacterSequenceInput } from "../core/CharacterSequence.js"
+import { loadNodeFs } from "../internal/node-modules.js"
 import type { AsyncDataResource, ByteRange } from "../internal/shared.js"
 
 export interface SegmentOptions {
@@ -31,7 +32,7 @@ export interface SegmentOptions {
  * fewer than `concurrency` segments. An empty file yields no segments.
  */
 export async function computeSegments(source: AsyncDataResource, options: SegmentOptions): Promise<ByteRange[]> {
-	const { readFileSize, readBytes } = await import("spliterator/node/fs")
+	const { readFileSize, readBytes } = await loadNodeFs()
 	const needle = new CharacterSequence(options.delimiter)
 	const probeSize = options.probeSize ?? 65_536
 	const concurrency = Math.max(1, Math.floor(options.concurrency))

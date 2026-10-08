@@ -4,7 +4,7 @@
  * @author Teffen Ellis, et al.
  */
 
-import { type WriteStream, createWriteStream } from "node:fs"
+import type { WriteStream } from "node:fs"
 
 import type { PathBuilderLike } from "../internal/shared.js"
 
@@ -48,6 +48,8 @@ export interface NewlineWriter extends AsyncDisposable {
  * ```
  */
 export function createNewlineWriter(filePath: PathBuilderLike): NewlineWriter {
+	// Sync built-in load, no static `node:fs` import: keeps the root bundleable for browsers.
+	const { createWriteStream } = process.getBuiltinModule("node:fs")
 	const writer = createWriteStream(filePath.toString())
 
 	const write: WriteLineCallback = (content: any, encoding?: BufferEncoding) => {
