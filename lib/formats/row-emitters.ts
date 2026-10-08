@@ -122,16 +122,11 @@ export function bindTransformers<V>(
 	headers: string[],
 	transformersInput: Iterable<RowTransformerEntry<V>> | RowTransformerRecord<V>
 ): RowTransformerEntry<V>[] {
-	if (Array.isArray(transformersInput)) {
-		return Array.from(zipSync(headers, transformersInput), ([columnName, transformer]) => [
-			columnName!,
-			(transformer as RowTransformer<V> | undefined) ?? identity,
-		])
-	}
+	// Entries bind by column name, never by position: `[["age", Number]]` applies to `age` wherever it sits.
+	const byName: Record<string, RowTransformer<V> | undefined> =
+		Symbol.iterator in transformersInput
+			? Object.fromEntries(transformersInput as Iterable<RowTransformerEntry<V>>)
+			: (transformersInput as RowTransformerRecord<V>)
 
-	return headers.map((columnName) => {
-		const transform = (transformersInput as RowTransformerRecord<V>)[columnName] || identity
-
-		return [columnName, transform]
-	})
+	return headers.map((columnName) => [columnName, byName[columnName] ?? identity])
 }

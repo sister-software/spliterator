@@ -118,8 +118,9 @@ export abstract class TextSpliterator {
 	/**
 	 * Count logical text rows without decoding them.
 	 *
-	 * This counts exactly the slices {@linkcode from} would yield, including a final unterminated row and its `skipEmpty`,
-	 * `drop`, and `take` behavior.
+	 * This counts the slices {@linkcode from} would yield, including a final unterminated row and its `skipEmpty`, `drop`,
+	 * and `take` behavior. The blank test is ASCII whitespace, so a row of only Unicode spaces is counted here and
+	 * dropped by `from` after decoding.
 	 *
 	 * @see {@linkcode countAsync} for files and other asynchronous sources.
 	 */
@@ -140,9 +141,10 @@ export abstract class TextSpliterator {
 	/**
 	 * Count logical text rows without decoding them.
 	 *
-	 * This counts exactly the slices {@linkcode fromAsync} would yield, including a final unterminated row and its
-	 * `skipEmpty`, `drop`, and `take` behavior. A path, URL, or file handle is opened independently and can then be
-	 * passed to {@linkcode fromAsync}; an async chunk source is inherently consumed.
+	 * This counts the slices {@linkcode fromAsync} would yield, including a final unterminated row and its `skipEmpty`,
+	 * `drop`, and `take` behavior, with the same ASCII-only blank test as {@linkcode count}. A path, URL, or file handle
+	 * is opened independently and can then be passed to {@linkcode fromAsync}; an async chunk source is inherently
+	 * consumed.
 	 */
 	public static async countAsync(
 		source: AsyncDataResource,

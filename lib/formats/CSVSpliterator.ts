@@ -120,11 +120,13 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 		crlf = true,
 		trim = true,
 		columnScan = "auto",
-		take = Infinity,
-		drop = 0,
+		take: takeInput = Infinity,
+		drop: dropInput = 0,
 		...rowInit
 	} = init
 
+	const drop = Math.max(0, dropInput)
+	const take = Math.max(0, takeInput)
 	const emitter = CSVSpliteratorEmitters[mode]
 	let transformers: CSVTransformerEntry[] = []
 	let yieldCount = 0
@@ -336,6 +338,9 @@ export abstract class CSVSpliterator {
 		}
 	}
 
+	/**
+	 * @yields Each row as an object with the header names as keys.
+	 */
 	public static from<T extends object = CSVSpliteratorEmittedRecord>(
 		source: CharacterSequenceInput,
 		options?: CSVSpliteratorInit & { mode?: "object"; header?: true }
@@ -343,14 +348,11 @@ export abstract class CSVSpliterator {
 	/**
 	 * @yields Each row as a 3-tuple [key, value, idx].
 	 */
-
 	public static from<T extends RowTuple[] = RowTuple[]>(
 		source: CharacterSequenceInput,
 		options?: CSVSpliteratorInit & { mode: "entries" }
 	): Sequence<T>
 	/**
-	 * Given a byte array or string, yield each row as an array of columns.
-	 *
 	 * @yields Each row as an array of columns.
 	 */
 	public static from<T extends string[] = string[]>(
@@ -358,10 +360,12 @@ export abstract class CSVSpliterator {
 		options?: CSVSpliteratorInit & ({ mode: "array" } | { mode?: "array"; header: false })
 	): Sequence<T>
 	/**
-	 * Given a byte array or string, yield each row as an array of columns.
+	 * Given a byte array or string, split the data by rows (usually newline-delimited) and then by columns (usually
+	 * comma).
 	 *
-	 * @yields Each row as an array of columns.
+	 * @yields Each row, shaped according to the `mode` option.
 	 */
+	public static from(source: CharacterSequenceInput, init?: CSVSpliteratorInit): Sequence<unknown>
 	public static from(source: CharacterSequenceInput, init: CSVSpliteratorInit = {}) {
 		return new Sequence(splitRows(source, init, this.ColumnDelimiter))
 	}
@@ -371,7 +375,7 @@ export abstract class CSVSpliterator {
 	 */
 	public static fromAsync<T extends object = CSVSpliteratorEmittedRecord>(
 		source: AsyncDataResource | AsyncChunkIterator,
-		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode?: "object"; header?: true }
+		options?: CSVSpliteratorInit & AdaptiveSourceInit & { mode?: "object"; header?: true }
 	): AsyncSequence<T>
 
 	/**
@@ -379,14 +383,14 @@ export abstract class CSVSpliterator {
 	 */
 	public static fromAsync<T extends RowTuple[] = RowTuple[]>(
 		source: AsyncDataResource | AsyncChunkIterator,
-		options?: CSVSpliteratorInit & AsyncSpliteratorInit & { mode: "entries" }
+		options?: CSVSpliteratorInit & AdaptiveSourceInit & { mode: "entries" }
 	): AsyncSequence<T>
 	/**
 	 * @yields Each row as an array of columns.
 	 */
 	public static fromAsync<T extends string[] = string[]>(
 		source: AsyncDataResource | AsyncChunkIterator,
-		options?: CSVSpliteratorInit & AsyncSpliteratorInit & ({ mode: "array" } | { mode?: "array"; header: false })
+		options?: CSVSpliteratorInit & AdaptiveSourceInit & ({ mode: "array" } | { mode?: "array"; header: false })
 	): AsyncSequence<T>
 	/**
 	 * Given an asynchronous data source, split the data by rows (usually newline-delimited) and then by columns (usually
@@ -399,7 +403,7 @@ export abstract class CSVSpliterator {
 	 */
 	public static fromAsync(
 		source: AsyncDataResource | AsyncChunkIterator,
-		init?: CSVSpliteratorInit & AsyncSpliteratorInit
+		init?: CSVSpliteratorInit & AdaptiveSourceInit
 	): AsyncSequence<unknown>
 	/**
 	 * Given an asynchronous data source, split the data by rows (usually newline-delimited) and then by columns (usually
@@ -511,15 +515,18 @@ export abstract class CSVSpliterator {
 			return rows
 		}
 
-		let sequence: AsyncSequence<unknown> = AsyncSequence.from<Uint8Array | string[]>(openRows).map((row) => {
+		let rows = AsyncSequence.from<Uint8Array | string[]>(openRows)
+
+		// Dropped before parsing, as `from` does: a transformer never sees a row the caller asked to skip.
+		if (drop > 0) {
+			rows = rows.drop(drop)
+		}
+
+		let sequence: AsyncSequence<unknown> = rows.map((row) => {
 			const columns = toColumns(row)
 
 			return emitter ? emitter(columns, transformers) : columns
 		})
-
-		if (drop > 0) {
-			sequence = sequence.drop(drop)
-		}
 
 		if (Number.isFinite(take)) {
 			sequence = sequence.take(take)

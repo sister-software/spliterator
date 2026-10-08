@@ -497,15 +497,24 @@ export function normalizeColumnNames(columnHeaders: Iterable<string>): string[] 
 	const keyableColumnNames = Iterator.from(columnHeaders).map((name) => smartSnakeCase(name).toLowerCase())
 
 	for (const columnHeader of keyableColumnNames) {
-		if (distinctColumns.has(columnHeader)) {
-			const headerCount = (columnInputCountMap.get(columnHeader) ?? 1) + 1
-			columnInputCountMap.set(columnHeader, headerCount)
-
-			const uniqueColumnName = `${columnHeader}_${headerCount}`
-			distinctColumns.add(uniqueColumnName)
-		} else {
+		if (!distinctColumns.has(columnHeader)) {
 			distinctColumns.add(columnHeader)
+
+			continue
 		}
+
+		// A suffixed name can itself collide with a literal header (`a_2, a, a`), so keep counting until it is free.
+		// One name per header, always: a dropped one would shift every later column onto the wrong key.
+		let headerCount = columnInputCountMap.get(columnHeader) ?? 1
+		let uniqueColumnName: string
+
+		do {
+			headerCount++
+			uniqueColumnName = `${columnHeader}_${headerCount}`
+		} while (distinctColumns.has(uniqueColumnName))
+
+		columnInputCountMap.set(columnHeader, headerCount)
+		distinctColumns.add(uniqueColumnName)
 	}
 
 	return Array.from(distinctColumns)

@@ -103,9 +103,9 @@ export abstract class JSONSpliterator {
 	}
 
 	/**
-	 * Given a byte array or string, yield each row as an array of columns.
+	 * Given an asynchronous data source, yield each delimited row parsed as JSON.
 	 *
-	 * @yields Each row as an array of columns.
+	 * @yields Each row's parsed value.
 	 */
 	public static fromAsync<T = unknown>(
 		source: AsyncDataResource,

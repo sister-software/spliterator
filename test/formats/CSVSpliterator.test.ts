@@ -584,8 +584,8 @@ describe("columnScan", () => {
 		}).toArray()
 
 		expect(out).toEqual([{ n: 2 }, { n: 3 }])
-		// fromAsync maps before it drops, so the dropped row's transformer still ran, as it does today.
-		expect(seen).toEqual(["1", "2", "3"])
+		// Dropped rows are never parsed, so the transformer sees only what is yielded, as on the sync path.
+		expect(seen).toEqual(["2", "3"])
 	})
 
 	test("take(0) leaves a deferred async source unopened", async ({ expect }) => {
