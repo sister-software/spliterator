@@ -7,7 +7,11 @@
  */
 
 import { sisterSoftwareOxfmtConfig } from "@sister.software/oxfmt-config"
+import type { OxfmtConfig } from "oxfmt"
 
-export default {
+const config: OxfmtConfig = {
 	...sisterSoftwareOxfmtConfig,
+	ignorePatterns: [".yarn"],
 }
+
+export default config
