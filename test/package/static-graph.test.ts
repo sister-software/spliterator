@@ -34,7 +34,9 @@ async function bareSpecifiersReachableFrom(entry: string): Promise<Set<string>> 
 		if (seen.has(file)) continue
 		seen.add(file)
 
-		const text = await readFile(file, "utf8")
+		// Block comments and whole-line comments are dropped first: a doc comment that mentions `import("node:...")` is
+		// prose, not an edge.
+		const text = (await readFile(file, "utf8")).replaceAll(/\/\*[\s\S]*?\*\//g, "").replaceAll(/^\s*\/\/.*$/gm, "")
 
 		for (const match of text.matchAll(STATIC_SPECIFIER)) {
 			const specifier = match[1] ?? match[2] ?? match[3]!
