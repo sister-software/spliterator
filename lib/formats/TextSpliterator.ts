@@ -9,7 +9,7 @@ import { CharacterSequence, type CharacterSequenceInput } from "#core/CharacterS
 import { Spliterator, type SpliteratorInit } from "#core/Spliterator"
 import type { AsyncDataResource } from "#internal/shared"
 import { type AdaptiveSourceInit, openDelimitedRows } from "#io/adaptive-source"
-import { windowedTextRows } from "#io/windowed-text"
+import { canSplitAsText, textRows, windowedTextRows } from "#io/windowed-text"
 import { AsyncSequence } from "#iterators/AsyncSequence"
 import { Sequence } from "#iterators/Sequence"
 
@@ -65,8 +65,28 @@ function* decodeRows(
 	source: CharacterSequenceInput,
 	{ encoding, fatal, ignoreBOM, trim = true, ...options }: TextSpliteratorInit & SpliteratorInit = {}
 ): Generator<string> {
-	const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
 	const dropBlank = trim && (options.skipEmpty ?? true)
+
+	// A string is already text: split it as text instead of encoding it, scanning the bytes and decoding each row back.
+	// The byte route cost 7.8µs for a 40-line string against 1µs for `split`; this is what the stdout-splitting callers
+	// pay per call.
+	if (typeof source === "string" && canSplitAsText({ ...options, encoding })) {
+		for (const row of textRows(source, options)) {
+			if (trim) {
+				const trimmed = row.trim()
+
+				if (dropBlank && !trimmed) continue
+
+				yield trimmed
+			} else {
+				yield row
+			}
+		}
+
+		return
+	}
+
+	const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
 	let rowCursor = 0
 
 	const spliterator = Spliterator.fromSync(source, options)

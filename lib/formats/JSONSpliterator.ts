@@ -10,7 +10,7 @@ import { Spliterator, type SpliteratorInit } from "#core/Spliterator"
 import { type CommentInput, createCommentFilter, createTextCommentFilter } from "#formats/comment-filter"
 import type { AsyncDataResource } from "#internal/shared"
 import { type AdaptiveSourceInit, openDelimitedRows } from "#io/adaptive-source"
-import { windowedTextRows } from "#io/windowed-text"
+import { canSplitAsText, textRows, windowedTextRows } from "#io/windowed-text"
 import { AsyncSequence } from "#iterators/AsyncSequence"
 import { Sequence } from "#iterators/Sequence"
 
@@ -36,9 +36,36 @@ function* parseRows<T>(
 	source: CharacterSequenceInput,
 	{ comment, ...options }: SpliteratorInit & JSONSpliteratorInit = {}
 ): Generator<T> {
+	let rowCursor = 0
+
+	// A string is already text: split it as text rather than encoding, scanning and decoding each row back.
+	if (typeof source === "string" && canSplitAsText(options)) {
+		const parseableText = createTextCommentFilter(comment)
+
+		for (const row of textRows(source, options)) {
+			if (parseableText && !parseableText(row)) continue
+
+			let parsed: T
+
+			try {
+				parsed = JSON.parse(row) as T
+			} catch (parsedError) {
+				const error = new SyntaxError(`Failed to parse JSON at row ${rowCursor}`)
+				error.cause = parsedError
+
+				throw error
+			}
+
+			yield parsed
+
+			rowCursor++
+		}
+
+		return
+	}
+
 	const decoder = new TextDecoder()
 	const parseable = createCommentFilter(comment)
-	let rowCursor = 0
 
 	const spliterator = Spliterator.fromSync(source, options)
 

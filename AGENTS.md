@@ -125,6 +125,7 @@ Boyer-Moore-Horspool fallback, and ~8–17× for `searchAll`.
   list parser. `count`/`countAsync` test raw slices for ASCII whitespace to stay in agreement
   without decoding. Pass `trim: false` for byte parity.
 - **`JSONSpliterator`** — Wraps `TextSpliterator`-style logic, additionally calls `JSON.parse` on each line.
+- **A string source to `TextSpliterator.from` or `JSONSpliterator.from` is split as text** (`textRows` in `lib/io/windowed-text.ts`): no encode, no byte scan, no per-row decode. Gated by `canSplitAsText`: no byte `position`, no quote handling, no encoding other than UTF-8. A 40-line string went 7.8µs → 2.5µs per call against 1µs for `split`+`trim`; the remainder is the `Sequence` and generator. This is the shape of the 80-odd stdout-splitting call sites in mailwoman. `test/formats/text-rows.test.ts` pins parity with the byte route across delimiters, `crlf`, `skipEmpty`, `drop`/`take`.
 - **`CSVSpliterator`** — Two-level splitting: first splits rows (newline), then splits each row
   into columns (comma). Supports `mode: "array" | "object" | "entries"`, header normalization,
   and per-column transformers. **`trim` is on by default** and trims every column after
