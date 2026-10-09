@@ -700,11 +700,12 @@ describe("WASM SIMD scanner", () => {
 		const options = { rowDelimiter: 0x0a, columnDelimiter: 0x2c, quote: 0x22, crlf: true }
 		const initial = { scanCursor: 0, units: 0, insideQuotes: false, cellStartUnits: 0, cellFlags: 0 }
 
-		test("rebases a window's cells and state to absolute offsets", () => {
+		test("returns a window's cells relative to its unit base and the state in absolute offsets", () => {
 			const bytes = encoder.encode("é,a\nbb,c")
 			// Scan the first row only, then resume.
 			const first = CharacterSequence.scanCells(bytes, initial, 5, options)!
 
+			expect(first.unitBase).toBe(0)
 			expect(Array.from(first.cells)).toEqual([0, 1, 0, 2, 3, CELL_FLAG_ROW_END])
 
 			expect(first).toMatchObject({
@@ -717,7 +718,8 @@ describe("WASM SIMD scanner", () => {
 
 			const second = CharacterSequence.scanCells(bytes, first, bytes.length, options)!
 
-			expect(Array.from(second.cells)).toEqual([4, 6, 0])
+			expect(second.unitBase).toBe(4)
+			expect(Array.from(second.cells)).toEqual([0, 2, 0])
 			expect(second).toMatchObject({ scanCursor: 9, units: 8, cellStartUnits: 7 })
 		})
 
@@ -737,7 +739,9 @@ describe("WASM SIMD scanner", () => {
 
 			const second = CharacterSequence.scanCells(bytes, first, bytes.length, options)!
 
-			expect(Array.from(second.cells)).toEqual([2, 7, CELL_FLAG_HAS_QUOTE, 8, 9, CELL_FLAG_ROW_END])
+			// The open cell began two units before this window, so its relative start is negative.
+			expect(second.unitBase).toBe(4)
+			expect(Array.from(second.cells)).toEqual([-2, 3, CELL_FLAG_HAS_QUOTE, 4, 5, CELL_FLAG_ROW_END])
 		})
 
 		test("supplies previous_byte so a CRLF split by the window is trimmed", () => {
@@ -748,17 +752,18 @@ describe("WASM SIMD scanner", () => {
 
 			const second = CharacterSequence.scanCells(bytes, first, bytes.length, options)!
 
-			expect(Array.from(second.cells)).toEqual([0, 2, CELL_FLAG_ROW_END, 4, 6, CELL_FLAG_ROW_END])
+			expect(second.unitBase).toBe(3)
+			expect(Array.from(second.cells)).toEqual([-3, -1, CELL_FLAG_ROW_END, 1, 3, CELL_FLAG_ROW_END])
 		})
 
-		test("returns an owned copy that survives a later scan", () => {
+		test("the batch is a view the next scan overwrites, so consumers finish it first", () => {
 			const bytes = encoder.encode("a,b\n")
 			const result = CharacterSequence.scanCells(bytes, initial, bytes.length, options)!
 			const snapshot = Array.from(result.cells)
 
 			CharacterSequence.scanCells(encoder.encode("zzzzzzzz,yyyyyyyy\n"), initial, 18, options)
 
-			expect(Array.from(result.cells)).toEqual(snapshot)
+			expect(Array.from(result.cells)).not.toEqual(snapshot)
 		})
 
 		test("honours maxCells and reports where it stopped", () => {

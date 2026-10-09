@@ -123,13 +123,16 @@ export class CellRowScanner {
 			throw new Error("CellRowScanner: the cell scanner returned no batch for a non-empty window")
 		}
 
+		// A view of the kernel's memory, relative to `unitBase`: every cell is turned into a row below before anything can
+		// scan again, and no user code runs in here.
 		const cells = scan.cells
+		const unitBase = scan.unitBase
 		const skipEmpty = this.#skipEmpty
 
 		for (let i = 0; i < scan.count; i++) {
 			const offset = i * CELL_RESULT_STRIDE
-			const start = cells[offset]!
-			const cellEnd = cells[offset + 1]!
+			const start = cells[offset]! + unitBase
+			const cellEnd = cells[offset + 1]! + unitBase
 			const flags = cells[offset + 2]!
 
 			// Evaluated before the store: `row[width++] = cell(...)` would bump `width` before `cell` reads it.

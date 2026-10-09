@@ -149,13 +149,18 @@ export interface WasmRangeScanResult {
 }
 
 /**
- * One owned batch from the CSV cell scanner, rebased to absolute offsets by `CharacterSequence.scanCells`.
+ * One batch from the CSV cell scanner, as `CharacterSequence.scanCells` returns it.
  */
 export interface WasmCellScanResult {
 	/**
-	 * `[start, end, flags]` triples in UTF-16 units of the decoded source. A copy, safe to hold across further scans.
+	 * `[start, end, flags]` triples, `start` and `end` in UTF-16 units relative to `unitBase`. A view of shared WASM
+	 * memory: consume it before the next scanner call.
 	 */
 	cells: Int32Array
+	/**
+	 * Absolute UTF-16 units at the window's start; add it to each cell's `start` and `end`.
+	 */
+	unitBase: number
 	count: number
 	/**
 	 * Absolute byte offset the scan stopped at.

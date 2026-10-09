@@ -423,12 +423,14 @@ export class CharacterSequence extends Uint8Array {
 	}
 
 	/**
-	 * Scan CSV cells over `[state.scanCursor, end)` in one bounded kernel call, returning an owned batch rebased to
-	 * absolute byte and UTF-16 offsets. The kernel counts UTF-16 units as it scans, which is what lets the caller slice a
-	 * decoded string by these offsets without an ASCII gate; the decode must be `fatal` so the count is exact.
+	 * Scan CSV cells over `[state.scanCursor, end)` in one bounded kernel call. The kernel counts UTF-16 units as it
+	 * scans, which is what lets the caller slice a decoded string by these offsets without an ASCII gate; the decode must
+	 * be `fatal` so the count is exact.
 	 *
-	 * The batch is copied out of WASM memory before returning, so a caller may hold it across further scans, including a
-	 * nested parse run by user code while a row is being consumed.
+	 * `cells` is a view of shared WASM memory, in units relative to `unitBase`, valid until the next scanner call of any
+	 * kind. The one consumer, `CellRowScanner`, turns the whole batch into rows before it returns, and nothing runs user
+	 * code in between, so the copy and the rebasing loop that used to be here were 9% of a streamed parse for nothing.
+	 * The state fields are absolute.
 	 *
 	 * Returns `null` when the scanner is unavailable or the window is empty. Callers keep their own fallback.
 	 */
@@ -480,17 +482,11 @@ export class CharacterSequence extends Uint8Array {
 		)
 
 		const block = new Int32Array(wasm.memory.buffer, resultsOffset, CELL_RESULT_HEADER + count * CELL_RESULT_STRIDE)
-		// Copy: the view aliases shared memory that the next scanner call overwrites.
-		const cells = block.slice(CELL_RESULT_HEADER)
 		const unitBase = state.units
 
-		for (let i = 0; i < count; i++) {
-			cells[i * CELL_RESULT_STRIDE] = cells[i * CELL_RESULT_STRIDE]! + unitBase
-			cells[i * CELL_RESULT_STRIDE + 1] = cells[i * CELL_RESULT_STRIDE + 1]! + unitBase
-		}
-
 		return {
-			cells,
+			cells: block.subarray(CELL_RESULT_HEADER),
+			unitBase,
 			count,
 			scanCursor: windowStart + block[0]!,
 			units: unitBase + block[1]!,
