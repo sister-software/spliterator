@@ -513,25 +513,30 @@ describe("columnScan", () => {
 		})
 	})
 
-	test("the async bulk branch takes the fast path and matches streaming and rows", async ({ expect }) => {
+	test("the async bulk and streaming branches both take the fast path and match rows", async ({ expect }) => {
 		const spy = vi.spyOn(CharacterSequence, "scanCells")
 		const auto = await CSVSpliterator.fromAsync(fixturePath).toArray()
 		const autoCalls = spy.mock.calls.length
 
 		spy.mockClear()
 
-		const rows = await CSVSpliterator.fromAsync(fixturePath, { columnScan: "rows" }).toArray()
 		const streamed = await CSVSpliterator.fromAsync(fixturePath, { bulkThreshold: 0 } as never).toArray()
-		const otherCalls = spy.mock.calls.length
+		const streamedCalls = spy.mock.calls.length
+
+		spy.mockClear()
+
+		const rows = await CSVSpliterator.fromAsync(fixturePath, { columnScan: "rows" }).toArray()
+		const rowCalls = spy.mock.calls.length
 
 		spy.mockRestore()
 		expect(autoCalls).toBeGreaterThan(0)
-		expect(otherCalls).toBe(0)
+		expect(streamedCalls).toBeGreaterThan(0)
+		expect(rowCalls).toBe(0)
 		expect(auto).toEqual(rows)
 		expect(auto).toEqual(streamed)
 	})
 
-	test("an unsized single-chunk stream takes the fast path; a multi-chunk stream does not", async ({ expect }) => {
+	test("an unsized stream takes the fast path whether it arrives in one chunk or many", async ({ expect }) => {
 		const bytes = encoder.encode("name,age\nAda,36\nBob,41\n")
 
 		const one = async function* () {
@@ -561,7 +566,102 @@ describe("columnScan", () => {
 
 		spy.mockRestore()
 		expect(oneCalls).toBeGreaterThan(0)
-		expect(manyCalls).toBe(0)
+		expect(manyCalls).toBeGreaterThan(0)
+	})
+
+	describe("streaming cell scan", () => {
+		// A high-water mark this small makes every engine window a handful of rows, so the fixture crosses many.
+		const tiny = { bulkThreshold: 0, highWaterMark: 32 } as const
+
+		test("many small windows match the row path on the fixture", async ({ expect }) => {
+			const spy = vi.spyOn(CharacterSequence, "scanCells")
+			const windowed = await CSVSpliterator.fromAsync(fixturePath, tiny).toArray()
+			const calls = spy.mock.calls.length
+
+			spy.mockRestore()
+
+			const rows = await CSVSpliterator.fromAsync(fixturePath, { ...tiny, columnScan: "rows" }).toArray()
+
+			expect(calls).toBeGreaterThan(1)
+			expect(windowed).toEqual(rows)
+			expect(windowed.length).toBeGreaterThan(1)
+		})
+
+		test("a quoted field longer than a window stays one cell", async ({ expect }) => {
+			const long = Array.from({ length: 40 }, (_, i) => `line ${i}, with a comma`).join("\n")
+			const text = `h1,h2\n"${long}",after\nx,y\n`
+
+			const source = async function* () {
+				yield encoder.encode(text)
+			}
+
+			const init = { ...tiny, mode: "array", header: false } as const
+			const windowed = await CSVSpliterator.fromAsync(source(), init).toArray()
+			const rows = await CSVSpliterator.fromAsync(source(), { ...init, columnScan: "rows" }).toArray()
+
+			expect(windowed).toEqual([
+				["h1", "h2"],
+				[long, "after"],
+				["x", "y"],
+			])
+
+			expect(windowed).toEqual(rows)
+		})
+
+		test("a window that is not UTF-8 takes the row path for that window alone", async ({ expect }) => {
+			const good = encoder.encode("h\n")
+			const bad = new Uint8Array([0x61, 0x2c, 0xff, 0x0a])
+			const more = encoder.encode(Array.from({ length: 20 }, (_, i) => `r${i},ok`).join("\n") + "\n")
+
+			const source = async function* () {
+				yield good
+				yield bad
+				yield more
+			}
+
+			const init = { ...tiny, mode: "array", header: false } as const
+			const windowed = await CSVSpliterator.fromAsync(source(), init).toArray()
+			const rows = await CSVSpliterator.fromAsync(source(), { ...init, columnScan: "rows" }).toArray()
+
+			expect(windowed[1]).toEqual(["a", "\uFFFD"])
+			expect(windowed).toEqual(rows)
+		})
+
+		test("empty rows kept with skipEmpty false match the row path across windows", async ({ expect }) => {
+			const text = "h\n\n\na\n\nb\n\n"
+
+			const source = async function* () {
+				yield encoder.encode(text)
+			}
+
+			const init = { ...tiny, mode: "array", header: false, skipEmpty: false } as const
+
+			const windowed = await CSVSpliterator.fromAsync(source(), init).toArray()
+			const rows = await CSVSpliterator.fromAsync(source(), { ...init, columnScan: "rows" }).toArray()
+
+			expect(windowed).toEqual(rows)
+			expect(windowed).toEqual([["h"], [""], [""], ["a"], [""], ["b"], [""], [""]])
+		})
+
+		test("an early exit closes the streaming source", async ({ expect }) => {
+			let closed = false
+
+			const source = {
+				async *[Symbol.asyncIterator]() {
+					try {
+						yield encoder.encode("name,age\nAda,36\nBob,41\n")
+						yield encoder.encode("Cy,52\n")
+					} finally {
+						closed = true
+					}
+				},
+			}
+
+			const first = await CSVSpliterator.fromAsync(source, { bulkThreshold: 0 }).take(1).toArray()
+
+			expect(first).toEqual([{ name: "Ada", age: "36" }])
+			expect(closed).toBe(true)
+		})
 	})
 
 	test("drop and take on the async bulk path keep fromAsync's callback order", async ({ expect }) => {

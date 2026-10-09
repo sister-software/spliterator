@@ -297,12 +297,12 @@ For information on all available commands, run `spliterator --help`.
 
 The question that predicts the answer is not "how big is my file?" — it's **how much work happens per row.**
 
-| Per-row work                                                 | What dominates | Reach for                                                                                           |
-| ------------------------------------------------------------ | -------------- | --------------------------------------------------------------------------------------------------- |
-| None — counting, segmenting, pulling a couple of fields      | The scan       | `Spliterator` raw byte ranges. The SIMD scanner earns its keep here (~5–6 GB/s vs ~600 MB/s for JS) |
-| ~1–3 µs — `JSON.parse`, CSV → object, string normalize       | The parse      | Plain sequential `fromAsync`. Threads **lose** here (0.3–0.9×); JSONL runs ~0.5× of `readline`      |
-| Milliseconds — model inference, geocoding, crypto, image ops | Your handler   | `parallelMapWorkers`, or `AsyncSpliterator.asManyWorkers` for one large file                        |
-| I/O-bound — file fan-out, network                            | Latency        | `parallelMap` (caller's thread). Concurrency peaks around 2–3, then **degrades**                    |
+| Per-row work                                                 | What dominates | Reach for                                                                                             |
+| ------------------------------------------------------------ | -------------- | ----------------------------------------------------------------------------------------------------- |
+| None — counting, segmenting, pulling a couple of fields      | The scan       | `Spliterator` raw byte ranges. The SIMD scanner earns its keep here (~5–6 GB/s vs ~600 MB/s for JS)   |
+| ~1–3 µs — `JSON.parse`, CSV → object, string normalize       | The parse      | Plain sequential `fromAsync`. Threads **lose** here (0.3–0.9×); JSONL runs about even with `readline` |
+| Milliseconds — model inference, geocoding, crypto, image ops | Your handler   | `parallelMapWorkers`, or `AsyncSpliterator.asManyWorkers` for one large file                          |
+| I/O-bound — file fan-out, network                            | Latency        | `parallelMap` (caller's thread). Concurrency peaks around 2–3, then **degrades**                      |
 
 The line worth internalizing: **the scan is almost never your bottleneck unless you aren't parsing.** Measure before adopting a parallel primitive.
 
@@ -373,6 +373,103 @@ Two things follow from workers being reused, both of them the point rather than 
 - **`workerData` belongs to the pool**, fixed when it spawns a worker. Passing it per call alongside `pool` throws rather than being silently ignored.
 
 A pool smaller than `concurrency` bounds the real parallelism — segments queue for a worker instead of running at once, and `parallelMapWorkers` clamps to the pool's size. Dispose it when you are done, or bind it with `await using` as above.
+
+## Benchmarks
+
+Numbers from [uDSV's benchmark harness](https://github.com/leeoniya/uDSV/tree/main/bench), run unmodified: its
+runner, its adapters for the other parsers, and its timing metric (the geometric mean of parse time over
+three-second cycles, reported as MiB/s). Every parser produces arrays of strings, with no typing, trimming, or header
+handling. The harness gives each parser a string already in memory; the streaming tables read the file with each
+parser's own streaming API instead, retaining every row in the `(stream)` rows and discarding them in the
+`(stream, count)` rows. The `(stream, row count)` rows are spliterator-only and a different workload: they count
+rows without decoding columns — the scan-only path a pre-count or projection takes — so they are labeled apart
+from the full-parse counts rather than compared against them.
+
+Memory is the process's peak resident set over the whole run, less the baseline the runner reports before loading
+the parser. An in-memory run therefore includes the input string, which every parser is handed alike, and a retained
+run includes the result; the count rows show a parser's own working set. Bars are relative to the largest value in
+their column.
+
+| Date    | Hardware                                | Node    |
+| ------- | --------------------------------------- | ------- |
+| 2026-10 | AMD Ryzen 9 8945HS, 29 GB RAM, NVMe SSD | v26.2.0 |
+
+`litmus_quoted.csv` is uDSV's generated 20-column file, every cell quoted. The other two are public datasets:
+[CMS Open Payments](https://openpaymentsdata.cms.gov/) covered-recipient profiles (386 MiB, 32 columns, quoted) and
+address tuples derived from
+[HM Land Registry Price Paid](https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads)
+(1.4 GiB, 6 columns, quoted), which only streams because it is past V8's string limit. A parser whose row count
+disagreed with uDSV's by more than the harness tolerates is listed with that error rather than timed.
+
+**litmus_quoted.csv (1.8 MiB, 10K rows), in-memory string**
+
+| Name              | Throughput (MiB/s)                           | Peak RSS above baseline (MiB)                |
+| ----------------- | -------------------------------------------- | -------------------------------------------- |
+| csv-simple-parser | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 387 | ░░░░░░░░░░░░ 57                              |
+| uDSV              | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 371   | ░░░░░░░░░░░░ 58                              |
+| spliterator       | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 288           | ░░░░░░░░░░░░░░░░░░░░ 96                      |
+| but-csv           | ░░░░░░░░░░░░░░░░░░░ 187                      | ░░░░░░░░░░░░░░░░░░░░░░░ 112                  |
+| d3-dsv            | ░░░░░░░░░░ 95.5                              | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 196 |
+| PapaParse         | ░░░░░░░░ 72.7                                | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 192  |
+
+**litmus_quoted.csv (1.8 MiB, 10K rows), streamed from file**
+
+| Name                                        | Throughput (MiB/s)                           | Peak RSS above baseline (MiB)                |
+| ------------------------------------------- | -------------------------------------------- | -------------------------------------------- |
+| spliterator (stream, row count)             | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 715 | ░░░░ 53                                      |
+| spliterator (stream, row count, 16 workers) | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 669    | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 474 |
+| uDSV (stream, count)                        | ░░░░░░░░░░░░░░ 249                           | ░░░░░░░░░░░░░ 153                            |
+| uDSV (stream)                               | ░░░░░░░░░░░░░ 231                            | ░░░░░░░░░░░░░░░░░ 202                        |
+| spliterator (stream, count)                 | ░░░░░░░░░░░ 199                              | ░░░░░░░ 84                                   |
+| spliterator (stream)                        | ░░░░░░░░░░ 178                               | ░░░░░░░░░░░░░ 158                            |
+| PapaParse (stream, count)                   | ░░░░░ 89.2                                   | ░░░░░░ 72                                    |
+| PapaParse (stream)                          | ░░░░ 66                                      | ░░░░░░░░░░░░░░░░░ 203                        |
+
+**openpayments_covered-recipient-profile_20260603.csv (386 MiB, 1.7M rows), in-memory string**
+
+| Name              | Throughput (MiB/s)                                  | Peak RSS above baseline (MiB)                  |
+| ----------------- | --------------------------------------------------- | ---------------------------------------------- |
+| uDSV              | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 163        | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 3.82K |
+| d3-dsv            | ░░░░░░░░░░░░░░░░░░░░░░░░ 95.6                       | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 2.86K           |
+| spliterator       | ░░░░░░░░░░░░░░░░░░░░░ 87.2                          | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 2.93K          |
+| PapaParse         | Wrong row count! Expected: 1697026, Actual: 1697027 |                                                |
+| csv-simple-parser | Wrong row count! Expected: 1697026, Actual: 1697027 |                                                |
+| but-csv           | Wrong row count! Expected: 1697026, Actual: 1697027 |                                                |
+
+**openpayments_covered-recipient-profile_20260603.csv (386 MiB, 1.7M rows), streamed from file**
+
+| Name                                        | Throughput (MiB/s)                             | Peak RSS above baseline (MiB)                  |
+| ------------------------------------------- | ---------------------------------------------- | ---------------------------------------------- |
+| spliterator (stream, row count, 16 workers) | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 2.01K | ░░░░░░ 575                                     |
+| spliterator (stream, row count)             | ░░░░░░░░░░░░░░░░░░░░░░ 1.09K                   | 33                                             |
+| uDSV (stream, count)                        | ░░░░░░ 310                                     | ░ 140                                          |
+| spliterator (stream, count)                 | ░░░░░░ 285                                     | ░ 90                                           |
+| PapaParse (stream, count)                   | ░░░░ 193                                       | ░ 83                                           |
+| spliterator (stream)                        | ░░ 119                                         | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 3.42K     |
+| PapaParse (stream)                          | ░░ 93.1                                        | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 3.75K |
+| uDSV (stream)                               | ░ 70.8                                         | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 3.65K  |
+
+**gb-tuples.csv (1.42 GiB), streamed from file**
+
+| Name                                        | Throughput (MiB/s)                           | Peak RSS above baseline (MiB)                |
+| ------------------------------------------- | -------------------------------------------- | -------------------------------------------- |
+| spliterator (stream, row count, 16 workers) | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 721 | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 532 |
+| spliterator (stream, row count)             | ░░░░░░░░░░░░░░░░░░░░░░ 393                   | ░░░ 46                                       |
+| uDSV (stream, count)                        | ░░░░░░░░░░░░░░░ 271                          | ░░░░░░░░░░░░░░░ 131                          |
+| spliterator (stream, count)                 | ░░░░░░░░░░ 174                               | ░░░░░░░░ 101                                 |
+| PapaParse (stream, count)                   | ░░░░░░░ 118                                  | ░░░░░░ 75                                    |
+
+CSV into arrays of strings is parse-bound, and on that work spliterator is mid-pack: uDSV generates a parser per
+schema and slices one decoded string, and nothing byte-oriented will catch that. The row-count rows are what the
+same engine does when cells are never produced — the byte-range scanner at SIMD speed, sequential, and then split
+across worker threads with `AsyncSpliterator.segments`. Segments align on the record delimiter without regard to
+quote state, so the parallel count assumes no quoted field contains a newline; both rows are verified against the
+sequential parser on every dataset above. See [Choosing a primitive](#choosing-a-primitive) for where each of
+those pays.
+
+To rerun: `benchmarks/udsv/sweep.ts` drives the harness from a sibling uDSV checkout and writes
+`benchmarks/udsv/results.json`; `benchmarks/udsv/render.ts` prints the tables above from it. Setup is in the header
+of the sweep script.
 
 ## Under the hood
 

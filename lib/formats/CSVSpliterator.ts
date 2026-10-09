@@ -10,9 +10,16 @@ import {
 	Delimiters,
 	normalizeCharacterInput,
 } from "#core/CharacterSequence"
-import { Spliterator, type SpliteratorInit } from "#core/Spliterator"
+import { AsyncSpliterator, Spliterator, type SpliteratorInit } from "#core/Spliterator"
 import { normalizeColumnNames } from "#formats/casing"
-import { cellScanEligibility, decodeForCellScan, scanCsvCells } from "#formats/csv-cells"
+import {
+	cellScanEligibility,
+	decodeForCellScan,
+	reheadBatches,
+	scanCsvCellBatches,
+	scanCsvCells,
+	scanCsvCellsStreaming,
+} from "#formats/csv-cells"
 import { splitRowColumns } from "#formats/csv-columns"
 import {
 	bindTransformers,
@@ -27,7 +34,7 @@ import {
 } from "#formats/row-emitters"
 import type { AsyncChunkIterator, AsyncDataResource } from "#internal/shared"
 import { type AdaptiveSourceInit, openDelimitedRows } from "#io/adaptive-source"
-import { AsyncSequence } from "#iterators/AsyncSequence"
+import { AsyncSequence, BATCHED_SOURCE, type BatchedAsyncIterable } from "#iterators/AsyncSequence"
 import { Sequence } from "#iterators/Sequence"
 
 export type { RowTuple } from "#formats/row-emitters"
@@ -151,10 +158,16 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 	if (plan && take <= 0 && !header) return
 
 	// The scanner loads asynchronously; a synchronous caller sees it only if something awaited `whenReady()` first.
-	const text = plan && CharacterSequence.hasScanner() ? decodeForCellScan(bytes) : null
+	//
+	// A string source is already the text the cells are sliced from. Encoding it produced `bytes`, so they are valid
+	// UTF-8 and the kernel's UTF-16 offsets land on the string the caller passed: a lone surrogate encodes as the three
+	// bytes of U+FFFD, one unit either way. Decoding here would cost a second copy of the source for every parse, and
+	// the retained cells would keep that copy alive rather than the caller's own string.
+	const text =
+		plan && CharacterSequence.hasScanner() ? (typeof source === "string" ? source : decodeForCellScan(bytes)) : null
 
 	if (plan && text !== null) {
-		const cellRows = scanCsvCells(bytes, text, {
+		const batches = scanCsvCellBatches(bytes, text, {
 			rowDelimiter: plan.rowDelimiter,
 			columnDelimiter: plan.columnDelimiter,
 			enableQuoteHandling,
@@ -163,28 +176,32 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 			skipEmpty: rowInit.skipEmpty ?? true,
 		})
 
-		if (header) {
-			const result = cellRows.next()
+		let headerPending = header
 
-			if (result.done) return
+		// One generator layer per row, not two: the batches are walked here rather than through a flattening generator.
+		for (const batch of batches) {
+			for (const columns of batch) {
+				if (headerPending) {
+					const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
 
-			const headers = normalizeKeys ? normalizeColumnNames(result.value) : result.value
+					transformers = bindTransformers(headers, transformersInput)
+					headerPending = false
 
-			transformers = bindTransformers(headers, transformersInput)
-		}
+					continue
+				}
 
-		for (const columns of cellRows) {
-			if (yieldCount < drop) {
+				if (yieldCount < drop) {
+					yieldCount++
+
+					continue
+				}
+
+				if (yieldCount >= yieldLimit) return
+
+				yield emitter ? emitter(columns, transformers) : columns
+
 				yieldCount++
-
-				continue
 			}
-
-			if (yieldCount >= yieldLimit) break
-
-			yield emitter ? emitter(columns, transformers) : columns
-
-			yieldCount++
 		}
 
 		return
@@ -482,18 +499,95 @@ export abstract class CSVSpliterator {
 		const toColumns = (row: Uint8Array | string[]): string[] =>
 			Array.isArray(row) ? row : splitRowColumns(row, columnDelimiter, decoder, enableQuoteHandling, trim)
 
-		const openRows = async (): Promise<AsyncIterable<Uint8Array> | Iterable<Uint8Array | string[]>> => {
+		/**
+		 * The streaming counterpart of the bulk branch: the same eligibility, minus the size cap and `position`, which the
+		 * engine has already applied by the time it hands out a window. Returns the rows as the engine gave them when the
+		 * cell scanner does not apply.
+		 */
+		const scanWindows = (
+			rows: AsyncIterable<Uint8Array> | Iterable<Uint8Array | string[]>
+		): AsyncIterable<Uint8Array | string[]> | BatchedAsyncIterable<string[]> | Iterable<Uint8Array | string[]> => {
+			if (!(rows instanceof AsyncSpliterator) || !CharacterSequence.hasScanner()) return rows
+
+			const plan = cellScanEligibility({
+				columnScan,
+				rowDelimiter,
+				columnDelimiter,
+				enableQuoteHandling,
+				position: undefined,
+				byteLength: 0,
+			})
+
+			if (!plan) return rows
+
+			return scanCsvCellsStreaming(
+				rows,
+				{
+					rowDelimiter: plan.rowDelimiter,
+					columnDelimiter: plan.columnDelimiter,
+					enableQuoteHandling,
+					crlf,
+					trim,
+					skipEmpty,
+				},
+				(window) => {
+					const fallbackRows: string[][] = []
+
+					for (const row of Spliterator.fromSync(window, {
+						...rowInit,
+						position: undefined,
+						crlf,
+						enableQuoteHandling,
+					})) {
+						fallbackRows.push(toColumns(row))
+					}
+
+					return fallbackRows
+				}
+			)
+		}
+
+		const openRows = async (): Promise<
+			AsyncIterable<Uint8Array | string[]> | BatchedAsyncIterable<string[]> | Iterable<Uint8Array | string[]>
+		> => {
 			// Quote handling applies at both levels: rows must not split on newlines inside quotes,
 			// columns must not split on quoted column delimiters.
-			const rows = await openDelimitedRows(source, { ...rowInit, crlf, enableQuoteHandling }, bulkParser)
+			const opened = await openDelimitedRows(source, { ...rowInit, crlf, enableQuoteHandling }, bulkParser)
+
+			// The bulk branch awaits the scanner inside `openDelimitedRows`; the streaming branch has to do it here, or a
+			// fresh process would take the row path for every file on its first parse.
+			await CharacterSequence.whenReady()
+
+			const rows = scanWindows(opened)
 
 			if (header) {
 				// Both engines return `this` from their iterator method. Consuming the header row here advances the cursor the
-				// row ops will read. Returning `rows` afterwards resumes at row two rather than row one.
+				// row ops will read. Returning `rows` afterwards resumes at row two rather than row one. The windowed scanner
+				// hands out batches instead, so its first batch loses its head row and the remainder is put back in front.
 				const iterator = Symbol.asyncIterator in rows ? rows[Symbol.asyncIterator]() : rows[Symbol.iterator]()
 
 				try {
-					const result = await iterator.next()
+					if (BATCHED_SOURCE in rows) {
+						const batches = iterator as AsyncIterator<string[][]>
+						let result = await batches.next()
+
+						while (!result.done && !result.value.length) {
+							result = await batches.next()
+						}
+
+						if (result.done) return rows
+
+						const [columns, ...remainder] = result.value
+						const headers = normalizeKeys ? normalizeColumnNames(columns!) : columns!
+
+						transformers = bindTransformers(headers, transformersInput)
+
+						return reheadBatches(remainder, batches)
+					}
+
+					const result = await (
+						iterator as AsyncIterator<Uint8Array | string[]> | Iterator<Uint8Array | string[]>
+					).next()
 
 					if (result.done) return rows
 

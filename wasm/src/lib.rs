@@ -305,12 +305,18 @@ const CELL_RESULT_HEADER: usize = 5;
 const CELL_RESULT_STRIDE: usize = 3;
 const CELL_FLAG_ROW_END: i32 = 1;
 const CELL_FLAG_HAS_QUOTE: i32 = 2;
+const CELL_FLAG_HAS_ESCAPE: i32 = 4;
 
 /// Resumable single-pass CSV cell scan. Emits `[start, end, flags]` per cell in UTF-16 code
 /// units relative to the window's unit base, tracking quote state and counting units from the
 /// UTF-8 lead-byte pattern. See docs/superpowers/specs/2026-09-27-csv-bulk-cell-scan-design.md.
 ///
-/// Results block (i32): [cursor, units, inside_quotes, cell_start_units, cell_has_quote, cells...]
+/// `flags` carries `HAS_QUOTE` for any quote byte in the cell and `HAS_ESCAPE` when a quote
+/// opened directly after another quote, which is a doubled quote inside a quoted field. The
+/// consumer skips its own search for `""` on every cell without `HAS_ESCAPE`.
+///
+/// Results block (i32): [cursor, units, inside_quotes, cell_start_units, cell_flags, cells...]
+/// where `cell_flags` is the open cell's `HAS_QUOTE | HAS_ESCAPE`, carried across calls.
 #[no_mangle]
 pub unsafe extern "C" fn scan_csv_cells(
     haystack_offset: usize,
@@ -321,7 +327,7 @@ pub unsafe extern "C" fn scan_csv_cells(
     crlf: i32,
     inside_quotes: i32,
     cell_start_units: i32,
-    cell_has_quote: i32,
+    cell_flags: i32,
     previous_byte: i32,
     results_offset: usize,
     max_cells: usize,
@@ -338,7 +344,8 @@ pub unsafe extern "C" fn scan_csv_cells(
     let mut units: i32 = 0;
     let mut quoted = inside_quotes != 0;
     let mut cell_start = cell_start_units;
-    let mut has_quote = cell_has_quote != 0;
+    let mut has_quote = cell_flags & CELL_FLAG_HAS_QUOTE != 0;
+    let mut has_escape = cell_flags & CELL_FLAG_HAS_ESCAPE != 0;
     let mut count = 0usize;
 
     let row_splat = i8x16_splat(row_byte as i8);
@@ -370,6 +377,7 @@ pub unsafe extern "C" fn scan_csv_cells(
         max_cells: usize,
         cell_start: &mut i32,
         has_quote: &mut bool,
+        has_escape: &mut bool,
         units_at: i32,
         end_units: i32,
         row_end: bool,
@@ -391,6 +399,10 @@ pub unsafe extern "C" fn scan_csv_cells(
             flags |= CELL_FLAG_HAS_QUOTE;
         }
 
+        if *has_escape {
+            flags |= CELL_FLAG_HAS_ESCAPE;
+        }
+
         *results.add(base) = *cell_start;
         *results.add(base + 1) = end_units;
         *results.add(base + 2) = flags;
@@ -398,6 +410,7 @@ pub unsafe extern "C" fn scan_csv_cells(
         // The delimiter is one ASCII byte, one unit.
         *cell_start = units_at + 1;
         *has_quote = false;
+        *has_escape = false;
 
         true
     }
@@ -424,6 +437,14 @@ pub unsafe extern "C" fn scan_csv_cells(
         } else {
             units_at
         }
+    }
+
+    // Whether the byte before `offset` is the quote byte, reading the carried byte at the window's edge.
+    #[inline(always)]
+    unsafe fn quote_before(haystack: *const u8, offset: usize, previous_byte: i32, quote_byte: u8) -> bool {
+        let before = if offset == 0 { previous_byte } else { *haystack.add(offset - 1) as i32 };
+
+        before == quote_byte as i32
     }
 
     while cursor + 16 <= haystack_len {
@@ -457,19 +478,24 @@ pub unsafe extern "C" fn scan_csv_cells(
                         units_at
                     };
 
-                    if !close_cell(results, &mut count, max_cells, &mut cell_start, &mut has_quote, units_at, end_units, is_row) {
-                        write_cell_scan_state(results, offset, units_at, quoted, cell_start, has_quote);
+                    if !close_cell(results, &mut count, max_cells, &mut cell_start, &mut has_quote, &mut has_escape, units_at, end_units, is_row) {
+                        write_cell_scan_state(results, offset, units_at, quoted, cell_start, has_quote, has_escape);
                         return count;
                     }
 
                     if count >= max_cells {
                         // The result buffer is now full. The cursor is immediately after the
                         // delimiter that filled it — one ASCII byte, one unit past this position.
-                        write_cell_scan_state(results, offset + 1, units_at + 1, quoted, cell_start, has_quote);
+                        write_cell_scan_state(results, offset + 1, units_at + 1, quoted, cell_start, has_quote, has_escape);
                         return count;
                     }
                 }
             } else {
+                // A quote that opens right after a quote is the second half of a doubled quote.
+                if !quoted && quote_before(haystack, offset, previous_byte, quote_byte) {
+                    has_escape = true;
+                }
+
                 quoted = !quoted;
                 has_quote = true;
             }
@@ -494,14 +520,18 @@ pub unsafe extern "C" fn scan_csv_cells(
                     units
                 };
 
-                if !close_cell(results, &mut count, max_cells, &mut cell_start, &mut has_quote, units, end_units, is_row) {
-                    write_cell_scan_state(results, cursor, units, quoted, cell_start, has_quote);
+                if !close_cell(results, &mut count, max_cells, &mut cell_start, &mut has_quote, &mut has_escape, units, end_units, is_row) {
+                    write_cell_scan_state(results, cursor, units, quoted, cell_start, has_quote, has_escape);
                     return count;
                 }
 
                 just_filled = count >= max_cells;
             }
         } else if quote_enabled && byte == quote_byte {
+            if !quoted && quote_before(haystack, cursor, previous_byte, quote_byte) {
+                has_escape = true;
+            }
+
             quoted = !quoted;
             has_quote = true;
         }
@@ -512,12 +542,12 @@ pub unsafe extern "C" fn scan_csv_cells(
         if just_filled {
             // The result buffer is now full. The cursor is immediately after the delimiter
             // that filled it, which was just accounted for above.
-            write_cell_scan_state(results, cursor, units, quoted, cell_start, has_quote);
+            write_cell_scan_state(results, cursor, units, quoted, cell_start, has_quote, has_escape);
             return count;
         }
     }
 
-    write_cell_scan_state(results, haystack_len, units, quoted, cell_start, has_quote);
+    write_cell_scan_state(results, haystack_len, units, quoted, cell_start, has_quote, has_escape);
     count
 }
 
@@ -529,12 +559,13 @@ unsafe fn write_cell_scan_state(
     inside_quotes: bool,
     cell_start_units: i32,
     cell_has_quote: bool,
+    cell_has_escape: bool,
 ) {
     *results = cursor as i32;
     *results.add(1) = units;
     *results.add(2) = if inside_quotes { 1 } else { 0 };
     *results.add(3) = cell_start_units;
-    *results.add(4) = if cell_has_quote { 1 } else { 0 };
+    *results.add(4) = (if cell_has_quote { CELL_FLAG_HAS_QUOTE } else { 0 }) | (if cell_has_escape { CELL_FLAG_HAS_ESCAPE } else { 0 });
 }
 
 /// SIMD double-scan: both patterns are single-byte.

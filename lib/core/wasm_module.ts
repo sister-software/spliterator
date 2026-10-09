@@ -78,7 +78,7 @@ type WasmScanCsvCells = (
 	crlf: number,
 	insideQuotes: number,
 	cellStartUnits: number,
-	cellHasQuote: number,
+	cellFlags: number,
 	previousByte: number,
 	ro: number,
 	mc: number
@@ -128,6 +128,11 @@ export const CELL_RESULT_HEADER = 5
 export const CELL_RESULT_STRIDE = 3
 export const CELL_FLAG_ROW_END = 1
 export const CELL_FLAG_HAS_QUOTE = 2
+/**
+ * The cell held a quote that opened directly after another quote: a doubled quote inside a quoted field. A cell without
+ * it needs no search for `""`.
+ */
+export const CELL_FLAG_HAS_ESCAPE = 4
 
 /**
  * State returned by the bounded, resumable range scanner.
@@ -144,13 +149,18 @@ export interface WasmRangeScanResult {
 }
 
 /**
- * One owned batch from the CSV cell scanner, rebased to absolute offsets by `CharacterSequence.scanCells`.
+ * One batch from the CSV cell scanner, as `CharacterSequence.scanCells` returns it.
  */
 export interface WasmCellScanResult {
 	/**
-	 * `[start, end, flags]` triples in UTF-16 units of the decoded source. A copy, safe to hold across further scans.
+	 * `[start, end, flags]` triples, `start` and `end` in UTF-16 units relative to `unitBase`. A view of shared WASM
+	 * memory: consume it before the next scanner call.
 	 */
 	cells: Int32Array
+	/**
+	 * Absolute UTF-16 units at the window's start; add it to each cell's `start` and `end`.
+	 */
+	unitBase: number
 	count: number
 	/**
 	 * Absolute byte offset the scan stopped at.
@@ -165,5 +175,8 @@ export interface WasmCellScanResult {
 	 * Absolute UTF-16 start of the cell open at `scanCursor`.
 	 */
 	cellStartUnits: number
-	cellHasQuote: boolean
+	/**
+	 * `CELL_FLAG_HAS_QUOTE | CELL_FLAG_HAS_ESCAPE` of the open cell.
+	 */
+	cellFlags: number
 }

@@ -37,13 +37,19 @@ describe("WASM SIMD scanner", () => {
 	let CELL_RESULT_STRIDE: number
 	let CELL_FLAG_ROW_END: number
 	let CELL_FLAG_HAS_QUOTE: number
+	let CELL_FLAG_HAS_ESCAPE: number
 
 	beforeAll(async () => {
 		const wasmModulePath = "../../out/lib/core/wasm_module"
 
-		;({ loadWasmModule, CELL_RESULT_HEADER, CELL_RESULT_STRIDE, CELL_FLAG_ROW_END, CELL_FLAG_HAS_QUOTE } = await import(
-			wasmModulePath
-		))
+		;({
+			loadWasmModule,
+			CELL_RESULT_HEADER,
+			CELL_RESULT_STRIDE,
+			CELL_FLAG_ROW_END,
+			CELL_FLAG_HAS_QUOTE,
+			CELL_FLAG_HAS_ESCAPE,
+		} = await import(wasmModulePath))
 	})
 
 	test("whenReady() resolves true once the SIMD scanner is loaded", async () => {
@@ -438,7 +444,7 @@ describe("WASM SIMD scanner", () => {
 				crlf = 1,
 				insideQuotes = 0,
 				cellStartUnits = 0,
-				cellHasQuote = 0,
+				cellFlags = 0,
 				previousByte = -1,
 				maxCells = 64,
 			} = {}
@@ -465,7 +471,7 @@ describe("WASM SIMD scanner", () => {
 				crlf,
 				insideQuotes,
 				cellStartUnits,
-				cellHasQuote,
+				cellFlags,
 				previousByte,
 				resultsOffset,
 				maxCells
@@ -485,7 +491,7 @@ describe("WASM SIMD scanner", () => {
 				units: block[1]!,
 				insideQuotes: block[2]!,
 				cellStartUnits: block[3]!,
-				cellHasQuote: block[4]!,
+				cellFlags: block[4]!,
 				cells,
 			}
 		}
@@ -499,7 +505,7 @@ describe("WASM SIMD scanner", () => {
 				[5, 7, 0],
 			])
 
-			expect(result).toMatchObject({ cursor: 9, units: 9, insideQuotes: 0, cellStartUnits: 8, cellHasQuote: 0 })
+			expect(result).toMatchObject({ cursor: 9, units: 9, insideQuotes: 0, cellStartUnits: 8, cellFlags: 0 })
 		})
 
 		test("a delimiter inside quotes is data, and the cell is flagged", async () => {
@@ -602,9 +608,19 @@ describe("WASM SIMD scanner", () => {
 		test("carries an open quoted cell across calls", async () => {
 			const first = await scan(encoder.encode('"ab'))
 
-			expect(first).toMatchObject({ cursor: 3, units: 3, insideQuotes: 1, cellStartUnits: 0, cellHasQuote: 1 })
+			expect(first).toMatchObject({
+				cursor: 3,
+				units: 3,
+				insideQuotes: 1,
+				cellStartUnits: 0,
+				cellFlags: CELL_FLAG_HAS_QUOTE,
+			})
 
-			const second = await scan(encoder.encode('c",d\n'), { insideQuotes: 1, cellStartUnits: -3, cellHasQuote: 1 })
+			const second = await scan(encoder.encode('c",d\n'), {
+				insideQuotes: 1,
+				cellStartUnits: -3,
+				cellFlags: CELL_FLAG_HAS_QUOTE,
+			})
 
 			expect(second.cells).toEqual([
 				[-3, 2, CELL_FLAG_HAS_QUOTE],
@@ -621,12 +637,41 @@ describe("WASM SIMD scanner", () => {
 			])
 		})
 
+		test("a doubled quote marks the cell escaped; an empty quoted cell is only quoted", async () => {
+			const result = await scan(encoder.encode('"a""b","",c\n'))
+
+			expect(result.cells).toEqual([
+				[0, 6, CELL_FLAG_HAS_QUOTE | CELL_FLAG_HAS_ESCAPE],
+				[7, 9, CELL_FLAG_HAS_QUOTE],
+				[10, 11, CELL_FLAG_ROW_END],
+			])
+		})
+
+		test("a doubled quote split by the window edge is seen through the carried byte", async () => {
+			// The window before this one ended on the first quote of `""`, so it closed the field and reported no escape.
+			const result = await scan(encoder.encode('"b",c\n'), {
+				insideQuotes: 0,
+				cellStartUnits: -3,
+				cellFlags: CELL_FLAG_HAS_QUOTE,
+				previousByte: 0x22,
+			})
+
+			expect(result.cells).toEqual([
+				[-3, 3, CELL_FLAG_HAS_QUOTE | CELL_FLAG_HAS_ESCAPE],
+				[4, 5, CELL_FLAG_ROW_END],
+			])
+		})
+
 		test("a window longer than 16 bytes with matches in every vector agrees with a scalar oracle", async () => {
 			// Quoted items must not embed a real comma: the oracle below splits on every comma in
 			// the raw text without tracking quote state, which is only valid when no quoted item's
 			// span actually contains one (quote-inside-comma masking has its own dedicated test
 			// above). This test's job is vector-boundary agreement across 200 varying-length items.
-			const text = Array.from({ length: 200 }, (_, i) => (i % 3 === 0 ? `"q${i}x"` : `c${i}é`)).join(",") + "\n"
+			const text =
+				Array.from({ length: 200 }, (_, i) => (i % 6 === 0 ? `"q""${i}"` : i % 3 === 0 ? `"q${i}x"` : `c${i}é`)).join(
+					","
+				) + "\n"
+
 			const bytes = encoder.encode(text)
 			const result = await scan(bytes, { maxCells: 4096 })
 			const expected: Array<[number, number, number]> = []
@@ -636,7 +681,12 @@ describe("WASM SIMD scanner", () => {
 				if (text[i] === ",") {
 					const cell = text.slice(start, i)
 
-					expected.push([start, i, cell.includes('"') ? CELL_FLAG_HAS_QUOTE : 0])
+					expected.push([
+						start,
+						i,
+						(cell.includes('"') ? CELL_FLAG_HAS_QUOTE : 0) | (cell.includes('""') ? CELL_FLAG_HAS_ESCAPE : 0),
+					])
+
 					start = i + 1
 				}
 			}
@@ -648,13 +698,14 @@ describe("WASM SIMD scanner", () => {
 
 	describe("CharacterSequence.scanCells", () => {
 		const options = { rowDelimiter: 0x0a, columnDelimiter: 0x2c, quote: 0x22, crlf: true }
-		const initial = { scanCursor: 0, units: 0, insideQuotes: false, cellStartUnits: 0, cellHasQuote: false }
+		const initial = { scanCursor: 0, units: 0, insideQuotes: false, cellStartUnits: 0, cellFlags: 0 }
 
-		test("rebases a window's cells and state to absolute offsets", () => {
+		test("returns a window's cells relative to its unit base and the state in absolute offsets", () => {
 			const bytes = encoder.encode("é,a\nbb,c")
 			// Scan the first row only, then resume.
 			const first = CharacterSequence.scanCells(bytes, initial, 5, options)!
 
+			expect(first.unitBase).toBe(0)
 			expect(Array.from(first.cells)).toEqual([0, 1, 0, 2, 3, CELL_FLAG_ROW_END])
 
 			expect(first).toMatchObject({
@@ -662,12 +713,13 @@ describe("WASM SIMD scanner", () => {
 				units: 4,
 				insideQuotes: false,
 				cellStartUnits: 4,
-				cellHasQuote: false,
+				cellFlags: 0,
 			})
 
 			const second = CharacterSequence.scanCells(bytes, first, bytes.length, options)!
 
-			expect(Array.from(second.cells)).toEqual([4, 6, 0])
+			expect(second.unitBase).toBe(4)
+			expect(Array.from(second.cells)).toEqual([0, 2, 0])
 			expect(second).toMatchObject({ scanCursor: 9, units: 8, cellStartUnits: 7 })
 		})
 
@@ -682,12 +734,14 @@ describe("WASM SIMD scanner", () => {
 				units: 4,
 				insideQuotes: true,
 				cellStartUnits: 2,
-				cellHasQuote: true,
+				cellFlags: CELL_FLAG_HAS_QUOTE,
 			})
 
 			const second = CharacterSequence.scanCells(bytes, first, bytes.length, options)!
 
-			expect(Array.from(second.cells)).toEqual([2, 7, CELL_FLAG_HAS_QUOTE, 8, 9, CELL_FLAG_ROW_END])
+			// The open cell began two units before this window, so its relative start is negative.
+			expect(second.unitBase).toBe(4)
+			expect(Array.from(second.cells)).toEqual([-2, 3, CELL_FLAG_HAS_QUOTE, 4, 5, CELL_FLAG_ROW_END])
 		})
 
 		test("supplies previous_byte so a CRLF split by the window is trimmed", () => {
@@ -698,17 +752,18 @@ describe("WASM SIMD scanner", () => {
 
 			const second = CharacterSequence.scanCells(bytes, first, bytes.length, options)!
 
-			expect(Array.from(second.cells)).toEqual([0, 2, CELL_FLAG_ROW_END, 4, 6, CELL_FLAG_ROW_END])
+			expect(second.unitBase).toBe(3)
+			expect(Array.from(second.cells)).toEqual([-3, -1, CELL_FLAG_ROW_END, 1, 3, CELL_FLAG_ROW_END])
 		})
 
-		test("returns an owned copy that survives a later scan", () => {
+		test("the batch is a view the next scan overwrites, so consumers finish it first", () => {
 			const bytes = encoder.encode("a,b\n")
 			const result = CharacterSequence.scanCells(bytes, initial, bytes.length, options)!
 			const snapshot = Array.from(result.cells)
 
 			CharacterSequence.scanCells(encoder.encode("zzzzzzzz,yyyyyyyy\n"), initial, 18, options)
 
-			expect(Array.from(result.cells)).toEqual(snapshot)
+			expect(Array.from(result.cells)).not.toEqual(snapshot)
 		})
 
 		test("honours maxCells and reports where it stopped", () => {

@@ -136,6 +136,15 @@ test("CSV: doubled quotes unescape", ({ expect }) => {
 	expect(rows).toEqual([{ h1: 'a"b', h2: "c" }])
 })
 
+test("CSV: the fused quoted walk agrees with unquoteColumn on the awkward shapes", ({ expect }) => {
+	// Empty quoted cell, doubled quote only, doubled quote after a plain cell, quotes mid-cell (left alone, since the
+	// cell does not begin with one), a doubled quote in the last cell, and an unterminated quote running to EOF.
+	const source = encoder.encode('"",""""\nx,"a""b"\na"b"c,d\n"e","f""g"\n"open,d')
+	const rows = Array.from(CSVSpliterator.from(source, { mode: "array", header: false, trim: false }))
+
+	expect(rows).toEqual([["", '"'], ["x", 'a"b'], ['a"b"c', "d"], ["e", 'f"g'], ['"open,d']])
+})
+
 test("CSV: empty fields preserved under quote handling", ({ expect }) => {
 	const source = encoder.encode('h1,h2,h3\n"a",,c\n')
 	const rows = Array.from(CSVSpliterator.from(source, { mode: "object", enableQuoteHandling: true }))

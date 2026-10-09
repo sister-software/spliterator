@@ -26,8 +26,17 @@ function decodeColumn(bytes: Uint8Array, decoder: TextDecoder, enableQuoteHandli
  * constant they both reference would not have proved that.
  */
 export function unquoteColumn(value: string): string {
-	if (value.length >= 2 && value.charCodeAt(0) === DOUBLE_QUOTE_CODE && value.endsWith('"')) {
-		return value.slice(1, -1).replaceAll('""', '"')
+	if (
+		value.length >= 2 &&
+		value.charCodeAt(0) === DOUBLE_QUOTE_CODE &&
+		value.charCodeAt(value.length - 1) === DOUBLE_QUOTE_CODE
+	) {
+		const inner = value.slice(1, -1)
+
+		// Most quoted cells escape nothing, and `replaceAll` costs a scan plus a copy even when it finds nothing. One
+		// `indexOf` is the cheaper way to learn that. Measured at 17% of a streamed quoted parse before this check. The
+		// cell-scan path does not come here: the kernel flags a doubled quote, so it slices the inside directly.
+		return inner.indexOf('""') === -1 ? inner : inner.replaceAll('""', '"')
 	}
 
 	return value
@@ -86,35 +95,71 @@ function delimiterAsString(columnDelimiter: CharacterSequence): string | null {
 }
 
 /**
- * Split one decoded row on `delimiter`, honouring double quotes.
+ * Split one decoded row on `delimiter`, honouring double quotes, and unquote each field in the same pass.
  *
  * Callers must establish that `line` contains a quote. {@linkcode splitRowColumns} does so and uses
  * `String.prototype.split` otherwise. A quote-free row cannot have a quoted field, so it needs no unquote pass. The
  * hoisted check lets the caller skip both operations. On a 12-column FCC availability file 96% of rows take that path.
+ *
+ * Unquoting here rather than over the split result is what keeps a fully quoted file close to the unquoted one: the
+ * two-pass form sliced each quoted cell and then sliced it again to drop the quotes, and ran `replaceAll` over every
+ * quoted cell to find that it had nothing to unescape. Measured over 1M rows of a six-column, every-cell-quoted file:
+ * 344ms two-pass, 243ms fused, against 185ms for `String.prototype.split` on the same rows. The walk notes whether a
+ * doubled quote was seen inside the cell and only then pays for `replaceAll`. Must agree with {@linkcode unquoteColumn},
+ * which the cell-scan path applies to the same fields.
  */
 function splitQuotedString(line: string, delimiter: string): string[] {
 	const columns: string[] = []
+	const length = line.length
+	const delimiterLength = delimiter.length
 	let sliceStart = 0
 	let index = 0
 	let insideQuotes = false
+	let sawDoubledQuote = false
 
-	while (index < line.length) {
+	while (index < length) {
 		if (line.charCodeAt(index) === DOUBLE_QUOTE_CODE) {
+			if (insideQuotes && line.charCodeAt(index + 1) === DOUBLE_QUOTE_CODE) {
+				sawDoubledQuote = true
+				index += 2
+
+				continue
+			}
+
 			insideQuotes = !insideQuotes
 
 			index++
 		} else if (!insideQuotes && line.startsWith(delimiter, index)) {
-			columns.push(line.slice(sliceStart, index))
-			index += delimiter.length
+			columns.push(unquoteSlice(line, sliceStart, index, sawDoubledQuote))
+			sawDoubledQuote = false
+			index += delimiterLength
 			sliceStart = index
 		} else {
 			index++
 		}
 	}
 
-	columns.push(line.slice(sliceStart))
+	columns.push(unquoteSlice(line, sliceStart, length, sawDoubledQuote))
 
 	return columns
+}
+
+/**
+ * The cell `[start, end)` of `line`, unquoted the way {@linkcode unquoteColumn} would unquote the slice, without first
+ * materializing the quoted slice.
+ */
+function unquoteSlice(line: string, start: number, end: number, sawDoubledQuote: boolean): string {
+	if (
+		end - start >= 2 &&
+		line.charCodeAt(start) === DOUBLE_QUOTE_CODE &&
+		line.charCodeAt(end - 1) === DOUBLE_QUOTE_CODE
+	) {
+		const inner = line.slice(start + 1, end - 1)
+
+		return sawDoubledQuote ? inner.replaceAll('""', '"') : inner
+	}
+
+	return line.slice(start, end)
 }
 
 /**
@@ -184,13 +229,7 @@ function splitRowColumnsRaw(
 		// the walk and the unquote pass.
 		if (!enableQuoteHandling || line.indexOf('"') === -1) return line.split(delimiter)
 
-		const columns = splitQuotedString(line, delimiter)
-
-		for (let i = 0; i < columns.length; i++) {
-			columns[i] = unquoteColumn(columns[i]!)
-		}
-
-		return columns
+		return splitQuotedString(line, delimiter)
 	}
 
 	// A delimiter that does not round-trip through UTF-8 keeps the byte scan, through the engine itself: a row is a

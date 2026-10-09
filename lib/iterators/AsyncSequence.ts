@@ -45,7 +45,49 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
 export type SequenceSource<T> =
 	| AsyncIterable<T>
 	| Iterable<T>
-	| (() => AsyncIterable<T> | Iterable<T> | PromiseLike<AsyncIterable<T> | Iterable<T>>)
+	| BatchedAsyncIterable<T>
+	| (() =>
+			| AsyncIterable<T>
+			| Iterable<T>
+			| BatchedAsyncIterable<T>
+			| PromiseLike<AsyncIterable<T> | Iterable<T> | BatchedAsyncIterable<T>>)
+
+/**
+ * Marks an async iterable whose items are arrays of elements to be yielded one at a time.
+ *
+ * A source that produces its elements in bulk, such as a scanner that splits a whole buffer window into rows, pays one
+ * `await` per batch instead of one per element when it hands the sequence the whole array. The pull loop in
+ * {@linkcode AsyncSequence.next} then walks the array synchronously, so a chain over a batched source costs what a chain
+ * over a synchronous iterator does between batches. Measured on a 300MB quoted CSV streamed through the cell scanner:
+ * yielding rows one at a time from an async generator was slower than the per-row path it replaced (4.8s against 3.2s),
+ * because every row still crossed an async boundary; the same rows handed over as batches took 2.9s, and 2.5s once
+ * `next` stopped awaiting the opener per pull. The per-row async boundary had been a third of the time.
+ *
+ * @internal
+ */
+export const BATCHED_SOURCE: unique symbol = Symbol("spliterator.batchedSource")
+
+/**
+ * An async iterable of batches that the sequence flattens one element at a time.
+ *
+ * @internal
+ */
+export interface BatchedAsyncIterable<T> extends AsyncIterable<readonly T[]> {
+	readonly [BATCHED_SOURCE]: true
+}
+
+/**
+ * Mark an async iterable of arrays as a batched source. The sequence yields each array's elements in order.
+ *
+ * @internal
+ */
+export function batched<T>(source: AsyncIterable<readonly T[]>): BatchedAsyncIterable<T> {
+	return Object.assign(source, { [BATCHED_SOURCE]: true as const })
+}
+
+function isBatched(source: object): source is BatchedAsyncIterable<unknown> {
+	return BATCHED_SOURCE in source
+}
 
 function toAsyncIterator<T>(source: AsyncIterable<T> | Iterable<T>): AsyncIterator<T> {
 	if (Symbol.asyncIterator in source) return source[Symbol.asyncIterator]()
@@ -323,6 +365,13 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T>, AsyncDisposab
 
 	#upstream: AsyncIterator<unknown> | null = null
 	#syncUpstream: Iterator<unknown> | null = null
+
+	/**
+	 * Set when the upstream is a {@linkcode BatchedAsyncIterable}: its results are arrays that `next` walks in place.
+	 */
+	#batched = false
+	#batch: readonly unknown[] | null = null
+	#batchIndex = 0
 	#counters: number[] | null = null
 	#budgets: number[] | null = null
 	#done = false
@@ -381,6 +430,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T>, AsyncDisposab
 			return this.#syncUpstream
 		}
 
+		this.#batched = isBatched(resolved)
 		this.#upstream = toAsyncIterator(resolved)
 
 		return this.#upstream
@@ -765,31 +815,59 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T>, AsyncDisposab
 			if (budgets[index]! <= 0) return this.#finish()
 		}
 
-		let upstream: AsyncIterator<unknown> | Iterator<unknown>
+		// Opening is async, but after the first pull the upstream is in hand. Awaiting the opener each time would put an
+		// async frame on every item; see the file header on what that costs.
+		let upstream: AsyncIterator<unknown> | Iterator<unknown> | null = this.#upstream ?? this.#syncUpstream
 
-		try {
-			upstream = await this.#openUpstream()
-		} catch (error) {
-			// A source that cannot open is not retried: the next pull reports done rather than invoking the thunk again.
-			this.#done = true
+		if (upstream === null) {
+			try {
+				upstream = await this.#openUpstream()
+			} catch (error) {
+				// A source that cannot open is not retried: the next pull reports done rather than invoking the thunk again.
+				this.#done = true
 
-			throw error
+				throw error
+			}
 		}
 
 		const isSync = upstream === this.#syncUpstream
 
 		try {
 			outer: for (;;) {
-				const pulled = upstream.next()
-				const result = isSync ? (pulled as IteratorResult<unknown>) : await pulled
+				let value: unknown
 
-				if (result.done) {
-					this.#done = true
+				if (this.#batched) {
+					// A batched upstream hands over arrays. Walk the current one without touching the event loop and pull
+					// the next only when it is spent; an empty batch is skipped the same way.
+					if (this.#batch === null || this.#batchIndex >= this.#batch.length) {
+						const result = await (upstream as AsyncIterator<readonly unknown[]>).next()
 
-					return { value: undefined, done: true }
+						if (result.done) {
+							this.#done = true
+							this.#batch = null
+
+							return { value: undefined, done: true }
+						}
+
+						this.#batch = result.value
+						this.#batchIndex = 0
+
+						if (!this.#batch.length) continue outer
+					}
+
+					value = this.#batch[this.#batchIndex++]
+				} else {
+					const pulled = upstream.next()
+					const result = isSync ? (pulled as IteratorResult<unknown>) : await pulled
+
+					if (result.done) {
+						this.#done = true
+
+						return { value: undefined, done: true }
+					}
+
+					value = result.value
 				}
-
-				let value: unknown = result.value
 
 				for (let i = 0; i < length; i++) {
 					const op = ops[i]!
@@ -867,6 +945,7 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T>, AsyncDisposab
 
 		this.#upstream = null
 		this.#syncUpstream = null
+		this.#batch = null
 
 		await upstream?.return?.()
 
