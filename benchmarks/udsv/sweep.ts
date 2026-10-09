@@ -88,7 +88,13 @@ const retainedParsers = [
 	"./streaming/untyped/retained/PapaParse.cjs",
 ]
 
-const countParsers = [adapters + "spliterator-count.js", adapters + "udsv-count.js", adapters + "papaparse-count.js"]
+const countParsers = [
+	adapters + "spliterator-count.js",
+	adapters + "spliterator-rows-count.js",
+	adapters + "spliterator-parallel-count.js",
+	adapters + "udsv-count.js",
+	adapters + "papaparse-count.js",
+]
 
 // The runner reads the whole file into a string unless the adapter path says otherwise. The count adapters never
 // need it, and the largest files cannot provide it, so a generated copy of the runner widens that test.

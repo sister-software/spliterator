@@ -381,7 +381,9 @@ runner, its adapters for the other parsers, and its timing metric (the geometric
 three-second cycles, reported as MiB/s). Every parser produces arrays of strings, with no typing, trimming, or header
 handling. The harness gives each parser a string already in memory; the streaming tables read the file with each
 parser's own streaming API instead, retaining every row in the `(stream)` rows and discarding them in the
-`(stream, count)` rows.
+`(stream, count)` rows. The `(stream, row count)` rows are spliterator-only and a different workload: they count
+rows without decoding columns — the scan-only path a pre-count or projection takes — so they are labeled apart
+from the full-parse counts rather than compared against them.
 
 Memory is the process's peak resident set over the whole run, less the baseline the runner reports before loading
 the parser. An in-memory run therefore includes the input string, which every parser is handed alike, and a retained
@@ -403,58 +405,67 @@ disagreed with uDSV's by more than the harness tolerates is listed with that err
 
 | Name              | Throughput (MiB/s)                           | Peak RSS above baseline (MiB)                |
 | ----------------- | -------------------------------------------- | -------------------------------------------- |
-| csv-simple-parser | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 394 | ░░░░░░░░░░░░ 58                              |
-| uDSV              | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 372   | ░░░░░░░░░░░░ 58                              |
-| spliterator       | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 288            | ░░░░░░░░░░░░░░░░░░░░ 96                      |
-| but-csv           | ░░░░░░░░░░░░░░░░░░░ 183                      | ░░░░░░░░░░░░░░░░░░░░░░░ 112                  |
-| d3-dsv            | ░░░░░░░░░░ 93.8                              | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 196 |
-| PapaParse         | ░░░░░░░░ 75                                  | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 192  |
+| csv-simple-parser | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 387 | ░░░░░░░░░░░░ 57                              |
+| uDSV              | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 371   | ░░░░░░░░░░░░ 58                              |
+| spliterator       | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 288           | ░░░░░░░░░░░░░░░░░░░░ 96                      |
+| but-csv           | ░░░░░░░░░░░░░░░░░░░ 187                      | ░░░░░░░░░░░░░░░░░░░░░░░ 112                  |
+| d3-dsv            | ░░░░░░░░░░ 95.5                              | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 196 |
+| PapaParse         | ░░░░░░░░ 72.7                                | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 192  |
 
 **litmus_quoted.csv (1.8 MiB, 10K rows), streamed from file**
 
-| Name                        | Throughput (MiB/s)                           | Peak RSS above baseline (MiB)                |
-| --------------------------- | -------------------------------------------- | -------------------------------------------- |
-| uDSV (stream, count)        | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 247 | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 155         |
-| uDSV (stream)               | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 226    | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 196 |
-| spliterator (stream, count) | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 197         | ░░░░░░░░░░░░░░░░░░░ 92                       |
-| spliterator (stream)        | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 176             | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 182    |
-| PapaParse (stream, count)   | ░░░░░░░░░░░░░░ 84.8                          | ░░░░░░░░░░░░░░ 71                            |
-| PapaParse (stream)          | ░░░░░░░░░░░ 66.5                             | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 190  |
+| Name                                        | Throughput (MiB/s)                           | Peak RSS above baseline (MiB)                |
+| ------------------------------------------- | -------------------------------------------- | -------------------------------------------- |
+| spliterator (stream, row count)             | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 715 | ░░░░ 53                                      |
+| spliterator (stream, row count, 16 workers) | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 669    | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 474 |
+| uDSV (stream, count)                        | ░░░░░░░░░░░░░░ 249                           | ░░░░░░░░░░░░░ 153                            |
+| uDSV (stream)                               | ░░░░░░░░░░░░░ 231                            | ░░░░░░░░░░░░░░░░░ 202                        |
+| spliterator (stream, count)                 | ░░░░░░░░░░░ 199                              | ░░░░░░░ 84                                   |
+| spliterator (stream)                        | ░░░░░░░░░░ 178                               | ░░░░░░░░░░░░░ 158                            |
+| PapaParse (stream, count)                   | ░░░░░ 89.2                                   | ░░░░░░ 72                                    |
+| PapaParse (stream)                          | ░░░░ 66                                      | ░░░░░░░░░░░░░░░░░ 203                        |
 
 **openpayments_covered-recipient-profile_20260603.csv (386 MiB, 1.7M rows), in-memory string**
 
 | Name              | Throughput (MiB/s)                                  | Peak RSS above baseline (MiB)                  |
 | ----------------- | --------------------------------------------------- | ---------------------------------------------- |
-| uDSV              | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 143        | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 3.82K |
-| d3-dsv            | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 103                   | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 2.86K           |
-| spliterator       | ░░░░░░░░░░░░░░░░░░░░░░░░ 84.6                       | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 2.94K          |
+| uDSV              | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 163        | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 3.82K |
+| d3-dsv            | ░░░░░░░░░░░░░░░░░░░░░░░░ 95.6                       | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 2.86K           |
+| spliterator       | ░░░░░░░░░░░░░░░░░░░░░ 87.2                          | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 2.93K          |
 | PapaParse         | Wrong row count! Expected: 1697026, Actual: 1697027 |                                                |
 | csv-simple-parser | Wrong row count! Expected: 1697026, Actual: 1697027 |                                                |
 | but-csv           | Wrong row count! Expected: 1697026, Actual: 1697027 |                                                |
 
 **openpayments_covered-recipient-profile_20260603.csv (386 MiB, 1.7M rows), streamed from file**
 
-| Name                        | Throughput (MiB/s)                           | Peak RSS above baseline (MiB)                  |
-| --------------------------- | -------------------------------------------- | ---------------------------------------------- |
-| uDSV (stream, count)        | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 314 | ░ 137                                          |
-| spliterator (stream, count) | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 285     | ░ 92                                           |
-| PapaParse (stream, count)   | ░░░░░░░░░░░░░░░░░░░░░░░░ 191                 | ░ 82                                           |
-| spliterator (stream)        | ░░░░░░░░░░░░░░ 109                           | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 3.37K     |
-| PapaParse (stream)          | ░░░░░░░░░░░ 88                               | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 3.71K |
-| uDSV (stream)               | ░░░░░░░░░ 69.9                               | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 3.61K  |
+| Name                                        | Throughput (MiB/s)                             | Peak RSS above baseline (MiB)                  |
+| ------------------------------------------- | ---------------------------------------------- | ---------------------------------------------- |
+| spliterator (stream, row count, 16 workers) | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 2.01K | ░░░░░░ 575                                     |
+| spliterator (stream, row count)             | ░░░░░░░░░░░░░░░░░░░░░░ 1.09K                   | 33                                             |
+| uDSV (stream, count)                        | ░░░░░░ 310                                     | ░ 140                                          |
+| spliterator (stream, count)                 | ░░░░░░ 285                                     | ░ 90                                           |
+| PapaParse (stream, count)                   | ░░░░ 193                                       | ░ 83                                           |
+| spliterator (stream)                        | ░░ 119                                         | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 3.42K     |
+| PapaParse (stream)                          | ░░ 93.1                                        | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 3.75K |
+| uDSV (stream)                               | ░ 70.8                                         | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 3.65K  |
 
 **gb-tuples.csv (1.42 GiB), streamed from file**
 
-| Name                        | Throughput (MiB/s)                           | Peak RSS above baseline (MiB)                |
-| --------------------------- | -------------------------------------------- | -------------------------------------------- |
-| uDSV (stream, count)        | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 277 | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 130 |
-| spliterator (stream, count) | ░░░░░░░░░░░░░░░░░░░░░░░░ 169                 | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 97            |
-| PapaParse (stream, count)   | ░░░░░░░░░░░░░░░░░░ 122                       | ░░░░░░░░░░░░░░░░░░░░░░░ 74                   |
+| Name                                        | Throughput (MiB/s)                           | Peak RSS above baseline (MiB)                |
+| ------------------------------------------- | -------------------------------------------- | -------------------------------------------- |
+| spliterator (stream, row count, 16 workers) | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 721 | ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 532 |
+| spliterator (stream, row count)             | ░░░░░░░░░░░░░░░░░░░░░░ 393                   | ░░░ 46                                       |
+| uDSV (stream, count)                        | ░░░░░░░░░░░░░░░ 271                          | ░░░░░░░░░░░░░░░ 131                          |
+| spliterator (stream, count)                 | ░░░░░░░░░░ 174                               | ░░░░░░░░ 101                                 |
+| PapaParse (stream, count)                   | ░░░░░░░ 118                                  | ░░░░░░ 75                                    |
 
 CSV into arrays of strings is parse-bound, and on that work spliterator is mid-pack: uDSV generates a parser per
-schema and slices one decoded string, and nothing byte-oriented will catch that. What this harness cannot show is
-what spliterator is for — raw byte-range scanning at SIMD speed, a bounded footprint on a file of any size, and the
-chainable sequence over the rows. See [Choosing a primitive](#choosing-a-primitive) for where each of those pays.
+schema and slices one decoded string, and nothing byte-oriented will catch that. The row-count rows are what the
+same engine does when cells are never produced — the byte-range scanner at SIMD speed, sequential, and then split
+across worker threads with `AsyncSpliterator.segments`. Segments align on the record delimiter without regard to
+quote state, so the parallel count assumes no quoted field contains a newline; both rows are verified against the
+sequential parser on every dataset above. See [Choosing a primitive](#choosing-a-primitive) for where each of
+those pays.
 
 To rerun: `benchmarks/udsv/sweep.ts` drives the harness from a sibling uDSV checkout and writes
 `benchmarks/udsv/results.json`; `benchmarks/udsv/render.ts` prints the tables above from it. Setup is in the header
