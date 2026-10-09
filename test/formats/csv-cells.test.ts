@@ -13,7 +13,7 @@
  * Window and batch sizes are kept small so edge cases cross boundaries.
  */
 
-import { CharacterSequence, Spliterator } from "spliterator"
+import { CharacterSequence, CSVSpliterator, Spliterator } from "spliterator"
 import { beforeAll, describe, expect, test } from "vitest"
 
 const encoder = new TextEncoder()
@@ -126,6 +126,9 @@ describe("scanCsvCells parity with the row path", () => {
 		["doubled quote", 'a,"b""c"\n'],
 		["quote-only cell", '"",a\n'],
 		["quote-only line is not empty", '""\n'],
+		["ragged widths, wider then narrower then wider", "a,b,c\nd\ne,f\ng,h,i,j\n"],
+		["quotes not at the cell edges stay", 'x"y"z,"q"w,"",""""\n'],
+		["doubled quote in a short cell and a sliced-length cell", '"a""b","a long cell with a ""quote"" inside"\n'],
 		["unmatched quote runs to eof", 'a,"b,c\nd,e\n'],
 		["unmatched quote mid-cell", '5" pipe,b\n'],
 		["quotes off", 'a,"b,c"\n', { enableQuoteHandling: false }],
@@ -187,6 +190,18 @@ describe("scanCsvCells parity with the row path", () => {
 		}
 	})
 
+	test("rows are distinct arrays of exactly their own width", () => {
+		const rows = fast("a,b,c\nd\ne,f\n")
+
+		expect(rows).toEqual([["a", "b", "c"], ["d"], ["e", "f"]])
+		expect(new Set(rows).size).toBe(3)
+		expect(rows.map((row) => Object.keys(row).length)).toEqual([3, 1, 2])
+
+		// A yielded row is the caller's: mutating it must not leak into the next one.
+		rows[0]!.push("tail")
+		expect(rows[1]).toEqual(["d"])
+	})
+
 	test("a row wider than the batch and longer than the window", () => {
 		const cells = Array.from({ length: 50 }, (_, i) => `cell${i}`)
 		const text = cells.join(",") + "\n" + cells.join(",")
@@ -204,5 +219,23 @@ describe("scanCsvCells parity with the row path", () => {
 		const text = rows.join("\r\n") + "\r\n"
 
 		expect(fast(text, {}, 64 * 1024, 4096)).toEqual(reference(text))
+	})
+})
+
+describe("a string source is sliced directly", () => {
+	test("cells are the source's own code units, a lone surrogate included", async () => {
+		await CharacterSequence.whenReady()
+
+		// Encoding a lone surrogate yields U+FFFD, and the row path decodes that back. The fast path slices the string the
+		// caller passed, so the surrogate survives: same UTF-16 length either way, which is what keeps the kernel's
+		// offsets aligned.
+		const source = "héllo,wörld\n\uD83D,ok\nx,y\n"
+		const rows = CSVSpliterator.from(source, { mode: "array", header: false, trim: false }).toArray()
+
+		expect(rows).toEqual([
+			["héllo", "wörld"],
+			["\uD83D", "ok"],
+			["x", "y"],
+		])
 	})
 })

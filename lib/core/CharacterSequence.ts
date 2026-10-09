@@ -115,7 +115,10 @@ export interface CellScanState {
 	 * Absolute UTF-16 start of the open cell.
 	 */
 	cellStartUnits: number
-	cellHasQuote: boolean
+	/**
+	 * `CELL_FLAG_HAS_QUOTE | CELL_FLAG_HAS_ESCAPE` of the open cell.
+	 */
+	cellFlags: number
 }
 
 export interface CellScanOptions {
@@ -470,7 +473,7 @@ export class CharacterSequence extends Uint8Array {
 			state.insideQuotes ? 1 : 0,
 			// Window-relative; negative when the open cell began before this window.
 			state.cellStartUnits - state.units,
-			state.cellHasQuote ? 1 : 0,
+			state.cellFlags,
 			previousByte,
 			resultsOffset,
 			maxCells
@@ -493,7 +496,7 @@ export class CharacterSequence extends Uint8Array {
 			units: unitBase + block[1]!,
 			insideQuotes: block[2] === 1,
 			cellStartUnits: unitBase + block[3]!,
-			cellHasQuote: block[4] === 1,
+			cellFlags: block[4]!,
 		}
 	}
 

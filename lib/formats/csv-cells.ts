@@ -4,9 +4,17 @@
  * @copyright Sister Software
  */
 
+import type { AsyncSpliterator } from "#core/AsyncSpliterator"
 import { CharacterSequence, type CellScanState } from "#core/CharacterSequence"
-import { CELL_FLAG_HAS_QUOTE, CELL_FLAG_ROW_END, CELL_RESULT_STRIDE, WASM_MAX_RESULTS } from "#core/wasm_module"
-import { normalizeCell, unquoteColumn } from "#formats/csv-columns"
+import {
+	CELL_FLAG_HAS_ESCAPE,
+	CELL_FLAG_HAS_QUOTE,
+	CELL_FLAG_ROW_END,
+	CELL_RESULT_STRIDE,
+	WASM_MAX_RESULTS,
+} from "#core/wasm_module"
+import { normalizeCell } from "#formats/csv-columns"
+import { batched, type BatchedAsyncIterable } from "#iterators/AsyncSequence"
 
 /**
  * Bytes staged into the kernel per call. The kernel copies `[cursor, end)` into WASM memory each time, so the window
@@ -53,22 +61,53 @@ export function* scanCsvCells(source: Uint8Array, text: string, init: CsvCellSca
 	const options = { rowDelimiter, columnDelimiter, quote: enableQuoteHandling ? 0x22 : -1, crlf, maxCells }
 	const length = source.byteLength
 
-	let state: CellScanState = { scanCursor: 0, units: 0, insideQuotes: false, cellStartUnits: 0, cellHasQuote: false }
-	let row: string[] = []
+	let state: CellScanState = { scanCursor: 0, units: 0, insideQuotes: false, cellStartUnits: 0, cellFlags: 0 }
+	// Rows are built into an exact-size copy of a template the width of the previous row, the way a parser that knows
+	// its column count would preallocate them. Growing a row by `push` left a 43-slot store behind 20 cells and two
+	// discarded stores per row, and the garbage is what matters here: the scavenger runs once per parse of a 2MB source
+	// instead of once per three, and each run copies the result built so far. See the note on the generator below.
+	let template: string[] = []
+	let row: string[] = template.slice()
+	let width = 0
 
-	const cell = (start: number, end: number, hasQuote: boolean): string => {
+	const cell = (start: number, end: number, flags: number): string => {
 		// The row path decodes each row on its own, which strips one BOM at the row's start.
-		if (!row.length && start < end && text.charCodeAt(start) === BOM) {
+		if (width === 0 && start < end && text.charCodeAt(start) === BOM) {
 			start++
 		}
 
-		let value = text.slice(start, end)
+		let value: string
 
-		if (hasQuote && enableQuoteHandling) {
-			value = unquoteColumn(value)
+		if (
+			enableQuoteHandling &&
+			flags & CELL_FLAG_HAS_QUOTE &&
+			end - start >= 2 &&
+			text.charCodeAt(start) === DOUBLE_QUOTE &&
+			text.charCodeAt(end - 1) === DOUBLE_QUOTE
+		) {
+			// Slice the inside directly: the quoted outer string was one more allocation per cell, and the kernel saw every
+			// quote, so it knows whether there is a doubled one to unescape. Agrees with `unquoteColumn`.
+			const inner = text.slice(start + 1, end - 1)
+
+			value = flags & CELL_FLAG_HAS_ESCAPE ? inner.replaceAll('""', '"') : inner
+		} else {
+			value = text.slice(start, end)
 		}
 
 		return normalizeCell(value, enableQuoteHandling, trim)
+	}
+
+	const finishRow = (): string[] => {
+		const finished = width === row.length ? row : row.slice(0, width)
+
+		if (width !== template.length) {
+			template = new Array<string>(width).fill("")
+		}
+
+		row = template.slice()
+		width = 0
+
+		return finished
 	}
 
 	while (state.scanCursor < length) {
@@ -89,18 +128,20 @@ export function* scanCsvCells(source: Uint8Array, text: string, init: CsvCellSca
 			const cellEnd = cells[offset + 1]!
 			const flags = cells[offset + 2]!
 
-			row.push(cell(start, cellEnd, (flags & CELL_FLAG_HAS_QUOTE) !== 0))
+			// Evaluated before the store: `row[width++] = cell(...)` would bump `width` before `cell` reads it.
+			const value = cell(start, cellEnd, flags)
+
+			row[width++] = value
 
 			if (flags & CELL_FLAG_ROW_END) {
 				// Empty means the raw row range is empty: one cell, and it spans nothing after CRLF removal. A row's first
 				// cell starts where the row does, so its raw start (before any BOM strip) is the row's start.
-				const empty = row.length === 1 && cellEnd === start
+				const empty = width === 1 && cellEnd === start
+				const finished = finishRow()
 
 				if (!(empty && skipEmpty)) {
-					yield row
+					yield finished
 				}
-
-				row = []
 			}
 		}
 
@@ -112,12 +153,16 @@ export function* scanCsvCells(source: Uint8Array, text: string, init: CsvCellSca
 	const tailEnd = text.length
 
 	if (tailStart < tailEnd) {
-		row.push(cell(tailStart, tailEnd, state.cellHasQuote))
-		yield row
-	} else if (row.length) {
+		const value = cell(tailStart, tailEnd, state.cellFlags)
+
+		row[width++] = value
+		yield finishRow()
+	} else if (width) {
 		// A row whose last cell is empty: `a,` at EOF.
-		row.push(cell(tailStart, tailEnd, false))
-		yield row
+		const value = cell(tailStart, tailEnd, 0)
+
+		row[width++] = value
+		yield finishRow()
 	} else if (!skipEmpty) {
 		// An empty source, or one ending on a row delimiter: one empty row, matching String.split.
 		yield [""]
@@ -187,4 +232,76 @@ export function decodeForCellScan(bytes: Uint8Array): string | null {
 
 		throw error
 	}
+}
+
+/**
+ * Drive the cell scanner over a streaming source one engine window at a time, yielding each window's rows as one batch.
+ *
+ * Each window the engine hands out spans whole records, so {@linkcode scanCsvCells} runs over it exactly as it would
+ * over a whole in-memory source, and nothing carries across windows: the engine cut the records with quote state in
+ * hand, and the scanner's own tail handling closes the window's last row. One decode and one `await` per window
+ * replaces one of each per row, which is what makes this the streaming counterpart of the in-memory fast path. The rows
+ * go out as a batch, which {@linkcode batched} tells the sequence to walk without an `await` per row. Yielding them
+ * singly here was measured slower than the per-row path it replaces.
+ *
+ * A window that is not valid UTF-8 goes through `fallback`, the per-row path, for that window alone: the row path
+ * decodes lossily, so the output is the same as if the whole source had taken it.
+ *
+ * `return()` on the iterable closes the engine. Callers that may never start it must close the engine themselves, since
+ * a never-started generator skips its `finally`.
+ */
+export function scanCsvCellsStreaming(
+	engine: AsyncSpliterator,
+	init: CsvCellScanInit,
+	fallback: (window: Uint8Array) => string[][]
+): BatchedAsyncIterable<string[]> {
+	return batched(windows(engine, init, fallback))
+}
+
+async function* windows(
+	engine: AsyncSpliterator,
+	init: CsvCellScanInit,
+	fallback: (window: Uint8Array) => string[][]
+): AsyncGenerator<string[][]> {
+	try {
+		while (true) {
+			const result = await engine.nextWindow()
+
+			if (result.done) return
+
+			const window = result.value
+			const text = decodeForCellScan(window)
+
+			yield text === null ? fallback(window) : Array.from(scanCsvCells(window, text, init))
+		}
+	} finally {
+		await engine.return()
+	}
+}
+
+/**
+ * A batched iterable that yields `first` and then whatever `rest` has left. Used to put back the remainder of a batch
+ * whose head row was consumed as the header. `return()` reaches `rest`, so closing still releases the engine.
+ */
+export function reheadBatches<T>(first: readonly T[], rest: AsyncIterator<readonly T[]>): BatchedAsyncIterable<T> {
+	let served = false
+
+	return batched({
+		[Symbol.asyncIterator]: () => ({
+			next: async () => {
+				if (!served) {
+					served = true
+
+					return { value: first, done: false }
+				}
+
+				return rest.next()
+			},
+			return: async () => {
+				await rest.return?.()
+
+				return { value: undefined, done: true }
+			},
+		}),
+	})
 }

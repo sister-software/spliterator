@@ -741,6 +741,52 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	 *
 	 * **This method will read the entire file into memory.**
 	 */
+	/**
+	 * Pull every queued range at once, as one contiguous view from the first range's start to the last range's end.
+	 *
+	 * The view spans whole records only, with the delimiters between them (and any carriage returns before those
+	 * delimiters) left in, and the last record's delimiter left out, exactly as {@linkcode next} would have cut each one.
+	 * A quoted region never straddles two windows, because the engine cut the records with quote state in hand. One
+	 * window per fill is one `await` per high-water mark of input instead of one per record, which is what a consumer
+	 * that scans records in bulk, such as the CSV cell scanner, wants.
+	 *
+	 * The engine's `skipEmpty`, `drop`, and `take` are not applied here: a window cannot have records removed from its
+	 * middle without ceasing to be contiguous, so a consumer applies all three itself. Like a per-record slice, the view
+	 * is valid until the next pull, when buffer compression may slide the bytes beneath it.
+	 */
+	public async nextWindow(): Promise<IteratorResult<Uint8Array, undefined>> {
+		if (this.#done) return this.#finalize()
+
+		if (!this.#indices.size) {
+			await this.#fill()
+		}
+
+		// See `next`: the first fill may read into EOF without flushing the tail.
+		if (this.#lastReadResult?.done && !this.#indices.size && !this.#done) {
+			await this.#fill()
+		}
+
+		const first = this.#indices.dequeue()
+
+		if (!first) {
+			this.#done = true
+
+			return this.#finalize()
+		}
+
+		const start = first[0]
+		let end = first[1]
+		let range: ByteRange | undefined
+
+		while ((range = this.#indices.dequeue())) {
+			end = range[1]
+		}
+
+		this.#yieldedByteLength += end - start
+
+		return { value: this.#controller.subarray(start, end), done: false }
+	}
+
 	public toArray(): Promise<R[]> {
 		return Array.fromAsync(this, (range) => (range as Uint8Array).slice() as unknown as R)
 	}
