@@ -16,6 +16,7 @@ import {
 	cellScanEligibility,
 	decodeForCellScan,
 	reheadBatches,
+	scanCsvCellBatches,
 	scanCsvCells,
 	scanCsvCellsStreaming,
 } from "#formats/csv-cells"
@@ -166,7 +167,7 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 		plan && CharacterSequence.hasScanner() ? (typeof source === "string" ? source : decodeForCellScan(bytes)) : null
 
 	if (plan && text !== null) {
-		const cellRows = scanCsvCells(bytes, text, {
+		const batches = scanCsvCellBatches(bytes, text, {
 			rowDelimiter: plan.rowDelimiter,
 			columnDelimiter: plan.columnDelimiter,
 			enableQuoteHandling,
@@ -175,28 +176,32 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 			skipEmpty: rowInit.skipEmpty ?? true,
 		})
 
-		if (header) {
-			const result = cellRows.next()
+		let headerPending = header
 
-			if (result.done) return
+		// One generator layer per row, not two: the batches are walked here rather than through a flattening generator.
+		for (const batch of batches) {
+			for (const columns of batch) {
+				if (headerPending) {
+					const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
 
-			const headers = normalizeKeys ? normalizeColumnNames(result.value) : result.value
+					transformers = bindTransformers(headers, transformersInput)
+					headerPending = false
 
-			transformers = bindTransformers(headers, transformersInput)
-		}
+					continue
+				}
 
-		for (const columns of cellRows) {
-			if (yieldCount < drop) {
+				if (yieldCount < drop) {
+					yieldCount++
+
+					continue
+				}
+
+				if (yieldCount >= yieldLimit) return
+
+				yield emitter ? emitter(columns, transformers) : columns
+
 				yieldCount++
-
-				continue
 			}
-
-			if (yieldCount >= yieldLimit) break
-
-			yield emitter ? emitter(columns, transformers) : columns
-
-			yieldCount++
 		}
 
 		return

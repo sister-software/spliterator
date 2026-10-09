@@ -5,7 +5,7 @@
  */
 
 import type { AsyncSpliterator } from "#core/AsyncSpliterator"
-import { CharacterSequence, type CellScanState } from "#core/CharacterSequence"
+import { CharacterSequence, type CellScanOptions, type CellScanState } from "#core/CharacterSequence"
 import {
 	CELL_FLAG_HAS_ESCAPE,
 	CELL_FLAG_HAS_QUOTE,
@@ -42,44 +42,130 @@ export interface CsvCellScanInit {
 }
 
 /**
- * Yield every row of a wholly in-memory CSV as `string[]`, slicing cells out of `text` at the boundaries the kernel
- * emits. `text` must be `source` decoded with `{ fatal: true, ignoreBOM: true }`: `fatal` is what makes the kernel's
- * UTF-16 unit count exact, and `ignoreBOM` keeps every U+FEFF in the string so the offsets line up; the one BOM the row
- * path strips at the start of each row is stripped here per row.
+ * Every row of a wholly in-memory CSV as `string[]`, produced one kernel batch at a time (up to `maxCells` cells, about
+ * 200 rows of 20 columns), slicing cells out of `text` at the boundaries the kernel emits. `text` must be `source`
+ * decoded with `{ fatal: true, ignoreBOM: true }`: `fatal` is what makes the kernel's UTF-16 unit count exact, and
+ * `ignoreBOM` keeps every U+FEFF in the string so the offsets line up; the one BOM the row path strips at the start of
+ * each row is stripped here per row.
  *
  * Row emptiness follows `Spliterator`: a row is empty when its byte range after CRLF removal is empty, before any BOM
  * removal, unquoting or trimming. `""`, a BOM-only row and `,,` are not empty.
  *
- * The caller has established eligibility (single ASCII delimiters, scanner loaded); this generator yields nothing until
- * first pulled and throws only on a broken scanner contract.
+ * The caller has established eligibility (single ASCII delimiters, scanner loaded). Nothing is scanned until the first
+ * `nextBatch`, which throws only on a broken scanner contract.
+ *
+ * A stepping object rather than a generator because the rows are pushed straight into the caller's array: the in-memory
+ * parser hands over a fresh array per batch and yields it ({@linkcode scanCsvCellBatches}), the streaming path hands
+ * over one array per engine window ({@linkcode collectCsvCells}) and never copies. A generator resumption per row had
+ * been 13% of a streamed parse, and a flattening copy of each batch 9%.
  */
-export function* scanCsvCells(source: Uint8Array, text: string, init: CsvCellScanInit): Generator<string[]> {
-	const { rowDelimiter, columnDelimiter, enableQuoteHandling, crlf, trim, skipEmpty } = init
-	const windowSize = init.windowSize ?? CELL_SCAN_WINDOW
-	// A zero batch would return without advancing and loop forever; it is a test-only knob, so clamp it.
-	const maxCells = Math.max(1, init.maxCells ?? WASM_MAX_RESULTS)
-	const options = { rowDelimiter, columnDelimiter, quote: enableQuoteHandling ? 0x22 : -1, crlf, maxCells }
-	const length = source.byteLength
+export class CellRowScanner {
+	readonly #source: Uint8Array
+	readonly #text: string
+	readonly #options: CellScanOptions
+	readonly #windowSize: number
+	readonly #enableQuoteHandling: boolean
+	readonly #trim: boolean
+	readonly #skipEmpty: boolean
 
-	let state: CellScanState = { scanCursor: 0, units: 0, insideQuotes: false, cellStartUnits: 0, cellFlags: 0 }
+	#state: CellScanState = { scanCursor: 0, units: 0, insideQuotes: false, cellStartUnits: 0, cellFlags: 0 }
+
 	// Rows are built into an exact-size copy of a template the width of the previous row, the way a parser that knows
 	// its column count would preallocate them. Growing a row by `push` left a 43-slot store behind 20 cells and two
-	// discarded stores per row, and the garbage is what matters here: the scavenger runs once per parse of a 2MB source
-	// instead of once per three, and each run copies the result built so far. See the note on the generator below.
-	let template: string[] = []
-	let row: string[] = template.slice()
-	let width = 0
+	// discarded stores per row, and the garbage is what matters here: the scavenger ran once per parse of a 2MB source
+	// instead of once per three, and each run copied the result built so far.
+	#template: string[] = []
+	#row: string[] = []
+	#width = 0
+	#done = false
 
-	const cell = (start: number, end: number, flags: number): string => {
+	constructor(source: Uint8Array, text: string, init: CsvCellScanInit) {
+		this.#source = source
+		this.#text = text
+		this.#windowSize = init.windowSize ?? CELL_SCAN_WINDOW
+		this.#enableQuoteHandling = init.enableQuoteHandling
+		this.#trim = init.trim
+		this.#skipEmpty = init.skipEmpty
+
+		this.#options = {
+			rowDelimiter: init.rowDelimiter,
+			columnDelimiter: init.columnDelimiter,
+			quote: init.enableQuoteHandling ? DOUBLE_QUOTE : -1,
+			crlf: init.crlf,
+			// A zero batch would return without advancing and loop forever; it is a test-only knob, so clamp it.
+			maxCells: Math.max(1, init.maxCells ?? WASM_MAX_RESULTS),
+		}
+	}
+
+	/**
+	 * Push the rows of the next kernel batch onto `out`. Returns `false` once the source is exhausted, after the tail row
+	 * has been pushed; a `true` return may have pushed nothing when a batch closed no row.
+	 */
+	public nextBatch(out: string[][]): boolean {
+		if (this.#done) return false
+
+		const source = this.#source
+		const length = source.byteLength
+		const state = this.#state
+
+		if (state.scanCursor >= length) {
+			this.#finish(out)
+
+			return false
+		}
+
+		const end = Math.min(length, state.scanCursor + this.#windowSize)
+		const scan = CharacterSequence.scanCells(source, state, end, this.#options)
+
+		if (!scan) {
+			// The scanner is loaded (the caller checked) and the window is not empty, so this cannot happen; treat it
+			// as a contract violation rather than looping.
+			throw new Error("CellRowScanner: the cell scanner returned no batch for a non-empty window")
+		}
+
+		const cells = scan.cells
+		const skipEmpty = this.#skipEmpty
+
+		for (let i = 0; i < scan.count; i++) {
+			const offset = i * CELL_RESULT_STRIDE
+			const start = cells[offset]!
+			const cellEnd = cells[offset + 1]!
+			const flags = cells[offset + 2]!
+
+			// Evaluated before the store: `row[width++] = cell(...)` would bump `width` before `cell` reads it.
+			const value = this.#cell(start, cellEnd, flags)
+
+			this.#row[this.#width++] = value
+
+			if (flags & CELL_FLAG_ROW_END) {
+				// Empty means the raw row range is empty: one cell, and it spans nothing after CRLF removal. A row's first
+				// cell starts where the row does, so its raw start (before any BOM strip) is the row's start.
+				const empty = this.#width === 1 && cellEnd === start
+				const finished = this.#finishRow()
+
+				if (!(empty && skipEmpty)) {
+					out.push(finished)
+				}
+			}
+		}
+
+		this.#state = scan
+
+		return true
+	}
+
+	#cell(start: number, end: number, flags: number): string {
+		const text = this.#text
+
 		// The row path decodes each row on its own, which strips one BOM at the row's start.
-		if (width === 0 && start < end && text.charCodeAt(start) === BOM) {
+		if (this.#width === 0 && start < end && text.charCodeAt(start) === BOM) {
 			start++
 		}
 
 		let value: string
 
 		if (
-			enableQuoteHandling &&
+			this.#enableQuoteHandling &&
 			flags & CELL_FLAG_HAS_QUOTE &&
 			end - start >= 2 &&
 			text.charCodeAt(start) === DOUBLE_QUOTE &&
@@ -94,79 +180,94 @@ export function* scanCsvCells(source: Uint8Array, text: string, init: CsvCellSca
 			value = text.slice(start, end)
 		}
 
-		return normalizeCell(value, enableQuoteHandling, trim)
+		return normalizeCell(value, this.#enableQuoteHandling, this.#trim)
 	}
 
-	const finishRow = (): string[] => {
+	#finishRow(): string[] {
+		const width = this.#width
+		const row = this.#row
 		const finished = width === row.length ? row : row.slice(0, width)
 
-		if (width !== template.length) {
-			template = new Array<string>(width).fill("")
+		if (width !== this.#template.length) {
+			this.#template = new Array<string>(width).fill("")
 		}
 
-		row = template.slice()
-		width = 0
+		this.#row = this.#template.slice()
+		this.#width = 0
 
 		return finished
 	}
 
-	while (state.scanCursor < length) {
-		const end = Math.min(length, state.scanCursor + windowSize)
-		const scan = CharacterSequence.scanCells(source, state, end, options)
+	/**
+	 * The tail after the last delimiter, as `Spliterator.#drain` leaves it: never CRLF-trimmed.
+	 */
+	#finish(out: string[][]): void {
+		this.#done = true
 
-		if (!scan) {
-			// The scanner is loaded (the caller checked) and the window is not empty, so this cannot happen; treat it
-			// as a contract violation rather than looping.
-			throw new Error("scanCsvCells: the cell scanner returned no batch for a non-empty window")
+		const tailStart = this.#state.cellStartUnits
+		const tailEnd = this.#text.length
+
+		if (tailStart < tailEnd) {
+			const value = this.#cell(tailStart, tailEnd, this.#state.cellFlags)
+
+			this.#row[this.#width++] = value
+			out.push(this.#finishRow())
+		} else if (this.#width) {
+			// A row whose last cell is empty: `a,` at EOF.
+			const value = this.#cell(tailStart, tailEnd, 0)
+
+			this.#row[this.#width++] = value
+			out.push(this.#finishRow())
+		} else if (!this.#skipEmpty) {
+			// An empty source, or one ending on a row delimiter: one empty row, matching String.split.
+			out.push([""])
 		}
+	}
+}
 
-		const cells = scan.cells
+/**
+ * The rows of a wholly in-memory CSV, one non-empty array per kernel batch. The in-memory parser walks these itself so
+ * each row crosses one generator, its own, rather than two.
+ */
+export function* scanCsvCellBatches(source: Uint8Array, text: string, init: CsvCellScanInit): Generator<string[][]> {
+	const scanner = new CellRowScanner(source, text, init)
+	let batch: string[][] = []
 
-		for (let i = 0; i < scan.count; i++) {
-			const offset = i * CELL_RESULT_STRIDE
-			const start = cells[offset]!
-			const cellEnd = cells[offset + 1]!
-			const flags = cells[offset + 2]!
+	while (scanner.nextBatch(batch)) {
+		if (batch.length) {
+			yield batch
 
-			// Evaluated before the store: `row[width++] = cell(...)` would bump `width` before `cell` reads it.
-			const value = cell(start, cellEnd, flags)
-
-			row[width++] = value
-
-			if (flags & CELL_FLAG_ROW_END) {
-				// Empty means the raw row range is empty: one cell, and it spans nothing after CRLF removal. A row's first
-				// cell starts where the row does, so its raw start (before any BOM strip) is the row's start.
-				const empty = width === 1 && cellEnd === start
-				const finished = finishRow()
-
-				if (!(empty && skipEmpty)) {
-					yield finished
-				}
-			}
+			batch = []
 		}
-
-		state = scan
 	}
 
-	// The tail after the last delimiter, as `Spliterator.#drain` leaves it: never CRLF-trimmed.
-	const tailStart = state.cellStartUnits
-	const tailEnd = text.length
-
-	if (tailStart < tailEnd) {
-		const value = cell(tailStart, tailEnd, state.cellFlags)
-
-		row[width++] = value
-		yield finishRow()
-	} else if (width) {
-		// A row whose last cell is empty: `a,` at EOF.
-		const value = cell(tailStart, tailEnd, 0)
-
-		row[width++] = value
-		yield finishRow()
-	} else if (!skipEmpty) {
-		// An empty source, or one ending on a row delimiter: one empty row, matching String.split.
-		yield [""]
+	if (batch.length) {
+		yield batch
 	}
+}
+
+/**
+ * {@linkcode scanCsvCellBatches} flattened to one row per step. The parity reference for tests and the shape the bulk
+ * parser of small sources returns.
+ */
+export function* scanCsvCells(source: Uint8Array, text: string, init: CsvCellScanInit): Generator<string[]> {
+	for (const batch of scanCsvCellBatches(source, text, init)) {
+		yield* batch
+	}
+}
+
+/**
+ * Every row of `source` in one array, pushed straight from the scanner: the streaming path's per-window shape.
+ */
+export function collectCsvCells(source: Uint8Array, text: string, init: CsvCellScanInit): string[][] {
+	const scanner = new CellRowScanner(source, text, init)
+	const rows: string[][] = []
+
+	while (scanner.nextBatch(rows)) {
+		// Each call appends its batch.
+	}
+
+	return rows
 }
 
 /**
@@ -272,7 +373,7 @@ async function* windows(
 			const window = result.value
 			const text = decodeForCellScan(window)
 
-			yield text === null ? fallback(window) : Array.from(scanCsvCells(window, text, init))
+			yield text === null ? fallback(window) : collectCsvCells(window, text, init)
 		}
 	} finally {
 		await engine.return()
