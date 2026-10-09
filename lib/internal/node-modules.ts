@@ -30,9 +30,18 @@ export function loadHidden<T = unknown>(specifier: string): Promise<T> {
  * The file URL of a worker entry named by its `#` import-map specifier, so the same specifier serves the source tree
  * under the `node` condition and the compiled tree under `default`. Taking the specifier as a parameter keeps a bundler
  * from chasing it as an asset.
+ *
+ * Resolved through `createRequire`, not `import.meta.resolve`. Tools that transpile this package to CommonJS on the fly
+ * (jiti, which Docusaurus loads its plugins through) rewrite `import.meta.url` and leave `import.meta.resolve` in
+ * place, and Node then refuses the rewritten file with "Cannot use 'import.meta' outside a module". That took down a
+ * consumer's docs build on 9.1.0. `require.resolve` honours the package's `#` import map the same way. The built-ins
+ * come through `process.getBuiltinModule` so this stays synchronous and the root keeps no static `node:` import.
  */
 export function workerEntryUrl(specifier: string): URL {
-	return new URL(import.meta.resolve(specifier))
+	const { createRequire } = process.getBuiltinModule("node:module")
+	const { pathToFileURL } = process.getBuiltinModule("node:url")
+
+	return pathToFileURL(createRequire(import.meta.url).resolve(specifier))
 }
 
 const NODE_FS = "spliterator/node/fs"

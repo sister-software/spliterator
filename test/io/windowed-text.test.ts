@@ -69,6 +69,7 @@ describe("windowed text rows", () => {
 		const init = { delimiter: "<>", trim: false }
 
 		expect(await TextSpliterator.fromAsync(source(text), { ...STREAM, ...init }).toArray()).toEqual(["a", "b", "c"])
+
 		expect(await TextSpliterator.fromAsync(source(text), { ...STREAM, ...init }).toArray()).toEqual(
 			TextSpliterator.from(text, init).toArray()
 		)
@@ -79,6 +80,7 @@ describe("windowed text rows", () => {
 		const init = { drop: 1, take: 2 }
 
 		expect(await TextSpliterator.fromAsync(source(text), { ...STREAM, ...init }).toArray()).toEqual(["b", "c"])
+
 		expect(await TextSpliterator.fromAsync(source(text), { ...STREAM, ...init }).toArray()).toEqual(
 			TextSpliterator.from(text, init).toArray()
 		)
@@ -148,6 +150,7 @@ describe("windowed JSON rows", () => {
 			{ a: 1 },
 			{ b: 2 },
 		])
+
 		expect(await JSONSpliterator.fromAsync(source(text), { ...STREAM, ...init }).toArray()).toEqual(
 			JSONSpliterator.from(text, init).toArray()
 		)
