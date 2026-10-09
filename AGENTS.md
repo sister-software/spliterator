@@ -190,6 +190,7 @@ Every `fromAsync` opens its source through `openDelimitedRows`, which reads sour
 - **A raw synchronous parse looks far better than this path can deliver** (~1.6× even at 1GiB). The rest is eaten by the per-row cost of `AsyncSequence`, which both paths pay. Don't re-derive the raw number and conclude the threshold should be raised.
 - **The bulk path awaits `CharacterSequence.whenReady()`.** The sync engine normally misses the WASM scanner because it finishes before the module loads; reaching it through an async path is the one place that can be fixed, worth ~26% on a large source. `CSVSpliterator.fromAsync` awaits it on the streaming branch too, in `openRows`, because the windowed cell scan below checks `hasScanner()` and a fresh process would otherwise take the row path for its first file.
 - **Streaming CSV scans cells per engine window.** `AsyncSpliterator.nextWindow()` dequeues every queued range at once and returns the contiguous view from the first range's start to the last range's end, whole records only, about a high-water mark (64 KiB) of rows per `await`. `scanCsvCellsStreaming` (`lib/formats/csv-cells.ts`) decodes each window with the fatal decoder and runs the cell scanner over it (`collectCsvCells`, every row of the window pushed into one array); nothing carries across windows because the engine cut the records with quote state in hand. A window that is not UTF-8 takes the per-row path for that window alone. The rows go out as a batched source (see `AsyncSequence`); yielding them singly was slower than the per-row path. `columnScan: "rows"` opts out, and it remains the parity reference. The engine's `skipEmpty`/`drop`/`take` do not apply to windows; the CSV path applies all three itself.
+- **Streamed text and JSON rows are decoded per engine window too.** `TextSpliterator.fromAsync` and `JSONSpliterator.fromAsync` hand a streamed `AsyncSpliterator` to `windowedTextRows` (`lib/io/windowed-text.ts`), which decodes each `nextWindow()` once and splits the text on the delimiter, honouring `crlf` and `skipEmpty` itself, and hands the rows out as a batched source. A `TextDecoder.decode` call per row costs a few hundred nanoseconds of fixed overhead in Node, and the per-row `await` the rest: 600k JSONL rows went 1289ms → 707ms, level with `readline` + `JSON.parse` (702ms), where this path had been half its speed; a 500MB corpus file 1948ms against `readline`'s 2092ms. `drop` and `take` are sequence ops on these two paths rather than engine options, since a window cannot have rows removed from it; they still count after `skipEmpty`. A window that fails a `fatal` decode is decoded row by row so the error names the row. The bulk (small-file) branch is unchanged and still decodes per row.
 - **Unsized sources use an end-of-input test, not a size test.** Pull one chunk; if the stream is already exhausted the whole input is in hand. Otherwise the pulled chunks are put back in front via a re-headed iterable — `test/io/adaptive-source.test.ts` covers 1/7/64/1024-byte chunkings because losing a chunk here would be silent.
 - **`bulkThreshold: 0` forces streaming.** Use it when a bounded footprint is the point.
 - Both engines must agree exactly; the parity tests assert the same fixture through both.
@@ -198,12 +199,12 @@ Every `fromAsync` opens its source through `openDelimitedRows`, which reads sour
 
 Keyed off **per-row work**, not file size:
 
-| Per-row work                              | Dominates   | Use                                                                        |
-| ----------------------------------------- | ----------- | -------------------------------------------------------------------------- |
-| None (count, segment, extract a field)    | The scan    | `Spliterator` raw ranges + SIMD (~5–6 GB/s vs ~600 MB/s JS)                |
-| ~1–3 µs (`JSON.parse`, CSV→object)        | The parse   | Sequential `fromAsync`. Threads lose (0.3–0.9×); JSONL ~0.5× of `readline` |
-| Milliseconds (inference, geocode, crypto) | The handler | `parallelMapWorkers` / `asManyWorkers`                                     |
-| I/O-bound (file fan-out, network)         | Latency     | `parallelMap`. Peaks ~2–3 concurrency, then degrades                       |
+| Per-row work                              | Dominates   | Use                                                                               |
+| ----------------------------------------- | ----------- | --------------------------------------------------------------------------------- |
+| None (count, segment, extract a field)    | The scan    | `Spliterator` raw ranges + SIMD (~5–6 GB/s vs ~600 MB/s JS)                       |
+| ~1–3 µs (`JSON.parse`, CSV→object)        | The parse   | Sequential `fromAsync`. Threads lose (0.3–0.9×); JSONL about even with `readline` |
+| Milliseconds (inference, geocode, crypto) | The handler | `parallelMapWorkers` / `asManyWorkers`                                            |
+| I/O-bound (file fan-out, network)         | Latency     | `parallelMap`. Peaks ~2–3 concurrency, then degrades                              |
 
 Naming rule: **closure ⇒ caller's thread; module path ⇒ worker thread** (closures can't cross `postMessage`).
 

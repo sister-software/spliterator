@@ -4,10 +4,12 @@
  * @copyright Sister Software
  */
 
-import type { CharacterSequenceInput } from "#core/CharacterSequence"
+import { AsyncSpliterator } from "#core/AsyncSpliterator"
+import { CharacterSequence, type CharacterSequenceInput } from "#core/CharacterSequence"
 import { Spliterator, type SpliteratorInit } from "#core/Spliterator"
 import type { AsyncDataResource } from "#internal/shared"
 import { type AdaptiveSourceInit, openDelimitedRows } from "#io/adaptive-source"
+import { windowedTextRows } from "#io/windowed-text"
 import { AsyncSequence } from "#iterators/AsyncSequence"
 import { Sequence } from "#iterators/Sequence"
 
@@ -181,23 +183,63 @@ export abstract class TextSpliterator {
 	 */
 	public static fromAsync(
 		source: AsyncDataResource,
-		{ encoding, fatal, ignoreBOM, trim = true, ...options }: TextSpliteratorInit & AdaptiveSourceInit = {}
+		{
+			encoding,
+			fatal,
+			ignoreBOM,
+			trim = true,
+			drop = 0,
+			take = Infinity,
+			...options
+		}: TextSpliteratorInit & AdaptiveSourceInit = {}
 	): AsyncSequence<string> {
 		const decoder = new TextDecoder(encoding, { fatal, ignoreBOM })
-		const dropBlank = trim && (options.skipEmpty ?? true)
+		const skipEmpty = options.skipEmpty ?? true
+		const dropBlank = trim && skipEmpty
+
+		const decodeError = (rowIndex: number, cause: unknown) => {
+			const error = new SyntaxError(`Failed to decode data at row ${rowIndex}`)
+			error.cause = cause
+
+			return error
+		}
+
+		// A streamed source is decoded per engine window and split as text (see `windowedTextRows`); the bulk branch's
+		// rows are bytes decoded per row below. `drop` and `take` are sequence ops rather than engine options because a
+		// window cannot have rows removed from it, and they count after `skipEmpty` either way.
+		let rows = AsyncSequence.from<Uint8Array | string>(async () => {
+			const opened = await openDelimitedRows(source, options)
+
+			return opened instanceof AsyncSpliterator
+				? windowedTextRows(opened, {
+						delimiter: new CharacterSequence(options.delimiter),
+						crlf: options.crlf ?? false,
+						skipEmpty,
+						decoder,
+						decodeError,
+					})
+				: opened
+		})
+
+		if (drop > 0) {
+			rows = rows.drop(drop)
+		}
+
+		if (Number.isFinite(take)) {
+			rows = rows.take(take)
+		}
 
 		// Decoding is an op on the sequence rather than a generator wrapped inside one. A wrapping generator adds an async frame
 		// per row on top of the sequence's own, which measured 297ms against 279ms over 500k rows.
-		const decoded = AsyncSequence.from<Uint8Array>(() => openDelimitedRows(source, options)).map((row, rowCursor) => {
+		const decoded = rows.map((row, rowCursor) => {
+			if (typeof row === "string") return trim ? row.trim() : row
+
 			try {
 				const text = decoder.decode(row)
 
 				return trim ? text.trim() : text
 			} catch (parsedError) {
-				const error = new SyntaxError(`Failed to decode data at row ${rowCursor}`)
-				error.cause = parsedError
-
-				throw error
+				throw decodeError(rowCursor, parsedError)
 			}
 		})
 

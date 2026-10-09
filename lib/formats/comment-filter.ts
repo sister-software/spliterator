@@ -43,6 +43,39 @@ export type RowPredicate = (row: Uint8Array) => boolean
  * worker whose range opens inside a block comment has no way to know. A line prefix is self-describing at every row
  * boundary, which is why every JSONL-with-comments convention in the wild is one.
  */
+export type TextRowPredicate = (row: string) => boolean
+
+/**
+ * {@linkcode createCommentFilter} for rows that are already text, which is what the windowed streaming path hands out.
+ * Same semantics: a blank row and a row whose first non-whitespace characters are a prefix are dropped.
+ */
+export function createTextCommentFilter(comment: CommentInput | undefined): TextRowPredicate | null {
+	if (comment === undefined) return null
+
+	const prefixes = (typeof comment === "string" ? [comment] : comment).filter((prefix) => prefix.length > 0)
+
+	return (row) => {
+		const { length } = row
+		let cursor = 0
+
+		while (cursor < length) {
+			const code = row.charCodeAt(cursor)
+
+			if (code !== SPACE && code !== HORIZONTAL_TAB && code !== CARRIAGE_RETURN && code !== LINE_FEED) break
+
+			cursor++
+		}
+
+		if (cursor === length) return false
+
+		for (const prefix of prefixes) {
+			if (row.startsWith(prefix, cursor)) return false
+		}
+
+		return true
+	}
+}
+
 export function createCommentFilter(comment: CommentInput | undefined): RowPredicate | null {
 	if (comment === undefined) return null
 

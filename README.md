@@ -297,12 +297,12 @@ For information on all available commands, run `spliterator --help`.
 
 The question that predicts the answer is not "how big is my file?" — it's **how much work happens per row.**
 
-| Per-row work                                                 | What dominates | Reach for                                                                                           |
-| ------------------------------------------------------------ | -------------- | --------------------------------------------------------------------------------------------------- |
-| None — counting, segmenting, pulling a couple of fields      | The scan       | `Spliterator` raw byte ranges. The SIMD scanner earns its keep here (~5–6 GB/s vs ~600 MB/s for JS) |
-| ~1–3 µs — `JSON.parse`, CSV → object, string normalize       | The parse      | Plain sequential `fromAsync`. Threads **lose** here (0.3–0.9×); JSONL runs ~0.5× of `readline`      |
-| Milliseconds — model inference, geocoding, crypto, image ops | Your handler   | `parallelMapWorkers`, or `AsyncSpliterator.asManyWorkers` for one large file                        |
-| I/O-bound — file fan-out, network                            | Latency        | `parallelMap` (caller's thread). Concurrency peaks around 2–3, then **degrades**                    |
+| Per-row work                                                 | What dominates | Reach for                                                                                             |
+| ------------------------------------------------------------ | -------------- | ----------------------------------------------------------------------------------------------------- |
+| None — counting, segmenting, pulling a couple of fields      | The scan       | `Spliterator` raw byte ranges. The SIMD scanner earns its keep here (~5–6 GB/s vs ~600 MB/s for JS)   |
+| ~1–3 µs — `JSON.parse`, CSV → object, string normalize       | The parse      | Plain sequential `fromAsync`. Threads **lose** here (0.3–0.9×); JSONL runs about even with `readline` |
+| Milliseconds — model inference, geocoding, crypto, image ops | Your handler   | `parallelMapWorkers`, or `AsyncSpliterator.asManyWorkers` for one large file                          |
+| I/O-bound — file fan-out, network                            | Latency        | `parallelMap` (caller's thread). Concurrency peaks around 2–3, then **degrades**                      |
 
 The line worth internalizing: **the scan is almost never your bottleneck unless you aren't parsing.** Measure before adopting a parallel primitive.
 
