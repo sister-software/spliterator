@@ -1,0 +1,272 @@
+[
+	{
+		"data": "litmus_quoted.csv",
+		"mib": 1.8,
+		"name": "spliterator",
+		"gmean_ms": 8.8,
+		"mibs": 209.1,
+		"rss_mib": 122,
+		"rows": 10000,
+		"error": null
+	},
+	{
+		"data": "litmus_quoted.csv",
+		"mib": 1.8,
+		"name": "uDSV",
+		"gmean_ms": 5,
+		"mibs": 369.6,
+		"rss_mib": 85,
+		"rows": 9999,
+		"error": null
+	},
+	{
+		"data": "litmus_quoted.csv",
+		"mib": 1.8,
+		"name": "PapaParse",
+		"gmean_ms": 24.9,
+		"mibs": 74.2,
+		"rss_mib": 192,
+		"rows": 10000,
+		"error": null
+	},
+	{
+		"data": "litmus_quoted.csv",
+		"mib": 1.8,
+		"name": "csv-simple-parser",
+		"gmean_ms": 4.7,
+		"mibs": 390.3,
+		"rss_mib": 58,
+		"rows": 10000,
+		"error": null
+	},
+	{
+		"data": "litmus_quoted.csv",
+		"mib": 1.8,
+		"name": "d3-dsv",
+		"gmean_ms": 19.2,
+		"mibs": 96.1,
+		"rss_mib": 196,
+		"rows": 10000,
+		"error": null
+	},
+	{
+		"data": "litmus_quoted.csv",
+		"mib": 1.8,
+		"name": "but-csv",
+		"gmean_ms": 9.9,
+		"mibs": 187.3,
+		"rss_mib": 112,
+		"rows": 10000,
+		"error": null
+	},
+	{
+		"data": "litmus_quoted.csv",
+		"mib": 1.8,
+		"name": "spliterator (stream)",
+		"gmean_ms": 12.1,
+		"mibs": 152.9,
+		"rss_mib": 179,
+		"rows": 10000,
+		"error": null
+	},
+	{
+		"data": "litmus_quoted.csv",
+		"mib": 1.8,
+		"name": "uDSV (stream)",
+		"gmean_ms": 8.1,
+		"mibs": 228.8,
+		"rss_mib": 198,
+		"rows": 9999,
+		"error": null
+	},
+	{
+		"data": "litmus_quoted.csv",
+		"mib": 1.8,
+		"name": "PapaParse (stream)",
+		"gmean_ms": 27.6,
+		"mibs": 66.8,
+		"rss_mib": 189,
+		"rows": 10000,
+		"error": null
+	},
+	{
+		"data": "litmus_quoted.csv",
+		"mib": 1.8,
+		"name": "spliterator (stream, count)",
+		"gmean_ms": 11,
+		"mibs": 168.4,
+		"rss_mib": 93,
+		"rows": 2,
+		"error": null
+	},
+	{
+		"data": "litmus_quoted.csv",
+		"mib": 1.8,
+		"name": "uDSV (stream, count)",
+		"gmean_ms": 7.1,
+		"mibs": 261.3,
+		"rss_mib": 153,
+		"rows": 2,
+		"error": null
+	},
+	{
+		"data": "litmus_quoted.csv",
+		"mib": 1.8,
+		"name": "PapaParse (stream, count)",
+		"gmean_ms": 20.7,
+		"mibs": 89.4,
+		"rss_mib": 71,
+		"rows": 2,
+		"error": null
+	},
+	{
+		"data": "openpayments_covered-recipient-profile_20260603.csv",
+		"mib": 386.1,
+		"name": "spliterator",
+		"gmean_ms": 5292.5,
+		"mibs": 72.9,
+		"rss_mib": 3005,
+		"rows": 1697026,
+		"error": null
+	},
+	{
+		"data": "openpayments_covered-recipient-profile_20260603.csv",
+		"mib": 386.1,
+		"name": "uDSV",
+		"gmean_ms": 2726,
+		"mibs": 141.6,
+		"rss_mib": 3814,
+		"rows": 1697025,
+		"error": null
+	},
+	{
+		"data": "openpayments_covered-recipient-profile_20260603.csv",
+		"mib": 386.1,
+		"name": "PapaParse",
+		"gmean_ms": null,
+		"mibs": null,
+		"rss_mib": null,
+		"rows": null,
+		"error": "Wrong row count! Expected: 1697026, Actual: 1697027"
+	},
+	{
+		"data": "openpayments_covered-recipient-profile_20260603.csv",
+		"mib": 386.1,
+		"name": "csv-simple-parser",
+		"gmean_ms": null,
+		"mibs": null,
+		"rss_mib": null,
+		"rows": null,
+		"error": "Wrong row count! Expected: 1697026, Actual: 1697027"
+	},
+	{
+		"data": "openpayments_covered-recipient-profile_20260603.csv",
+		"mib": 386.1,
+		"name": "d3-dsv",
+		"gmean_ms": 3814.3,
+		"mibs": 101.2,
+		"rss_mib": 2852,
+		"rows": 1697026,
+		"error": null
+	},
+	{
+		"data": "openpayments_covered-recipient-profile_20260603.csv",
+		"mib": 386.1,
+		"name": "but-csv",
+		"gmean_ms": null,
+		"mibs": null,
+		"rss_mib": null,
+		"rows": null,
+		"error": "Wrong row count! Expected: 1697026, Actual: 1697027"
+	},
+	{
+		"data": "openpayments_covered-recipient-profile_20260603.csv",
+		"mib": 386.1,
+		"name": "spliterator (stream)",
+		"gmean_ms": 3901.6,
+		"mibs": 99,
+		"rss_mib": 3373,
+		"rows": 1697026,
+		"error": null
+	},
+	{
+		"data": "openpayments_covered-recipient-profile_20260603.csv",
+		"mib": 386.1,
+		"name": "uDSV (stream)",
+		"gmean_ms": 5137.7,
+		"mibs": 75.1,
+		"rss_mib": 3666,
+		"rows": 1697025,
+		"error": null
+	},
+	{
+		"data": "openpayments_covered-recipient-profile_20260603.csv",
+		"mib": 386.1,
+		"name": "PapaParse (stream)",
+		"gmean_ms": 4484.2,
+		"mibs": 86.1,
+		"rss_mib": 3708,
+		"rows": 1697026,
+		"error": null
+	},
+	{
+		"data": "openpayments_covered-recipient-profile_20260603.csv",
+		"mib": 386.1,
+		"name": "spliterator (stream, count)",
+		"gmean_ms": 1885.5,
+		"mibs": 204.8,
+		"rss_mib": 98,
+		"rows": 2,
+		"error": null
+	},
+	{
+		"data": "openpayments_covered-recipient-profile_20260603.csv",
+		"mib": 386.1,
+		"name": "uDSV (stream, count)",
+		"gmean_ms": 1256.2,
+		"mibs": 307.3,
+		"rss_mib": 147,
+		"rows": 2,
+		"error": null
+	},
+	{
+		"data": "openpayments_covered-recipient-profile_20260603.csv",
+		"mib": 386.1,
+		"name": "PapaParse (stream, count)",
+		"gmean_ms": 2103.5,
+		"mibs": 183.5,
+		"rss_mib": 81,
+		"rows": 2,
+		"error": null
+	},
+	{
+		"data": "gb-tuples.csv",
+		"mib": 1454.2,
+		"name": "spliterator (stream, count)",
+		"gmean_ms": 10587.1,
+		"mibs": 137.4,
+		"rss_mib": 101,
+		"rows": 2,
+		"error": null
+	},
+	{
+		"data": "gb-tuples.csv",
+		"mib": 1454.2,
+		"name": "uDSV (stream, count)",
+		"gmean_ms": 5413.6,
+		"mibs": 268.6,
+		"rss_mib": 132,
+		"rows": 2,
+		"error": null
+	},
+	{
+		"data": "gb-tuples.csv",
+		"mib": 1454.2,
+		"name": "PapaParse (stream, count)",
+		"gmean_ms": 12378.5,
+		"mibs": 117.5,
+		"rss_mib": 76,
+		"rows": 2,
+		"error": null
+	}
+]
