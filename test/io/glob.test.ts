@@ -6,7 +6,7 @@
 
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join, relative } from "node:path"
 
 import { AsyncSequence } from "spliterator"
 import { Globerator } from "spliterator/node/fs"
@@ -18,9 +18,31 @@ mkdirSync(join(dir, "nested"))
 writeFileSync(join(dir, "nested", "second.txt"), "second")
 writeFileSync(join(dir, "nested", "ignored.log"), "ignored")
 
+const parityDir = mkdtempSync(join(tmpdir(), "spliterator-glob-parity-"))
+
+for (const path of [
+	"top.txt",
+	"top.log",
+	".dotfile.txt",
+	".hidden/inside.txt",
+	"deep/b.txt",
+	"deep/a/a.txt",
+	"deep/a/b/c.txt",
+	"deep/a/.dot.txt",
+	"deep/x/z.txt",
+	"nested/x.txt",
+	"keep/nested/y.txt",
+	"a-alt-b/z.txt",
+	"q/w-alt-1.txt",
+]) {
+	mkdirSync(dirname(join(parityDir, path)), { recursive: true })
+	writeFileSync(join(parityDir, path), "")
+}
+
 afterAll(async () => {
 	const { rm } = await import("node:fs/promises")
 	await rm(dir, { recursive: true, force: true })
+	await rm(parityDir, { recursive: true, force: true })
 })
 
 describe("Globerator", () => {
@@ -84,6 +106,53 @@ describe("Globerator", () => {
 		const files = await Globerator.files(".txt", { cwd: dir, recursive: false }).toArray()
 
 		expect(files).toEqual(["abc.txt"])
+	})
+
+	test.each([
+		["**/*", {}],
+		["**/*.txt", {}],
+		["*/*.txt", {}],
+		["**/*.{txt,log}", {}],
+		["deep/**/?.txt", {}],
+		["deep/*/[ab].txt", {}],
+		["deep/*/[!ab].txt", {}],
+		[".hidden/*", {}],
+		["**/.*", {}],
+		[["**/*.txt", "deep/**/*.txt"], {}],
+		["**/*.txt", { exclude: ["nested/**"] }],
+		["**/*.txt", { exclude: ["**/deep/**"] }],
+		["**/*.txt", { exclude: ["**/*-alt-*"] }],
+		["**/*", { onlyFiles: false }],
+		["deep/**", { onlyFiles: false }],
+	] as const)("matches Node's fs.glob for %j %j", async (pattern, options) => {
+		const { glob } = await import("node:fs/promises")
+		const onlyFiles = !("onlyFiles" in options) || options.onlyFiles !== false
+		const native: string[] = []
+
+		for await (const entry of glob(pattern as string | string[], {
+			cwd: parityDir,
+			withFileTypes: true,
+			exclude: "exclude" in options ? options.exclude : undefined,
+		})) {
+			if (onlyFiles && entry.isDirectory()) continue
+
+			native.push(relative(parityDir, join(entry.parentPath, entry.name)))
+		}
+
+		const ours = await Globerator.from(pattern, { cwd: parityDir, ...options }).toArray()
+
+		expect(ours.toSorted()).toEqual([...new Set(native)].filter(Boolean).toSorted())
+	})
+
+	test("walks an absolute pattern from its own static prefix", async () => {
+		const matches = await Globerator.from(join(parityDir, "deep", "**", "*.txt"), {
+			cwd: dir,
+			absolute: true,
+		}).toArray()
+
+		expect(matches.toSorted()).toEqual(
+			["deep/a/a.txt", "deep/a/b/c.txt", "deep/b.txt", "deep/x/z.txt"].map((path) => join(parityDir, path)).toSorted()
+		)
 	})
 
 	test("rejects extensions that are empty or glob patterns", () => {
