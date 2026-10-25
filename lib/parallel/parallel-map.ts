@@ -8,7 +8,7 @@ import { AsyncSequence, type ParallelMapSequenceOptions } from "#iterators/Async
 
 /**
  * Map an iterable through a callback with up to `concurrency` calls in flight. Values are yielded in **completion
- * order** rather than input order.
+ * order**, or in input order with `ordered: true`.
  *
  * The callback is a closure, so every call runs on the caller's thread. This overlaps _latency_ — file reads, network
  * round-trips, and other waiting work. It does not improve CPU-bound work, which still occupies the caller's thread.
@@ -21,7 +21,7 @@ import { AsyncSequence, type ParallelMapSequenceOptions } from "#iterators/Async
  * @param options Concurrency ceiling (defaults to the runtime's filesystem fan-out — see
  *   {@linkcode ParallelMapSequenceOptions.concurrency}) and optional abort signal.
  *
- * @yields Each result, in completion order.
+ * @yields Each result, in completion order, or in input order with `ordered: true`.
  * @see {@linkcode parallelMapWorkers} to run the handler on worker threads instead — it takes a module path rather than
  *   a closure, because a closure cannot cross a thread boundary.
  * @see The "Choosing a primitive" table in the README, which keys the decision off per-row work.

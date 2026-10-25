@@ -301,6 +301,65 @@ async function* filterValuesConcurrently<T>(
 	}
 }
 
+/**
+ * `parallelMap` with `ordered: true`: the window {@linkcode filterValuesConcurrently} keeps, yielding each mapped value
+ * at its input's position.
+ */
+async function* mapValuesConcurrentlyInOrder<T, U>(
+	source: AsyncIterable<T>,
+	fn: (value: T, counter: number) => U | PromiseLike<U>,
+	concurrency: number | undefined,
+	signal?: AbortSignal
+): AsyncGenerator<U> {
+	const limit = concurrency ?? (await defaultConcurrency())
+	const upstream = source[Symbol.asyncIterator]()
+	// Dispatched callbacks in input order. `head` advances instead of `shift()`, and consumed entries are spliced off
+	// once `head` reaches `limit`, so the array never holds more than `2 * limit` entries.
+	const window: (U | PromiseLike<U>)[] = []
+	let head = 0
+	let counter = 0
+	let exhausted = false
+
+	try {
+		for (;;) {
+			if (signal?.aborted) break
+
+			while (!exhausted && window.length - head < limit) {
+				const result = await upstream.next()
+
+				if (result.done) {
+					exhausted = true
+
+					break
+				}
+
+				const produced = fn(result.value, counter++)
+
+				// A callback can reject before its turn. Attach a handler here. The window rethrows the error when it reaches it.
+				if (isThenable(produced)) {
+					Promise.resolve(produced).then(undefined, noop)
+				}
+
+				window.push(produced)
+			}
+
+			if (head === window.length) break
+
+			const produced = window[head++]!
+
+			if (head >= limit) {
+				window.splice(0, head)
+				head = 0
+			}
+
+			yield isThenable(produced) ? await produced : produced
+		}
+	} finally {
+		await upstream.return?.()
+		await Promise.allSettled(window.slice(head))
+	}
+}
+
 function noop(): void {}
 
 /**
@@ -322,6 +381,17 @@ export interface ParallelMapSequenceOptions {
 	 * settle so every rejection is observed.
 	 */
 	signal?: AbortSignal
+
+	/**
+	 * `parallelMap` only: yield each result at its input's position rather than as it completes.
+	 *
+	 * Use it when the output must be reproducible, such as records a later step deduplicates first-come. It costs
+	 * head-of-line blocking, as in {@linkcode AsyncSequence.parallelFilter}: dispatch runs at most `concurrency` calls
+	 * ahead of the oldest unsettled one. `parallelFilter` always yields in input order and ignores this option.
+	 *
+	 * @defaultValue `false`
+	 */
+	ordered?: boolean
 }
 
 /**
@@ -717,8 +787,9 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T>, AsyncDisposab
 	}
 
 	/**
-	 * Map values through a callback with up to `concurrency` calls in flight, yielding in **completion order** — not
-	 * input order. When only membership changes and order must survive, use {@linkcode parallelFilter}.
+	 * Map values through a callback with up to `concurrency` calls in flight, yielding in **completion order**, or in
+	 * input order with `ordered: true`. When only membership changes and order must survive, use
+	 * {@linkcode parallelFilter}.
 	 *
 	 * The callback is a closure, so it runs on the caller's thread. This overlaps _latency_ (file reads, network) and
 	 * does not improve CPU-bound work. Use `parallelMapWorkers` or `AsyncSpliterator.asManyWorkers`, which take a module
@@ -728,11 +799,11 @@ export class AsyncSequence<T> implements AsyncIterableIterator<T>, AsyncDisposab
 	 */
 	public parallelMap<U>(
 		fn: (value: T, counter: number) => U | PromiseLike<U>,
-		{ concurrency, signal }: ParallelMapSequenceOptions = {}
+		{ concurrency, signal, ordered }: ParallelMapSequenceOptions = {}
 	): AsyncSequence<U> {
-		return new AsyncSequence<U>(
-			closingWith(mapValuesConcurrently(this, fn, normalizeConcurrency(concurrency), signal), this)
-		)
+		const map = ordered ? mapValuesConcurrentlyInOrder : mapValuesConcurrently
+
+		return new AsyncSequence<U>(closingWith(map(this, fn, normalizeConcurrency(concurrency), signal), this))
 	}
 
 	/**
