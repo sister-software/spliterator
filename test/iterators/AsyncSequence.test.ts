@@ -701,6 +701,68 @@ describe("fusion barriers close an unpulled upstream", () => {
 	})
 })
 
+describe("parallelMap ordered", () => {
+	test("yields each result at its input's position when early callbacks settle last", async () => {
+		const result = await AsyncSequence.from(range(8))
+			.parallelMap(
+				(value) =>
+					new Promise<number>((resolve) => {
+						setTimeout(() => resolve(value * 10), 8 - value)
+					}),
+				{ concurrency: 4, ordered: true }
+			)
+			.toArray()
+
+		expect(result).toEqual([0, 10, 20, 30, 40, 50, 60, 70])
+	})
+
+	test("keeps at most `concurrency` callbacks in flight", async () => {
+		let inFlight = 0
+		let peak = 0
+
+		await AsyncSequence.from(range(20))
+			.parallelMap(
+				async (value) => {
+					inFlight++
+					peak = Math.max(peak, inFlight)
+
+					await new Promise((resolve) => {
+						setTimeout(resolve, 20 - value)
+					})
+
+					inFlight--
+
+					return value
+				},
+				{ concurrency: 3, ordered: true }
+			)
+			.toArray()
+
+		expect(peak).toBeLessThanOrEqual(3)
+	})
+
+	test("accepts a synchronous callback and duplicate values", async () => {
+		const result = await AsyncSequence.from(["a", "a", "b"])
+			.parallelMap((value, counter) => `${value}${counter}`, { concurrency: 2, ordered: true })
+			.toArray()
+
+		expect(result).toEqual(["a0", "a1", "b2"])
+	})
+
+	test("rejects with a callback's error at its position", async () => {
+		const sequence = AsyncSequence.from(range(5)).parallelMap(
+			async (value) => {
+				if (value === 2) throw new Error("boom")
+
+				return value
+			},
+			{ concurrency: 3, ordered: true }
+		)
+
+		await expect(sequence.toArray()).rejects.toThrow("boom")
+	})
+})
+
 describe("parallelMap", () => {
 	test("maps every value", async () => {
 		const result = await AsyncSequence.from(range(10))
