@@ -5,12 +5,14 @@
  */
 
 import { AsyncSpliterator } from "#core/AsyncSpliterator"
-import { CharacterSequence, type CharacterSequenceInput } from "#core/CharacterSequence"
+import { CharacterSequence, type CharacterSequenceInput, normalizeCharacterInput } from "#core/CharacterSequence"
+import { JSONRowError } from "#core/errors"
 import { Spliterator, type SpliteratorInit } from "#core/Spliterator"
 import { type CommentInput, createCommentFilter, createTextCommentFilter } from "#formats/comment-filter"
 import type { AsyncDataResource } from "#internal/shared"
 import { type AdaptiveSourceInit, openDelimitedRows } from "#io/adaptive-source"
-import { canSplitAsText, textRows, windowedTextRows } from "#io/windowed-text"
+import { maybeDecompressSync } from "#io/compression"
+import { canSplitAsText, isBlankText, textRows, windowedTextRows } from "#io/windowed-text"
 import { AsyncSequence } from "#iterators/AsyncSequence"
 import { Sequence } from "#iterators/Sequence"
 
@@ -28,37 +30,61 @@ export interface JSONSpliteratorInit {
 	comment?: CommentInput
 }
 
+function parseError(rowCursor: number, cause: unknown): JSONRowError {
+	return new JSONRowError(rowCursor, cause)
+}
+
 /**
  * The row generator behind {@linkcode JSONSpliterator.from}, kept at module scope so `from` can hand it to a
  * {@linkcode Sequence} while staying lazy — calling a generator function runs none of its body.
+ *
+ * A row is skipped, in order, for being a comment, then for being blank (with `skipEmpty`), and `drop` and `take` count
+ * what is left. The error's row index counts the rows that reached `JSON.parse`.
  */
 function* parseRows<T>(
 	source: CharacterSequenceInput,
-	{ comment, ...options }: SpliteratorInit & JSONSpliteratorInit = {}
+	{
+		comment,
+		drop: dropInput = 0,
+		take: takeInput = Infinity,
+		decompress = true,
+		...options
+	}: SpliteratorInit & JSONSpliteratorInit = {}
 ): Generator<T> {
+	const skipBlank = options.skipEmpty ?? true
+	const drop = Math.max(0, dropInput)
+	const take = Math.max(0, takeInput)
+	let skipped = 0
 	let rowCursor = 0
+
+	if (take <= 0) return
 
 	// A string is already text: split it as text rather than encoding, scanning and decoding each row back.
 	if (typeof source === "string" && canSplitAsText(options)) {
 		const parseableText = createTextCommentFilter(comment)
 
-		for (const row of textRows(source, options)) {
+		for (const row of textRows(source, options, true)) {
 			if (parseableText && !parseableText(row)) continue
+
+			if (skipBlank && isBlankText(row)) continue
+
+			if (skipped < drop) {
+				skipped++
+
+				continue
+			}
 
 			let parsed: T
 
 			try {
 				parsed = JSON.parse(row) as T
 			} catch (parsedError) {
-				const error = new SyntaxError(`Failed to parse JSON at row ${rowCursor}`)
-				error.cause = parsedError
-
-				throw error
+				throw parseError(rowCursor, parsedError)
 			}
 
 			yield parsed
 
-			rowCursor++
+			if (++rowCursor >= take) return
 		}
 
 		return
@@ -66,28 +92,32 @@ function* parseRows<T>(
 
 	const decoder = new TextDecoder()
 	const parseable = createCommentFilter(comment)
+	const bytes = typeof source === "string" ? source : maybeDecompressSync(normalizeCharacterInput(source), decompress)
 
-	const spliterator = Spliterator.fromSync(source, options)
-
-	for (const row of spliterator) {
+	for (const row of Spliterator.fromSync(bytes, options)) {
 		if (parseable && !parseable(row)) continue
+
+		const content = decoder.decode(row)
+
+		if (skipBlank && isBlankText(content)) continue
+
+		if (skipped < drop) {
+			skipped++
+
+			continue
+		}
 
 		let parsed: T
 
 		try {
-			const content = decoder.decode(row)
-
 			parsed = JSON.parse(content) as T
 		} catch (parsedError) {
-			const error = new SyntaxError(`Failed to parse JSON at row ${rowCursor}`)
-			error.cause = parsedError
-
-			throw error
+			throw parseError(rowCursor, parsedError)
 		}
 
 		yield parsed
 
-		rowCursor++
+		if (++rowCursor >= take) return
 	}
 }
 
@@ -142,22 +172,27 @@ export abstract class JSONSpliterator {
 		{ comment, drop = 0, take = Infinity, ...options }: AdaptiveSourceInit & JSONSpliteratorInit = {}
 	): AsyncSequence<T> {
 		const decoder = new TextDecoder()
+		// A window decoder keeps every BOM; `stripBOM` then drops one per row, as `decoder` does for a row decoded alone.
+		const windowDecoder = new TextDecoder("utf-8", { ignoreBOM: true })
 		const parseableBytes = createCommentFilter(comment)
 		const parseableText = createTextCommentFilter(comment)
+		const skipBlank = options.skipEmpty ?? true
 
 		// A streamed source is decoded per engine window and split as text (see `windowedTextRows`), which is where this
 		// path stopped losing to `readline`: 1289ms → 707ms over 600k rows, `readline` + `JSON.parse` at 702ms. The bulk
 		// branch's rows are bytes decoded per row below. `drop` and `take` are sequence ops rather than engine options
-		// because a window cannot have rows removed from it, and they count after `skipEmpty` either way.
+		// because a window cannot have rows removed from it, and they count the rows left after comment and blank rows go.
 		let rows = AsyncSequence.from<Uint8Array | string>(async () => {
 			const opened = await openDelimitedRows(source, options)
 
-			return opened instanceof AsyncSpliterator
+			// The window split is a plain text split, so a quote-aware read keeps the engine's own records.
+			return opened instanceof AsyncSpliterator && !options.enableQuoteHandling
 				? windowedTextRows(opened, {
 						delimiter: new CharacterSequence(options.delimiter),
 						crlf: options.crlf ?? false,
 						skipEmpty: options.skipEmpty ?? true,
-						decoder,
+						decoder: windowDecoder,
+						stripBOM: true,
 						decodeError: (rowIndex, cause) => {
 							const error = new SyntaxError(`Failed to decode data at row ${rowIndex}`)
 							error.cause = cause
@@ -168,14 +203,6 @@ export abstract class JSONSpliterator {
 				: opened
 		})
 
-		if (drop > 0) {
-			rows = rows.drop(drop)
-		}
-
-		if (Number.isFinite(take)) {
-			rows = rows.take(take)
-		}
-
 		// Skipping is a fused op ahead of the parse. The chain runs its ops in one loop, so
 		// this costs an extra iteration per row rather than an extra async boundary. When no prefix is configured, the
 		// chain adds no operation and the hot path is unchanged.
@@ -183,17 +210,28 @@ export abstract class JSONSpliterator {
 			rows = rows.filter((row) => (typeof row === "string" ? parseableText(row) : parseableBytes(row)))
 		}
 
+		let texts = rows.map((row) => (typeof row === "string" ? row : decoder.decode(row)))
+
+		if (skipBlank) {
+			texts = texts.filter((row) => !isBlankText(row))
+		}
+
+		if (drop > 0) {
+			texts = texts.drop(drop)
+		}
+
+		if (Number.isFinite(take)) {
+			texts = texts.take(take)
+		}
+
 		// Parsing is an op on the sequence rather than a generator wrapped inside one. An allocating row body makes the extra
 		// async frame a wrapping generator adds disproportionately expensive: 1460ms against 1278ms over 500k rows, where
 		// the same layer costs a third as much when the body only decodes.
-		return rows.map((row, rowCursor) => {
+		return texts.map((row, rowCursor) => {
 			try {
-				return JSON.parse(typeof row === "string" ? row : decoder.decode(row)) as T
+				return JSON.parse(row) as T
 			} catch (parsedError) {
-				const error = new SyntaxError(`Failed to parse JSON at row ${rowCursor}`)
-				error.cause = parsedError
-
-				throw error
+				throw parseError(rowCursor, parsedError)
 			}
 		})
 	}

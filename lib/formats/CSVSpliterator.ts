@@ -11,7 +11,6 @@ import {
 	normalizeCharacterInput,
 } from "#core/CharacterSequence"
 import { AsyncSpliterator, Spliterator, type SpliteratorInit } from "#core/Spliterator"
-import { normalizeColumnNames } from "#formats/casing"
 import {
 	cellScanEligibility,
 	decodeForCellScan,
@@ -24,6 +23,7 @@ import { splitRowColumns } from "#formats/csv-columns"
 import {
 	bindTransformers,
 	createRowEmitters,
+	headerNames,
 	type RowEmitter,
 	type RowOutputMode,
 	type RowSpliteratorInit,
@@ -34,6 +34,7 @@ import {
 } from "#formats/row-emitters"
 import type { AsyncChunkIterator, AsyncDataResource } from "#internal/shared"
 import { type AdaptiveSourceInit, openDelimitedRows } from "#io/adaptive-source"
+import { maybeDecompressSync } from "#io/compression"
 import { AsyncSequence, BATCHED_SOURCE, type BatchedAsyncIterable } from "#iterators/AsyncSequence"
 import { Sequence } from "#iterators/Sequence"
 
@@ -71,7 +72,9 @@ export interface CSVSpliteratorInit extends SpliteratorInit, RowSpliteratorInit<
 	 * Whether to treat double-quoted regions as opaque. A delimiter inside `"…"` does not split. Wrapping quotes are
 	 * stripped and doubled quotes (`""`) unescape to `"`.
 	 *
-	 * @default true
+	 * Input that ends inside quotes throws an `UnterminatedQuoteError` unless `allowUnterminatedQuote` is set.
+	 *
+	 * @default true for CSV and PSV, false for TSV (the class's {@linkcode CSVSpliterator.EnableQuoteHandling})
 	 */
 	enableQuoteHandling?: boolean
 
@@ -109,7 +112,12 @@ export interface CSVSpliteratorInit extends SpliteratorInit, RowSpliteratorInit<
  * {@linkcode Sequence} while staying lazy — calling a generator function runs none of its body. `from` reads
  * `this.ColumnDelimiter` on the way in, so a subclass's delimiter still wins.
  */
-function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, defaultColumnDelimiter: number) {
+function* splitRows(
+	source: CharacterSequenceInput,
+	init: CSVSpliteratorInit,
+	defaultColumnDelimiter: number,
+	defaultEnableQuoteHandling: boolean
+) {
 	const {
 		// ---
 		header = true,
@@ -117,11 +125,10 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 		// Declared before `normalizeKeys`, whose own default reads this one.
 		mode = header === false ? "array" : "object",
 		transformers: transformersInput = [],
-		// Matches `fromAsync`. These two defaulted differently until 4.0.1, so the same options
-		// object produced `row.some_name` from one entry point and `row["Some Name"]` from the other.
-		normalizeKeys = mode !== "array",
+		// Matches `fromAsync`. Keys are the header as written; `true` was the default for object rows before 10.0.0.
+		normalizeKeys = false,
 		columnDelimiter: columnDelimiterInput = defaultColumnDelimiter,
-		enableQuoteHandling = true,
+		enableQuoteHandling = defaultEnableQuoteHandling,
 		// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
 		// never carries a stray `\r` on Windows-lineage sources.
 		crlf = true,
@@ -129,6 +136,7 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 		columnScan = "auto",
 		take: takeInput = Infinity,
 		drop: dropInput = 0,
+		decompress = true,
 		...rowInit
 	} = init
 
@@ -141,7 +149,13 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 
 	const decoder = new TextDecoder()
 	const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? defaultColumnDelimiter)
-	const bytes = normalizeCharacterInput(source)
+
+	// A string is text by definition; bytes may arrive compressed.
+	const bytes =
+		typeof source === "string"
+			? normalizeCharacterInput(source)
+			: maybeDecompressSync(normalizeCharacterInput(source), decompress)
+
 	const rowDelimiter = new CharacterSequence(rowInit.delimiter ?? Delimiters.LineFeed)
 
 	const plan = cellScanEligibility({
@@ -174,6 +188,7 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 			crlf,
 			trim,
 			skipEmpty: rowInit.skipEmpty ?? true,
+			allowUnterminatedQuote: rowInit.allowUnterminatedQuote ?? false,
 		})
 
 		let headerPending = header
@@ -182,9 +197,7 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 		for (const batch of batches) {
 			for (const columns of batch) {
 				if (headerPending) {
-					const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
-
-					transformers = bindTransformers(headers, transformersInput)
+					transformers = bindTransformers(headerNames(columns, normalizeKeys, mode), transformersInput)
 					headerPending = false
 
 					continue
@@ -217,9 +230,8 @@ function* splitRows(source: CharacterSequenceInput, init: CSVSpliteratorInit, de
 		if (result.done) return
 
 		const columns = splitRowColumns(result.value, columnDelimiter, decoder, enableQuoteHandling, trim)
-		const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
 
-		transformers = bindTransformers(headers, transformersInput)
+		transformers = bindTransformers(headerNames(columns, normalizeKeys, mode), transformersInput)
 	}
 
 	for (const row of rows) {
@@ -258,6 +270,14 @@ export abstract class CSVSpliterator {
 	 */
 	public static ColumnDelimiter: number = Delimiters.Comma
 
+	/**
+	 * Whether double-quoted regions are opaque by default. {@linkcode TSVSpliterator} turns this off: the TSV format has
+	 * no quoting, and a `"` in a tab-separated source is an ordinary character.
+	 *
+	 * @default true
+	 */
+	public static EnableQuoteHandling = true
+
 	constructor() {
 		throw new TypeError("Static class cannot be instantiated. Did you mean `CSVSpliterator.from`?")
 	}
@@ -273,15 +293,21 @@ export abstract class CSVSpliterator {
 	public static count(source: CharacterSequenceInput, init: CSVSpliteratorInit = {}): number {
 		const {
 			header = true,
-			enableQuoteHandling = true,
+			enableQuoteHandling = this.EnableQuoteHandling,
 			crlf = true,
 			trim: _trim,
 			drop = 0,
 			take = Infinity,
+			decompress = true,
 			...rowInit
 		} = init
 
-		const rows = Spliterator.fromSync(source, { ...rowInit, crlf, enableQuoteHandling })
+		const bytes =
+			typeof source === "string"
+				? normalizeCharacterInput(source)
+				: maybeDecompressSync(normalizeCharacterInput(source), decompress)
+
+		const rows = Spliterator.fromSync(bytes, { ...rowInit, crlf, enableQuoteHandling })
 
 		if (header && rows.next().done) return 0
 
@@ -318,7 +344,7 @@ export abstract class CSVSpliterator {
 	): Promise<number> {
 		const {
 			header = true,
-			enableQuoteHandling = true,
+			enableQuoteHandling = this.EnableQuoteHandling,
 			crlf = true,
 			trim: _trim,
 			drop = 0,
@@ -384,7 +410,7 @@ export abstract class CSVSpliterator {
 	 */
 	public static from(source: CharacterSequenceInput, init?: CSVSpliteratorInit): Sequence<unknown>
 	public static from(source: CharacterSequenceInput, init: CSVSpliteratorInit = {}) {
-		return new Sequence(splitRows(source, init, this.ColumnDelimiter))
+		return new Sequence(splitRows(source, init, this.ColumnDelimiter, this.EnableQuoteHandling))
 	}
 
 	/**
@@ -436,6 +462,7 @@ export abstract class CSVSpliterator {
 		init: CSVSpliteratorInit & AdaptiveSourceInit = {}
 	): AsyncSequence<unknown> {
 		const defaultColumnDelimiter = this.ColumnDelimiter
+		const defaultEnableQuoteHandling = this.EnableQuoteHandling
 
 		const {
 			// ---
@@ -443,9 +470,9 @@ export abstract class CSVSpliterator {
 			// Without a header row there are no column names, so a row can only be an array.
 			mode = header === false ? "array" : "object",
 			transformers: transformersInput = [],
-			normalizeKeys = mode !== "array",
+			normalizeKeys = false,
 			columnDelimiter: columnDelimiterInput,
-			enableQuoteHandling = true,
+			enableQuoteHandling = defaultEnableQuoteHandling,
 			// RFC 4180 mandates CRLF row terminators — accept them by default so the last column
 			// never carries a stray `\r` on Windows-lineage sources.
 			crlf = true,
@@ -460,6 +487,7 @@ export abstract class CSVSpliterator {
 		const columnDelimiter = new CharacterSequence(columnDelimiterInput ?? defaultColumnDelimiter)
 		const rowDelimiter = new CharacterSequence(rowInit.delimiter ?? Delimiters.LineFeed)
 		const skipEmpty = rowInit.skipEmpty ?? true
+		const allowUnterminatedQuote = rowInit.allowUnterminatedQuote ?? false
 		const decoder = new TextDecoder()
 
 		// Populated by the header pass below before the first row op runs, since the source thunk resolves on the first
@@ -493,6 +521,7 @@ export abstract class CSVSpliterator {
 				crlf,
 				trim,
 				skipEmpty,
+				allowUnterminatedQuote,
 			})
 		}
 
@@ -529,6 +558,7 @@ export abstract class CSVSpliterator {
 					crlf,
 					trim,
 					skipEmpty,
+					allowUnterminatedQuote,
 				},
 				(window) => {
 					const fallbackRows: string[][] = []
@@ -578,9 +608,8 @@ export abstract class CSVSpliterator {
 						if (result.done) return rows
 
 						const [columns, ...remainder] = result.value
-						const headers = normalizeKeys ? normalizeColumnNames(columns!) : columns!
 
-						transformers = bindTransformers(headers, transformersInput)
+						transformers = bindTransformers(headerNames(columns!, normalizeKeys, mode), transformersInput)
 
 						return reheadBatches(remainder, batches)
 					}
@@ -592,9 +621,8 @@ export abstract class CSVSpliterator {
 					if (result.done) return rows
 
 					const columns = toColumns(result.value)
-					const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
 
-					transformers = bindTransformers(headers, transformersInput)
+					transformers = bindTransformers(headerNames(columns, normalizeKeys, mode), transformersInput)
 				} catch (error) {
 					try {
 						await iterator.return?.()

@@ -26,6 +26,7 @@ import {
 	smartSnakeCase,
 	Spliterator,
 	TextSpliterator,
+	UnterminatedQuoteError,
 } from "spliterator"
 import { describe, test } from "vitest"
 
@@ -64,14 +65,79 @@ test("Spliterator: empty fields survive quote handling with skipEmpty false", ({
 	expect(slices).toEqual(['"a"', "", "c", ""])
 })
 
-test("Spliterator: unclosed quote consumes the tail as one slice", ({ expect }) => {
+test("Spliterator: an unclosed quote throws once the records before it are out", ({ expect }) => {
+	const source = encoder.encode('a,"b,c')
+	const iterator = new Spliterator(source, { delimiter: ",", enableQuoteHandling: true })
+
+	expect(decoder.decode(iterator.next().value!)).toBe("a")
+	expect(() => iterator.next()).toThrow(UnterminatedQuoteError)
+	expect(iterator.next().done, "The engine is finished after throwing").toBe(true)
+})
+
+test("Spliterator: the error names the byte offset of the record holding the open quote", ({ expect }) => {
+	const source = encoder.encode('é,"b,c')
+
+	try {
+		Array.from(new Spliterator(source, { delimiter: ",", enableQuoteHandling: true }))
+		expect.unreachable()
+	} catch (error) {
+		expect(error).toBeInstanceOf(UnterminatedQuoteError)
+		// `é` is two bytes and the delimiter one, so the open record starts at byte 3.
+		expect((error as UnterminatedQuoteError).byteOffset).toBe(3)
+	}
+})
+
+test("Spliterator: allowUnterminatedQuote reads the tail as one slice", ({ expect }) => {
 	const source = encoder.encode('a,"b,c')
 
-	const slices = Array.from(new Spliterator(source, { delimiter: ",", enableQuoteHandling: true }), (bytes) =>
-		decoder.decode(bytes)
+	const slices = Array.from(
+		new Spliterator(source, { delimiter: ",", enableQuoteHandling: true, allowUnterminatedQuote: true }),
+		(bytes) => decoder.decode(bytes)
 	)
 
 	expect(slices).toEqual(["a", '"b,c'])
+})
+
+test("AsyncSpliterator: an unclosed quote throws with the stream offset across compressions", async ({ expect }) => {
+	// Enough closed records ahead of the open one that the buffer compresses before the end.
+	const head = "x,y\n".repeat(50_000)
+
+	const spliterator = AsyncSpliterator.from(chunksOf(head, 'z,"open\nrest'), {
+		delimiter: "\n",
+		enableQuoteHandling: true,
+		highWaterMark: 4096,
+	})
+
+	let rows = 0
+	let caught: unknown
+
+	try {
+		for await (const _ of spliterator) {
+			rows++
+		}
+	} catch (error) {
+		caught = error
+	}
+
+	expect(caught).toBeInstanceOf(UnterminatedQuoteError)
+	expect((caught as UnterminatedQuoteError).byteOffset).toBe(head.length)
+	expect(rows).toBe(50_000)
+})
+
+test("AsyncSpliterator: allowUnterminatedQuote reads the tail as one slice", async ({ expect }) => {
+	const spliterator = AsyncSpliterator.from(chunksOf('a\n"b\nc'), {
+		delimiter: "\n",
+		enableQuoteHandling: true,
+		allowUnterminatedQuote: true,
+	})
+
+	const rows: string[] = []
+
+	for await (const bytes of spliterator) {
+		rows.push(decoder.decode(bytes))
+	}
+
+	expect(rows).toEqual(["a", '"b\nc'])
 })
 
 test("AsyncSpliterator: quote state survives chunk boundaries", async ({ expect }) => {
@@ -140,7 +206,10 @@ test("CSV: the fused quoted walk agrees with unquoteColumn on the awkward shapes
 	// Empty quoted cell, doubled quote only, doubled quote after a plain cell, quotes mid-cell (left alone, since the
 	// cell does not begin with one), a doubled quote in the last cell, and an unterminated quote running to EOF.
 	const source = encoder.encode('"",""""\nx,"a""b"\na"b"c,d\n"e","f""g"\n"open,d')
-	const rows = Array.from(CSVSpliterator.from(source, { mode: "array", header: false, trim: false }))
+
+	const rows = Array.from(
+		CSVSpliterator.from(source, { mode: "array", header: false, trim: false, allowUnterminatedQuote: true })
+	)
 
 	expect(rows).toEqual([["", '"'], ["x", 'a"b'], ['a"b"c', "d"], ["e", 'f"g'], ['"open,d']])
 })
@@ -189,8 +258,16 @@ test("CSV fast path: an unmatched quote opens a region that runs to EOF, as it d
 	// Malformed CSV has no RFC 4180 rule for a lone `"` mid-field. The row splitter opens a quoted region on it just as
 	// the column splitter does, so the row continues through the newline. This test preserves that interpretation.
 	const source = encoder.encode('h1,h2\n5" pipe,b\n')
+
+	expect(
+		() => Array.from(CSVSpliterator.from(source, { mode: "array", enableQuoteHandling: true })),
+		"By default the open region is an error, not a short file"
+	).toThrow(UnterminatedQuoteError)
+
 	// The swallowed newline is the point, so this is a `trim: false` parity case.
-	const rows = Array.from(CSVSpliterator.from(source, { mode: "array", enableQuoteHandling: true, trim: false }))
+	const rows = Array.from(
+		CSVSpliterator.from(source, { mode: "array", enableQuoteHandling: true, trim: false, allowUnterminatedQuote: true })
+	)
 
 	expect(rows).toEqual([['5" pipe,b\n']])
 })
@@ -240,18 +317,19 @@ test("CSV fast path: multi-byte UTF-8 content is unharmed by decoding before spl
 
 test("CSV: quoted header columns", ({ expect }) => {
 	const source = encoder.encode('"h,1",h2\na,b\n')
-	const rows = Array.from(CSVSpliterator.from(source, { mode: "object", enableQuoteHandling: true }))
 
-	// Object mode normalizes keys by default. The comma enclosed by the quotes becomes an underscore.
+	const rows = Array.from(
+		CSVSpliterator.from(source, { mode: "object", enableQuoteHandling: true, normalizeKeys: true })
+	)
+
+	// The comma enclosed by the quotes becomes an underscore when keys are normalized.
 	expect(rows).toEqual([{ h_1: "a", h2: "b" }])
 })
 
-test("CSV: quoted header columns keep their raw text under normalizeKeys: false", ({ expect }) => {
+test("CSV: quoted header columns keep their raw text by default", ({ expect }) => {
 	const source = encoder.encode('"h,1",h2\na,b\n')
 
-	const rows = Array.from(
-		CSVSpliterator.from(source, { mode: "object", enableQuoteHandling: true, normalizeKeys: false })
-	)
+	const rows = Array.from(CSVSpliterator.from(source, { mode: "object", enableQuoteHandling: true }))
 
 	expect(rows).toEqual([{ "h,1": "a", h2: "b" }])
 })
@@ -265,9 +343,9 @@ test("CSV: from and fromAsync agree on default keys", async ({ expect }) => {
 	)
 
 	// The two entry points defaulted `normalizeKeys` differently until 4.0.1: the same options
-	// object produced `row.some_name` from one and `row["Some Name"]` from the other.
+	// object produced `row.some_name` from one and `row["Some Name"]` from the other. Since 10.0.0 both keep the header.
 	expect(sync).toEqual(asyncRows)
-	expect(sync).toEqual([{ h_1: "a", some_name: "b" }])
+	expect(sync).toEqual([{ "h,1": "a", "Some Name": "b" }])
 })
 
 test("CSV: normalizeKeys lower-cases an ALL CAPS header", ({ expect }) => {

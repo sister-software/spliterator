@@ -12,6 +12,7 @@ import {
 	normalizeCharacterInput,
 	type CharacterSequenceInput,
 } from "#core/CharacterSequence"
+import { UnterminatedQuoteError } from "#core/errors"
 import { IndexQueue } from "#core/IndexQueue"
 import { loadNodeFs } from "#internal/node-modules"
 import {
@@ -116,11 +117,13 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 		}
 
 		if (isPathBuilderLike(source) || source instanceof URL || isFileHandleLike(source)) {
-			return loadNodeFs().then(async ({ createChunkIterator }) => {
+			return loadNodeFs().then(async ({ createChunkIterator, resolveCompressedSibling }) => {
 				let chunkIterator: AsyncChunkIterator
 
 				try {
-					chunkIterator = await createChunkIterator(source, {
+					const resolved = init.preferCompressed === false ? source : await resolveCompressedSibling(source)
+
+					chunkIterator = await createChunkIterator(resolved, {
 						highWaterMark: init.highWaterMark,
 					})
 				} catch (error) {
@@ -215,6 +218,7 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 
 		this.#skipEmpty = init.skipEmpty ?? true
 		this.#enableQuoteHandling = init.enableQuoteHandling ?? false
+		this.#allowUnterminatedQuote = init.allowUnterminatedQuote ?? false
 		this.#crlf = init.crlf ?? false
 
 		this.#debug = init.debug ?? false
@@ -254,6 +258,11 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 	 */
 	readonly #doubleQuoteSequence: CharacterSequence = new CharacterSequence('"')
 	readonly #enableQuoteHandling: boolean
+
+	/**
+	 * Whether input ending inside quotes is read as one final record rather than thrown on.
+	 */
+	readonly #allowUnterminatedQuote: boolean
 
 	/**
 	 * Whether to trim a carriage return immediately preceding each delimiter match.
@@ -370,6 +379,13 @@ export class Spliterator<R extends Uint8Array | DataView | ArrayBuffer = Uint8Ar
 
 		// There's a few special cases we could get this far and not have drained the buffer.
 		const lastByteRange = this.#previousByteRange
+
+		// The scan has reached the end of the source, so a quote still open here never closes.
+		if (this.#enableQuoteHandling && this.#insideQuotes && !this.#allowUnterminatedQuote) {
+			this.#done = true
+
+			throw new UnterminatedQuoteError(this.#readPosition)
+		}
 
 		if (this.#readPosition < sourceByteLength) {
 			this.#indices.enqueue([this.#readPosition, sourceByteLength])

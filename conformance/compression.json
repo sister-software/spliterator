@@ -1,0 +1,11 @@
+{
+	"$comment": "Sources compressed with gzip or zstd are detected by their magic bytes and decompressed before splitting. Inputs were produced with node:zlib; each case's `plain` field shows the uncompressed text.",
+	"format": "text",
+	"cases": [
+		{ "name": "gzip", "input": { "base64": "H4sIAAAAAAAAA0vkSuICAJcqVxgEAAAA" }, "plain": "a\nb\n", "expect": ["a", "b"] },
+		{ "name": "concatenated gzip members", "input": { "base64": "H4sIAAAAAAAAA0vkAgAHoerdAgAAAB+LCAAAAAAAAANL4gIAxPLH9gIAAAA=" }, "plain": "a\n + b\n", "expect": ["a", "b"] },
+		{ "name": "empty gzip", "input": { "base64": "H4sIAAAAAAAAAwMAAAAAAAAAAAA=" }, "plain": "", "expect": [] },
+		{ "name": "zstd JSONL", "format": "jsonl", "input": { "base64": "KLUv/SAQgQAAeyJhIjoxfQp7ImEiOjJ9Cg==" }, "plain": "{\"a\":1}\n{\"a\":2}\n", "expect": [{ "a": 1 }, { "a": 2 }] },
+		{ "name": "concatenated zstd frames", "format": "csv", "input": { "base64": "KLUv/SAIQQAAeCx5CjEsMgootS/9IAQhAAAzLDQK" }, "plain": "x,y\n1,2\n + 3,4\n", "expect": [{ "x": "1", "y": "2" }, { "x": "3", "y": "4" }] }
+	]
+}

@@ -4,7 +4,7 @@
  * @copyright Sister Software
  */
 
-import { CSVSpliterator } from "spliterator"
+import { CSVSpliterator, DuplicateHeaderError } from "spliterator"
 import { describe, expect, test } from "vitest"
 
 /**
@@ -90,18 +90,39 @@ describe("row emitters", () => {
 		}
 	})
 
-	test("duplicate header names: the last column wins on both paths", () => {
-		const rows = CSVSpliterator.from(
+	test("duplicate header names throw in object mode rather than losing a column", () => {
+		expect(() =>
+			CSVSpliterator.from(
+				csv("k,k", (i) => `first${i},second${i}`),
+				{
+					mode: "object",
+					trim: false,
+				}
+			).toArray()
+		).toThrow(DuplicateHeaderError)
+	})
+
+	test("duplicate header names are kept in entries mode and suffixed under normalizeKeys", () => {
+		const entries = CSVSpliterator.from(
+			csv("k,k", (i) => `first${i},second${i}`),
+			{ mode: "entries" }
+		).toArray()
+
+		expect(entries[LATE]).toEqual([
+			["k", `first${LATE}`, 0],
+			["k", `second${LATE}`, 1],
+		])
+
+		const normalized = CSVSpliterator.from(
 			csv("k,k", (i) => `first${i},second${i}`),
 			{
 				mode: "object",
-				normalizeKeys: false,
-				trim: false,
+				normalizeKeys: true,
 			}
 		).toArray()
 
-		expect(rows[EARLY]).toEqual({ k: `second${EARLY}` })
-		expect(rows[LATE]).toEqual({ k: `second${LATE}` })
+		expect(normalized[EARLY]).toEqual({ k: `first${EARLY}`, k_2: `second${EARLY}` })
+		expect(normalized[LATE]).toEqual({ k: `first${LATE}`, k_2: `second${LATE}` })
 	})
 
 	test("entries rows carry key, value and index on both sides of the threshold", () => {

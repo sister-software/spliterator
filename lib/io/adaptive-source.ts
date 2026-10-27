@@ -8,6 +8,7 @@ import { CharacterSequence } from "#core/CharacterSequence"
 import { type AsyncSpliteratorInit, Spliterator } from "#core/Spliterator"
 import { loadNodeFs } from "#internal/node-modules"
 import type { AsyncChunkIterator, AsyncDataResource } from "#internal/shared"
+import { decompressChunks, sniffCompression } from "#io/compression"
 
 /**
  * Byte length at or below which a source is read whole and parsed synchronously.
@@ -108,23 +109,47 @@ export async function openDelimitedRows<R = Uint8Array>(
 	}
 
 	let size: number
+	let resolved: AsyncDataResource = source
 
 	try {
-		const { readFileSize } = await loadNodeFs()
+		const { readFileSize, resolveCompressedSibling } = await loadNodeFs()
 
-		size = await readFileSize(source)
+		if (init.preferCompressed !== false) {
+			resolved = await resolveCompressedSibling(source)
+		}
+
+		size = await readFileSize(resolved)
 	} catch {
 		// Unsized or unreachable by the Node adapter — the streaming path owns reporting why.
 		return Spliterator.fromAsync(source, init)
 	}
 
+	// The sibling is resolved once, here; the engine must not look for a sibling of the sibling.
+	const resolvedInit: AdaptiveSourceInit = { ...init, preferCompressed: false }
+
 	if (size > threshold) {
-		return Spliterator.fromAsync(source, init)
+		return Spliterator.fromAsync(resolved, resolvedInit)
 	}
 
 	const { readBytes } = await loadNodeFs()
+	const bytes = await readBytes(resolved, 0, size)
 
-	return bulk(await readBytes(source, 0, size), init, bulkParser)
+	// A compressed file's size says nothing about its content's, so it takes the stream test instead: its decompressed
+	// chunks are read whole only if they turn out to be small.
+	if (init.decompress !== false && sniffCompression(bytes)) {
+		return openChunkIterator(
+			{
+				async *[Symbol.asyncIterator]() {
+					yield bytes
+				},
+			},
+			threshold,
+			resolvedInit,
+			bulkParser
+		)
+	}
+
+	return bulk(bytes, resolvedInit, bulkParser)
 }
 
 /**
@@ -139,7 +164,8 @@ async function openChunkIterator<R>(
 	init: AdaptiveSourceInit,
 	bulkParser?: BulkParser<R>
 ): Promise<AsyncIterable<Uint8Array> | Iterable<Uint8Array | R>> {
-	const iterator = source[Symbol.asyncIterator]()
+	// Decompressed here rather than by the engine, so the end-of-input test below sees the content's size.
+	const iterator = (init.decompress === false ? source : decompressChunks(source))[Symbol.asyncIterator]()
 	const first = await iterator.next()
 
 	if (first.done) return bulk(new Uint8Array(0), init, bulkParser)
@@ -153,14 +179,19 @@ async function openChunkIterator<R>(
 
 	const reheaded: AsyncChunkIterator = {
 		async *[Symbol.asyncIterator]() {
-			yield* pulled
+			try {
+				yield* pulled
 
-			for (;;) {
-				const next = await iterator.next()
+				for (;;) {
+					const next = await iterator.next()
 
-				if (next.done) return
+					if (next.done) return
 
-				yield next.value
+					yield next.value
+				}
+			} finally {
+				// An early exit must reach the source, or a decompressor or read stream behind it is left open.
+				await iterator.return?.()
 			}
 		},
 	}
@@ -169,5 +200,5 @@ async function openChunkIterator<R>(
 		reheaded[Symbol.asyncDispose] = () => source[Symbol.asyncDispose]!()
 	}
 
-	return Spliterator.fromAsync(reheaded, init)
+	return Spliterator.fromAsync(reheaded, { ...init, decompress: false })
 }

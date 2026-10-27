@@ -108,7 +108,7 @@ test("TextSpliterator: toSet deduplicates", () => {
 })
 
 test("CSVSpliterator: chains in object mode", () => {
-	const names = CSVSpliterator.from(csvSource, { mode: "object" })
+	const names = CSVSpliterator.from(csvSource, { mode: "object", normalizeKeys: true })
 		.filter((row) => Boolean((row as Record<string, string>).item_name))
 		.map((row) => (row as Record<string, string>).item_name)
 		.take(3)

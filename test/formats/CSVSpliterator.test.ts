@@ -231,8 +231,8 @@ test("trim: columns and header cells are trimmed by default, after unquoting", (
 	const source = new TextEncoder().encode(' Name , Age \n " Ada " , 36 \r\nBob,  41\n')
 
 	expect(CSVSpliterator.from(source).toArray()).toEqual([
-		{ name: "Ada", age: "36" },
-		{ name: "Bob", age: "41" },
+		{ Name: "Ada", Age: "36" },
+		{ Name: "Bob", Age: "41" },
 	])
 
 	expect(CSVSpliterator.from(source, { mode: "array", header: false }).toArray()).toEqual([
@@ -345,6 +345,7 @@ describe("columnScan", () => {
 		for (const columnScan of ["auto", "rows"] as const) {
 			const out = CSVSpliterator.from(src, {
 				columnScan,
+				normalizeKeys: true,
 				drop: 1,
 				take: 2,
 				transformers: {

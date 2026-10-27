@@ -4,10 +4,10 @@
  * @copyright Sister Software
  */
 
-import { normalizeColumnNames } from "#formats/casing"
 import {
 	bindTransformers,
 	createRowEmitters,
+	headerNames,
 	type RowEmitter,
 	type RowOutputMode,
 	type RowSpliteratorInit,
@@ -210,7 +210,7 @@ export abstract class XLSXSpliterator {
 			// Without a header row there are no column names, so a row can only be an array.
 			mode = header === false ? "array" : "object",
 			transformers: transformersInput = [],
-			normalizeKeys = mode !== "array",
+			normalizeKeys = false,
 			take = Infinity,
 			drop = 0,
 		} = init
@@ -233,9 +233,7 @@ export abstract class XLSXSpliterator {
 
 			// A header row may legally contain non-string cells — stringify before normalization.
 			const columns = headerRow.map((cell) => String(cell ?? ""))
-			const headers = normalizeKeys ? normalizeColumnNames(columns) : columns
-
-			transformers = bindTransformers<XLSXCellValue>(headers, transformersInput)
+			transformers = bindTransformers<XLSXCellValue>(headerNames(columns, normalizeKeys, mode), transformersInput)
 
 			return rows.slice(1)
 		}

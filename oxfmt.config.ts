@@ -11,7 +11,9 @@ import type { OxfmtConfig } from "oxfmt"
 
 const config: OxfmtConfig = {
 	...sisterSoftwareOxfmtConfig,
-	ignorePatterns: [".yarn"],
+	// The conformance fixtures keep invisible characters (BOMs, NBSPs, U+FFFD) as escapes, which formatting would
+	// rewrite into literal characters.
+	ignorePatterns: [".yarn", "conformance"],
 }
 
 export default config

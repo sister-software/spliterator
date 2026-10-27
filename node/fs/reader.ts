@@ -13,6 +13,34 @@ import {
 	isPathBuilderLike,
 	toPathString,
 } from "#internal/shared"
+import { COMPRESSED_EXTENSIONS } from "#io/compression"
+
+/**
+ * The path a delimited file is read from: `path.zst` when it exists, else `path.gz` when it exists, else `path`.
+ *
+ * A corpus converted one part file at a time then reads the same whether a part has been compressed yet or not: a
+ * reader asks for `part-0000.jsonl` and gets `part-0000.jsonl.zst` once the conversion has reached it. A path that
+ * already names a compressed file, and any source that is not a path, is returned unchanged.
+ */
+export async function resolveCompressedSibling<T>(source: T): Promise<T | string> {
+	if (!isPathBuilderLike(source)) return source
+
+	const path = toPathString(source)
+
+	if (COMPRESSED_EXTENSIONS.some((extension) => path.endsWith(extension))) return source
+
+	for (const extension of COMPRESSED_EXTENSIONS) {
+		const candidate = `${path}${extension}`
+
+		const found = await stat(candidate)
+			.then((stats) => stats.isFile())
+			.catch(() => false)
+
+		if (found) return candidate
+	}
+
+	return source
+}
 
 /**
  * Create a readable stream from a file system source.
