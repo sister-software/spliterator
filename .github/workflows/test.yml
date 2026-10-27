@@ -61,3 +61,41 @@ jobs:
           test -f out/index.js || { echo "::error::out/index.js missing — compile did not produce the published entry"; exit 1; }
           test -f out/index.d.ts || { echo "::error::out/index.d.ts missing — no types would ship"; exit 1; }
           test -f out/web.js || { echo "::error::out/web.js missing — the ./web entry would not ship"; exit 1; }
+
+  # The Rust crate and the Python package, held to the same conformance suite as the TypeScript package. A separate job,
+  # not a step of `test`, so the required check above keeps its name and its runtime.
+  ports:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal --component clippy,rustfmt && rustup default stable
+
+      - name: Set up uv
+        run: |
+          curl -LsSf https://astral.sh/uv/0.12.23/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Rust format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --workspace
+
+      - name: Python package
+        working-directory: crates/spliterator-py
+        run: |
+          uv venv .venv --python 3.12
+          uv pip install --python .venv/bin/python maturin pytest mypy
+          VIRTUAL_ENV=$PWD/.venv .venv/bin/maturin develop
+          .venv/bin/python -m pytest -q
+          .venv/bin/python -m mypy
+          uvx ruff@0.17.1 check python tests
+          uvx ruff@0.17.1 format --check python tests
