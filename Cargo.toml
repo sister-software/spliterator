@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["crates/spliterator", "crates/spliterator-py"]
+# The WASM SIMD kernel targets wasm32 only and builds on its own (wasm/build.sh).
+exclude = ["wasm"]
+
+[workspace.package]
+version = "10.0.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+authors = ["Teffen Ellis <teffen@sister.software>"]
+repository = "https://github.com/sister-software/spliterator"
+homepage = "https://github.com/sister-software/spliterator"

@@ -17,6 +17,7 @@
 		{ "name": "Infinity is rejected", "input": "[1]\n{\"x\":Infinity}", "error": { "type": "JSONRow", "row": 1 } },
 		{ "name": "a trailing comma is rejected", "input": "[1,]", "error": { "type": "JSONRow", "row": 0 } },
 		{ "name": "comment prefixes skip rows", "input": "// header\n{\"a\":1}\n  # note\n[1]", "options": { "comment": ["//", "#"] }, "expect": [{ "a": 1 }, [1]] },
+		{ "name": "a comment row after a BOM is still a comment", "input": "\ufeff// header\n1", "options": { "comment": "//" }, "expect": [1] },
 		{ "name": "without a comment prefix a comment row is an error", "input": "// header\n1", "error": { "type": "JSONRow", "row": 0 } },
 		{ "name": "drop and take count rows after comment and blank rows go", "input": "1\n\n2\n// c\n3\n4", "options": { "comment": "//", "drop": 1, "take": 2 }, "expect": [2, 3] },
 		{ "name": "the error index counts from after drop", "input": "1\n2\nx", "options": { "drop": 1 }, "error": { "type": "JSONRow", "row": 1 } },

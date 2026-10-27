@@ -87,7 +87,8 @@ export function createCommentFilter(comment: CommentInput | undefined): RowPredi
 
 	return (row) => {
 		const { length } = row
-		let cursor = 0
+		// A BOM is not part of the row's text: the decoder drops it, and the text filter never sees it.
+		let cursor = row[0] === 0xef && row[1] === 0xbb && row[2] === 0xbf ? 3 : 0
 
 		while (cursor < length) {
 			const byte = row[cursor]!

@@ -77,3 +77,10 @@ examples/data/
 # Source is TypeScript only; Node strips types natively on the supported floor.
 *.js
 *.mjs
+
+## Rust workspace and Python package
+/target/
+crates/spliterator-py/.venv/
+__pycache__/
+.pytest_cache/
+*.so
