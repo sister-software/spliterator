@@ -27,15 +27,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  # Outside the `cargo` environment, which only release tags may enter, so a dry run from a branch checks everything.
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: cargo
-    permissions:
-      contents: read
-      id-token: write # crates.io Trusted Publishing (OIDC)
-    env:
-      HAS_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      published: ${{ steps.version.outputs.published }}
 
     steps:
       - name: Checkout
@@ -73,21 +71,38 @@ jobs:
       - name: Package and verify
         run: cargo publish -p spliterator --dry-run
 
+  publish:
+    needs: verify
+    if: ${{ needs.verify.outputs.published != 'true' && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: cargo
+    permissions:
+      contents: read
+      id-token: write # crates.io Trusted Publishing (OIDC)
+    env:
+      HAS_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
       - name: Authenticate with crates.io
         id: auth
-        if: ${{ !inputs.dry_run && steps.version.outputs.published != 'true' && env.HAS_REGISTRY_TOKEN != 'true' }}
+        if: ${{ env.HAS_REGISTRY_TOKEN != 'true' }}
         uses: rust-lang/crates-io-auth-action@v1
 
       - name: Publish
-        if: ${{ !inputs.dry_run && steps.version.outputs.published != 'true' }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || steps.auth.outputs.token }}
         run: cargo publish -p spliterator
 
       - name: Verify the published version
-        if: ${{ !inputs.dry_run && steps.version.outputs.published != 'true' }}
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.verify.outputs.version }}
         run: |
           for attempt in $(seq 1 20); do
             if curl -sf -A "spliterator-release (github.com/sister-software/spliterator)" \

@@ -146,15 +146,12 @@ jobs:
           path: crates/spliterator-py/dist/*.tar.gz
           if-no-files-found: error
 
-  publish:
+  # Outside the `pypi` environment, which only release tags may enter, so a dry run from a branch checks everything.
+  verify:
     needs: [check, wheels, sdist]
     if: ${{ needs.check.outputs.published != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment: pypi
-    permissions:
-      contents: read
-      id-token: write # PyPI Trusted Publishing (OIDC)
+    timeout-minutes: 5
 
     steps:
       - name: Download
@@ -178,16 +175,32 @@ jobs:
           done
           test "$(ls dist/*.whl | wc -l)" -eq 7 || { echo "::error::expected 7 wheels"; exit 1; }
 
-      - name: "Dry run: summary and stop"
+      - name: "Dry run: summary"
         if: ${{ inputs.dry_run }}
         run: echo "::notice::DRY RUN — built and checked sister-software-spliterator ${{ needs.check.outputs.version }}; nothing uploaded."
 
+  publish:
+    needs: [check, verify]
+    if: ${{ needs.check.outputs.published != 'true' && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write # PyPI Trusted Publishing (OIDC)
+
+    steps:
+      - name: Download
+        uses: actions/download-artifact@v8
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+
       - name: Publish to PyPI
-        if: ${{ !inputs.dry_run }}
         uses: pypa/gh-action-pypi-publish@release/v1
 
       - name: Verify the published version
-        if: ${{ !inputs.dry_run }}
         env:
           VERSION: ${{ needs.check.outputs.version }}
         run: |
