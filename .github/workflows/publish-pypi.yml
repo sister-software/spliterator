@@ -175,6 +175,11 @@ jobs:
           done
           test "$(ls dist/*.whl | wc -l)" -eq 7 || { echo "::error::expected 7 wheels"; exit 1; }
 
+      # PyPI validates metadata on upload and rejects a file mid-batch, leaving a release with some files and not
+      # others. Checking here fails before anything is uploaded.
+      - name: Check the metadata
+        run: pipx run twine check --strict dist/*
+
       - name: "Dry run: summary"
         if: ${{ inputs.dry_run }}
         run: echo "::notice::DRY RUN — built and checked sister-software-spliterator ${{ needs.check.outputs.version }}; nothing uploaded."

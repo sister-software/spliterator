@@ -30,6 +30,9 @@ dev = ["pytest>=8"]
 python-source = "python"
 module-name = "spliterator._native"
 features = ["pyo3/extension-module"]
+# The sdist puts pyproject.toml at its root but this directory's files under crates/spliterator-py/, so the license
+# is also copied to the root, where the `License-File` metadata entry says it is. PyPI rejects an sdist without it.
+include = [{ path = "LICENSE.md", format = "sdist" }]
 
 [tool.ruff]
 line-length = 120
