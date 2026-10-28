@@ -32,6 +32,11 @@
 # configured path names a real file, so a mismatch surfaces as a bare E404 on publish rather than
 # as a configuration error. If a publish 404s and the package exists, check that path first, then
 # check whether the trusted publisher is bound to a GitHub environment this job does not declare.
+#
+# ONE VERSION, THREE REGISTRIES. package.json is the source of truth. `prepare` bumps the Cargo workspace version in the
+# same release commit, so the npm package, the `spliterator` crate and the `sister-software-spliterator` wheel always
+# share a version. `publish` tags and publishes npm, then dispatches publish-cargo.yml and publish-pypi.yml against the
+# tag. Each of those is idempotent and can be re-dispatched by hand with the tag as its ref.
 name: NPM Publish
 
 on:
@@ -105,6 +110,22 @@ jobs:
           if npm view "spliterator@${VERSION}" version >/dev/null 2>&1; then
             echo "::error::spliterator@${VERSION} is already on npm — pick a different version"; exit 1
           fi
+          # PyPI needs a PEP 440 version, and maturin derives it from the Cargo version: `-alpha.N`, `-beta.N` and
+          # `-rc.N` map to aN, bN and rcN. npm's bare `prerelease` (`10.0.1-0`) has no PEP 440 spelling.
+          if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]]; then
+            echo "::error::${VERSION} cannot be published to PyPI — use an exact version such as 10.1.0-rc.1"; exit 1
+          fi
+          PY_VERSION="$(echo "${VERSION}" | sed -E 's/-alpha\./a/; s/-beta\./b/; s/-rc\./rc/')"
+          if curl -sf -A "spliterator-release (github.com/sister-software/spliterator)" \
+            "https://crates.io/api/v1/crates/spliterator/${VERSION}" >/dev/null; then
+            echo "::error::spliterator ${VERSION} is already on crates.io — pick a different version"; exit 1
+          fi
+          if curl -sf "https://pypi.org/pypi/sister-software-spliterator/${PY_VERSION}/json" >/dev/null; then
+            echo "::error::sister-software-spliterator ${PY_VERSION} is already on PyPI — pick a different version"; exit 1
+          fi
+          # The first `version =` in Cargo.toml is `[workspace.package]`'s, which both crates inherit.
+          sed -i -E "0,/^version = \".*\"/s//version = \"${VERSION}\"/" Cargo.toml
+          cargo update --workspace
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
       - name: "Dry run: show the bump and stop"
@@ -127,12 +148,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "${BRANCH}"
-          # Only the manifest may change in a release commit. Anything else dirty is a fault to
+          # Only the manifests may change in a release commit. Anything else dirty is a fault to
           # surface, never to ship.
-          git add package.json
-          UNEXPECTED="$(git status --porcelain --untracked-files=no | grep -v '^M  package.json$' || true)"
+          git add package.json Cargo.toml Cargo.lock
+          UNEXPECTED="$(git status --porcelain --untracked-files=no | grep -vE '^M  (package\.json|Cargo\.toml|Cargo\.lock)$' || true)"
           if [ -n "${UNEXPECTED}" ]; then
-            echo "::error::changed files outside package.json — refusing to commit them silently:"
+            echo "::error::changed files outside the manifests — refusing to commit them silently:"
             echo "${UNEXPECTED}"
             exit 1
           fi
@@ -171,6 +192,7 @@ jobs:
     permissions:
       contents: write # push the version tag + create the GitHub release
       id-token: write # npm Trusted Publishing (OIDC)
+      actions: write # dispatch publish-cargo.yml and publish-pypi.yml against the tag
 
     steps:
       - name: Checkout
@@ -215,7 +237,11 @@ jobs:
         id: version
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          echo "version=${VERSION}"
+          CARGO_VERSION="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "spliterator") | .version')"
+          echo "version=${VERSION} (Cargo: ${CARGO_VERSION})"
+          if [ "${CARGO_VERSION}" != "${VERSION}" ]; then
+            echo "::error::package.json says ${VERSION} but Cargo.toml says ${CARGO_VERSION}; the release commit must bump both"; exit 1
+          fi
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
       - name: Pack and inspect the tarball
@@ -285,3 +311,19 @@ jobs:
           done
           echo "::error::npm still reports '${PUBLISHED}' after 10 minutes; expected ${EXPECTED}"
           exit 1
+
+      # The tag exists now, so the crate and the wheels build from exactly the commit npm shipped. Dispatching with the
+      # workflow token is the one cross-workflow trigger GitHub allows from it.
+      - name: Dispatch the crate and wheel publishes
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh workflow run publish-cargo.yml --ref "v${VERSION}"
+          gh workflow run publish-pypi.yml --ref "v${VERSION}"
+          {
+            echo "## Dispatched"
+            echo ""
+            echo "- publish-cargo.yml and publish-pypi.yml at v${VERSION}. Re-dispatch either with that ref to retry."
+          } >> "${GITHUB_STEP_SUMMARY}"

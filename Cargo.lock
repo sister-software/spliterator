@@ -306,7 +306,7 @@ checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
 
 [[package]]
 name = "spliterator"
-version = "10.0.0"
+version = "9.3.0"
 dependencies = [
  "base64",
  "flate2",
@@ -318,7 +318,7 @@ dependencies = [
 
 [[package]]
 name = "spliterator-py"
-version = "10.0.0"
+version = "9.3.0"
 dependencies = [
  "pyo3",
  "spliterator",

@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 # The PyPI name `spliterator` belongs to an unrelated 0.0.1 project; the import name is `spliterator` regardless.
-name = "spliterator-py"
+name = "sister-software-spliterator"
 description = "Streaming readers for delimited text, CSV, TSV and JSONL with transparent zstd/gzip decompression, sharing the spliterator npm package's semantics."
 readme = "README.md"
 license = "MIT"

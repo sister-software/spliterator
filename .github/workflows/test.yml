@@ -80,6 +80,13 @@ jobs:
           curl -LsSf https://astral.sh/uv/0.12.23/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # One version across npm, crates.io and PyPI; publish.yml bumps them together.
+      - name: Versions in lockstep
+        run: |
+          CARGO_VERSION="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "spliterator") | .version')"
+          NPM_VERSION="$(node -p "require('./package.json').version")"
+          test "${CARGO_VERSION}" = "${NPM_VERSION}" || { echo "::error::Cargo.toml ${CARGO_VERSION} != package.json ${NPM_VERSION}"; exit 1; }
+
       - name: Rust format
         run: cargo fmt --all --check
 

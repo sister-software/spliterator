@@ -131,7 +131,7 @@ Pass `decompress: false` or `preferCompressed: false` to opt out. A compressed f
 
 ## Rust and Python
 
-The same readers exist as a Rust crate (`crates/spliterator`) and a Python package (`crates/spliterator-py`, imported as `spliterator`), with the same defaults, the same rows and the same errors. A shared conformance suite (`conformance/`) runs in all three languages.
+The same readers exist as a Rust crate ([`spliterator`](https://crates.io/crates/spliterator), in `crates/spliterator`) and a Python package ([`sister-software-spliterator`](https://pypi.org/project/sister-software-spliterator/), in `crates/spliterator-py`, imported as `spliterator`), with the same defaults, the same rows and the same errors. A shared conformance suite (`conformance/`) runs in all three languages.
 
 ```python
 import spliterator

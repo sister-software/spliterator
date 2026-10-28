@@ -1,5 +1,11 @@
 # spliterator (Python)
 
+```sh
+pip install sister-software-spliterator
+```
+
+The distribution is `sister-software-spliterator`; the import name is `spliterator`.
+
 Streaming readers for delimited text, CSV, TSV, PSV and JSONL, with transparent zstd and gzip decompression.
 
 This is the Python counterpart of the [`spliterator`](https://www.npmjs.com/package/spliterator) npm package and the

@@ -38,7 +38,7 @@ __all__ = [
 ]
 
 try:
-    __version__ = version("spliterator-py")
+    __version__ = version("sister-software-spliterator")
 except PackageNotFoundError:  # pragma: no cover - a source checkout without an install
     __version__ = "0.0.0"
 

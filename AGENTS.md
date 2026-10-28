@@ -59,8 +59,14 @@ uvx ruff check crates/spliterator-py && uvx ruff format --check crates/spliterat
 # Release — two GitHub Actions dispatches; nothing runs locally. `main` is protected, so the
 # bump lands via an auto-merging PR (mode=prepare), then the merged commit is tagged and
 # published (mode=publish). See .github/workflows/publish.yml.
+# One version for all three registries: prepare bumps package.json AND the Cargo workspace;
+# publish tags, publishes npm, then dispatches publish-cargo.yml (environment `cargo`, crate
+# `spliterator`) and publish-pypi.yml (environment `pypi`, `sister-software-spliterator`) at the tag.
 gh workflow run publish.yml -f mode=prepare -f version=minor
 gh workflow run publish.yml -f mode=publish
+# Retry one registry: both are idempotent and refuse to publish from anything but the tag.
+gh workflow run publish-pypi.yml --ref v10.0.0
+gh workflow run publish-cargo.yml --ref v10.0.0
 ```
 
 The package manager is **yarn** (v4). Node >= 22.18 is required. Compiled output goes to `out/`.
@@ -214,8 +220,11 @@ semantics table and migration guide are `docs/v10.md`.
 
 ### Rust and Python (`crates/`)
 
-A Cargo workspace at the root holds `crates/spliterator` (the crate) and `crates/spliterator-py` (PyO3 bindings, built
-with maturin, imported as `spliterator`). The WASM kernel in `wasm/` is excluded from the workspace because it targets
+A Cargo workspace at the root holds `crates/spliterator` (the crate, `spliterator` on crates.io) and
+`crates/spliterator-py` (PyO3 bindings, built with maturin, `sister-software-spliterator` on PyPI, imported as
+`spliterator`; the PyPI name `spliterator` belongs to an unrelated project). The workspace version always equals
+`package.json`'s; CI's `ports` job fails otherwise, and a prerelease must be `-alpha.N`/`-beta.N`/`-rc.N` so PyPI can spell
+it. The WASM kernel in `wasm/` is excluded from the workspace because it targets
 `wasm32` only. The crate is its own implementation of the semantics, not a port of the WASM kernel: parity is enforced by
 the conformance suite, which each language runs over its own entry points (`test/conformance/conformance.test.ts`,
 `crates/spliterator/tests/conformance.rs`, `crates/spliterator-py/tests/test_conformance.py`). Fixture expectations are
