@@ -1,7 +1,9 @@
 from collections.abc import Iterator
-from typing import Any, BinaryIO, TypeAlias
+from typing import Any, TypeAlias
 
-_Source: TypeAlias = str | bytes | BinaryIO
+from ._types import SupportsRead
+
+_Source: TypeAlias = str | bytes | SupportsRead
 
 class TextBatches(Iterator[list[str]]):
     def __init__(

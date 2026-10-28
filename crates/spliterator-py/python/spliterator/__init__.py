@@ -23,10 +23,11 @@ import json
 import os
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any, BinaryIO, Literal, TypeAlias, TypedDict, TypeVar, Unpack
+from typing import Any, Literal, TypeAlias, TypedDict, TypeVar, Unpack
 
 from . import _native
 from ._errors import DuplicateHeaderError, JSONRowError, SpliteratorError, UnterminatedQuoteError
+from ._types import SupportsRead
 
 __all__ = [
     "CSVOptions",
@@ -35,6 +36,7 @@ __all__ = [
     "JSONRowError",
     "Source",
     "SpliteratorError",
+    "SupportsRead",
     "TextOptions",
     "UnterminatedQuoteError",
     "aread_csv",
@@ -58,8 +60,8 @@ try:
 except PackageNotFoundError:  # pragma: no cover - a source checkout without an install
     __version__ = "0.0.0"
 
-Source: TypeAlias = str | os.PathLike[str] | bytes | bytearray | memoryview | BinaryIO
-"""A path, bytes-like data, or a binary file object."""
+Source: TypeAlias = str | os.PathLike[str] | bytes | bytearray | memoryview | SupportsRead
+"""A path, bytes-like data, or a binary stream (anything with ``read(size) -> bytes``)."""
 
 Mode: TypeAlias = Literal["object", "array", "entries"]
 
@@ -207,7 +209,7 @@ def _merge(defaults: Mapping[str, Any], options: Mapping[str, Any], reader: str)
     return {**defaults, **options}
 
 
-def _source(source: Source) -> str | bytes | BinaryIO:
+def _source(source: Source) -> str | bytes | SupportsRead:
     if isinstance(source, (bytes, bytearray, memoryview)):
         return bytes(source)
 
