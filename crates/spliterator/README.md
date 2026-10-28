@@ -24,6 +24,8 @@ assert_eq!(lines, ["a", "b"]);
 
 ```
 
+`text::count` and `csv::count` return the number of rows the matching reader would yield, without building them.
+
 ## Sources
 
 `Reader::open` takes a path, bytes, or any `Read` (`Source`). A path `p` reads `p.zst`, or failing that `p.gz`, when one

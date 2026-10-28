@@ -6,10 +6,11 @@ sources, and decompression on each, all answer to the same expectations as the T
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +45,21 @@ OPTION_NAMES = {
     "columnDelimiter": "column_delimiter",
 }
 
+ASYNC_READERS: dict[str, Callable[..., AsyncIterator[Any]]] = {
+    "text": spliterator.aread_text,
+    "jsonl": spliterator.aread_jsonl,
+    "csv": spliterator.aread_csv,
+    "tsv": spliterator.aread_tsv,
+    "psv": spliterator.aread_psv,
+}
+
+COUNTERS: dict[str, Callable[..., int]] = {
+    "text": spliterator.count_text,
+    "csv": spliterator.count_csv,
+    "tsv": spliterator.count_tsv,
+    "psv": spliterator.count_psv,
+}
+
 ERRORS = {
     "UnterminatedQuote": (spliterator.UnterminatedQuoteError, "byteOffset", "byte_offset"),
     "DuplicateHeader": (spliterator.DuplicateHeaderError, "column", "column"),
@@ -62,7 +78,7 @@ def load_cases() -> list[Any]:
 
             params.extend(
                 pytest.param(fmt, case, source, id=f"{name}.json :: {case['name']} :: {source}")
-                for source in ("bytes", "file object", "path")
+                for source in ("bytes", "file object", "path", "async", "count")
             )
 
     return params
@@ -96,6 +112,16 @@ def test_conformance(fmt: str, case: dict[str, Any], source_kind: str, tmp_path:
         source = tmp_path / "input"
         source.write_bytes(data)
 
+    if source_kind == "count":
+        check_count(fmt, case, data, options)
+
+        return
+
+    if source_kind == "async":
+        check_async(fmt, case, data, options)
+
+        return
+
     rows: list[Any] = []
     reader = READERS[fmt](source, **options)
 
@@ -115,5 +141,51 @@ def test_conformance(fmt: str, case: dict[str, Any], source_kind: str, tmp_path:
         return
 
     rows = [plain(row) for row in reader]
+
+    assert rows == case["expect"]
+
+
+def check_count(fmt: str, case: dict[str, Any], data: bytes, options: dict[str, Any]) -> None:
+    """A count must equal the number of rows the reader yields. It reads no header names, so a repeated header is not
+    its error to raise."""
+    if fmt not in COUNTERS or case.get("error", {}).get("type") == "DuplicateHeader":
+        pytest.skip("no count for this case")
+
+    if "error" in case:
+        expected = case["error"]
+        error_type, json_field, attribute = ERRORS[expected["type"]]
+
+        with pytest.raises(error_type) as raised:
+            COUNTERS[fmt](data, **options)
+
+        assert getattr(raised.value, attribute) == expected[json_field]
+
+        return
+
+    assert COUNTERS[fmt](data, **options) == len(case["expect"])
+
+
+def check_async(fmt: str, case: dict[str, Any], data: bytes, options: dict[str, Any]) -> None:
+    rows: list[Any] = []
+
+    async def collect() -> None:
+        async for row in ASYNC_READERS[fmt](data, **options):
+            rows.append(plain(row))  # noqa: PERF401 - the rows before an error are the point
+
+    if "error" in case:
+        expected = case["error"]
+        error_type, json_field, attribute = ERRORS[expected["type"]]
+
+        with pytest.raises(error_type) as raised:
+            asyncio.run(collect())
+
+        assert getattr(raised.value, attribute) == expected[json_field]
+
+        if "expectBeforeError" in case:
+            assert rows == case["expectBeforeError"]
+
+        return
+
+    asyncio.run(collect())
 
     assert rows == case["expect"]

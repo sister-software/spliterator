@@ -120,6 +120,44 @@ function variants(format: Format, input: ConformanceCase["input"], options: Reco
 	return result
 }
 
+interface CountVariant {
+	label: string
+	run: () => number | Promise<number>
+}
+
+/**
+ * Every way to count a case's rows. Text and the CSV family have counts; a count must equal the number of rows the
+ * reader yields, so the expected rows double as the expected count.
+ */
+function countVariants(format: Format, input: ConformanceCase["input"], options: Record<string, unknown>): CountVariant[] {
+	if (format === "jsonl") return []
+
+	const counter = READERS[format] as unknown as {
+		count(source: unknown, init: unknown): number
+		countAsync(source: unknown, init: unknown): Promise<number>
+	}
+
+	const bytes = inputBytes(input)
+	const result: CountVariant[] = []
+
+	if (typeof input === "string") {
+		result.push({ label: "count(string)", run: () => counter.count(input, options) })
+	}
+
+	result.push({ label: "count(bytes)", run: () => counter.count(bytes, options) })
+
+	for (const size of [1, Infinity]) {
+		for (const bulkThreshold of [0, undefined]) {
+			result.push({
+				label: `countAsync, chunks of ${size}, ${bulkThreshold === 0 ? "streamed" : "adaptive"}`,
+				run: () => counter.countAsync(chunked(bytes, size), { ...options, bulkThreshold }),
+			})
+		}
+	}
+
+	return result
+}
+
 async function collect(run: Variant["run"]): Promise<{ rows: unknown[]; error: unknown }> {
 	const rows: unknown[] = []
 
@@ -183,6 +221,27 @@ for (const name of FILES) {
 						expect(rows).toEqual(testCase.expect)
 					}
 				)
+
+				// A count reads no header names, so a repeated header is not its error to raise.
+				if (testCase.error?.type === "DuplicateHeader") return
+
+				test.for(countVariants(format, testCase.input, testCase.options ?? {}))("$label", async (variant) => {
+					if (testCase.error) {
+						let caught: unknown
+
+						try {
+							await variant.run()
+						} catch (error) {
+							caught = error
+						}
+
+						expectError(caught, testCase.error)
+
+						return
+					}
+
+					expect(await variant.run()).toBe(testCase.expect!.length)
+				})
 			})
 		}
 	})

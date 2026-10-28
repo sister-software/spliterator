@@ -26,6 +26,18 @@ for line in spliterator.read_text(b"  a \n\n b\n"):       # "a", "b"
     ...
 ```
 
+## Async and counts
+
+Each reader has an async twin that reads each batch on a worker thread, so the event loop never blocks on I/O:
+
+```python
+async for row in spliterator.aread_csv("people.csv"):
+    ...
+```
+
+`count_text`, `count_csv`, `count_tsv` and `count_psv` return the number of rows the matching reader would yield,
+without building them.
+
 ## Sources
 
 A source is a path (`str` or `os.PathLike`), bytes-like data, or a binary file object.

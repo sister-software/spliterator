@@ -8,6 +8,9 @@ A source is a path (``str`` or ``os.PathLike``), bytes-like data, or a binary fi
 ``path.gz`` in its place when one exists (``prefer_compressed``), and any source beginning with the zstd or gzip magic
 bytes is decompressed before it is split (``decompress``). Nothing is opened until the first row is pulled.
 
+Every reader has an async twin (``aread_text``, ``aread_csv``, …) that reads each batch of rows on a worker thread, and
+text and the CSV family have counts (``count_text``, ``count_csv``, …) that equal the number of rows the reader yields.
+
 >>> import spliterator
 >>> list(spliterator.read_csv(b"name,age\\nAda,36\\n"))
 [{'name': 'Ada', 'age': '36'}]
@@ -15,21 +18,34 @@ bytes is decompressed before it is split (``decompress``). Nothing is opened unt
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any, BinaryIO, Literal, TypeAlias
+from typing import Any, BinaryIO, Literal, TypeAlias, TypedDict, TypeVar, Unpack
 
 from . import _native
 from ._errors import DuplicateHeaderError, JSONRowError, SpliteratorError, UnterminatedQuoteError
 
 __all__ = [
+    "CSVOptions",
     "DuplicateHeaderError",
+    "JSONLOptions",
     "JSONRowError",
     "Source",
     "SpliteratorError",
+    "TextOptions",
     "UnterminatedQuoteError",
+    "aread_csv",
+    "aread_jsonl",
+    "aread_psv",
+    "aread_text",
+    "aread_tsv",
+    "count_csv",
+    "count_psv",
+    "count_text",
+    "count_tsv",
     "read_csv",
     "read_jsonl",
     "read_psv",
@@ -49,6 +65,147 @@ Mode: TypeAlias = Literal["object", "array", "entries"]
 
 Delimiter: TypeAlias = str | bytes
 
+Transformers: TypeAlias = Mapping[str, Callable[[str], Any]]
+
+T = TypeVar("T")
+
+
+class TextOptions(TypedDict, total=False):
+    """Options for :func:`read_text`, :func:`aread_text` and :func:`count_text`."""
+
+    delimiter: Delimiter
+    """The record delimiter. Default ``"\\n"``."""
+    trim: bool
+    """Strip the ECMAScript whitespace set (not ``str.strip``'s) from each row. Default ``True``."""
+    skip_empty: bool
+    """Drop empty records, and with ``trim`` rows that trim to nothing. Default ``True``."""
+    crlf: bool
+    """Treat one ``\\r`` before a delimiter as part of it. Default ``False``; ``trim`` removes it anyway."""
+    drop: int
+    """Rows to skip, counted after skipping. Default ``0``."""
+    take: int | None
+    """Rows to yield at most, counted after skipping. Default unlimited."""
+    enable_quote_handling: bool
+    """Keep a delimiter inside ``"…"`` from splitting. Default ``False``."""
+    allow_unterminated_quote: bool
+    """Read input ending inside quotes instead of raising :class:`UnterminatedQuoteError`. Default ``False``."""
+    decompress: bool
+    """Decompress a source beginning with the zstd or gzip magic bytes. Default ``True``."""
+    prefer_compressed: bool
+    """Read ``path.zst`` or ``path.gz`` in place of ``path`` when one exists. Default ``True``."""
+
+
+class JSONLOptions(TypedDict, total=False):
+    """Options for :func:`read_jsonl` and :func:`aread_jsonl`."""
+
+    delimiter: Delimiter
+    """The record delimiter. Default ``"\\n"``."""
+    skip_empty: bool
+    """Skip empty and whitespace-only rows. Default ``True``."""
+    crlf: bool
+    """Treat one ``\\r`` before a delimiter as part of it. Default ``False``."""
+    comment: str | list[str] | None
+    """Skip rows whose first non-whitespace text starts with one of these prefixes. Default none."""
+    drop: int
+    """Rows to skip, counted after skipping. Default ``0``."""
+    take: int | None
+    """Rows to parse at most, counted after skipping. Default unlimited."""
+    decompress: bool
+    """Decompress a source beginning with the zstd or gzip magic bytes. Default ``True``."""
+    prefer_compressed: bool
+    """Read ``path.zst`` or ``path.gz`` in place of ``path`` when one exists. Default ``True``."""
+
+
+class CSVOptions(TypedDict, total=False):
+    """Options for the CSV, TSV and PSV readers and counts. The defaults shown are CSV's."""
+
+    column_delimiter: Delimiter
+    """The column delimiter: ``","`` for CSV, ``"\\t"`` for TSV, ``"|"`` for PSV."""
+    delimiter: Delimiter
+    """The row delimiter. Default ``"\\n"``."""
+    header: bool
+    """Take the first record as the header. Default ``True``."""
+    mode: Mode | None
+    """``"object"`` (default with a header), ``"array"`` (default without), or ``"entries"``."""
+    normalize_keys: bool
+    """Snake-case header names and suffix repeats. Default ``False``."""
+    enable_quote_handling: bool
+    """Keep delimiters inside ``"…"`` from splitting and unquote cells. ``True`` for CSV and PSV, ``False`` for TSV."""
+    allow_unterminated_quote: bool
+    """Read input ending inside quotes instead of raising :class:`UnterminatedQuoteError`. Default ``False``."""
+    crlf: bool
+    """Treat one ``\\r`` before a row delimiter as part of it. Default ``True``."""
+    trim: bool
+    """Trim each cell, header included, after unquoting. Default ``True``."""
+    skip_empty: bool
+    """Drop records whose bytes are empty after CRLF removal. Default ``True``."""
+    drop: int
+    """Data rows to skip. Default ``0``."""
+    take: int | None
+    """Data rows to yield at most. Default unlimited."""
+    transformers: Transformers | None
+    """Functions applied by header name to object and entries rows, after trimming. Default none."""
+    decompress: bool
+    """Decompress a source beginning with the zstd or gzip magic bytes. Default ``True``."""
+    prefer_compressed: bool
+    """Read ``path.zst`` or ``path.gz`` in place of ``path`` when one exists. Default ``True``."""
+
+
+_TEXT_DEFAULTS: TextOptions = {
+    "delimiter": "\n",
+    "trim": True,
+    "skip_empty": True,
+    "crlf": False,
+    "drop": 0,
+    "take": None,
+    "enable_quote_handling": False,
+    "allow_unterminated_quote": False,
+    "decompress": True,
+    "prefer_compressed": True,
+}
+
+_JSONL_DEFAULTS: JSONLOptions = {
+    "delimiter": "\n",
+    "skip_empty": True,
+    "crlf": False,
+    "comment": None,
+    "drop": 0,
+    "take": None,
+    "decompress": True,
+    "prefer_compressed": True,
+}
+
+_CSV_DEFAULTS: CSVOptions = {
+    "column_delimiter": ",",
+    "delimiter": "\n",
+    "header": True,
+    "mode": None,
+    "normalize_keys": False,
+    "enable_quote_handling": True,
+    "allow_unterminated_quote": False,
+    "crlf": True,
+    "trim": True,
+    "skip_empty": True,
+    "drop": 0,
+    "take": None,
+    "transformers": None,
+    "decompress": True,
+    "prefer_compressed": True,
+}
+
+_TSV_DEFAULTS: CSVOptions = {**_CSV_DEFAULTS, "column_delimiter": "\t", "enable_quote_handling": False}
+
+_PSV_DEFAULTS: CSVOptions = {**_CSV_DEFAULTS, "column_delimiter": "|"}
+
+
+def _merge(defaults: Mapping[str, Any], options: Mapping[str, Any], reader: str) -> dict[str, Any]:
+    unknown = options.keys() - defaults.keys()
+
+    if unknown:
+        raise TypeError(f"{reader}() got unexpected keyword arguments: {', '.join(sorted(unknown))}")
+
+    return {**defaults, **options}
+
 
 def _source(source: Source) -> str | bytes | BinaryIO:
     if isinstance(source, (bytes, bytearray, memoryview)):
@@ -64,42 +221,76 @@ def _delimiter(value: Delimiter) -> bytes:
     return value.encode("utf-8") if isinstance(value, str) else bytes(value)
 
 
-def read_text(
-    source: Source,
-    *,
-    delimiter: Delimiter = "\n",
-    trim: bool = True,
-    skip_empty: bool = True,
-    crlf: bool = False,
-    drop: int = 0,
-    take: int | None = None,
-    enable_quote_handling: bool = False,
-    allow_unterminated_quote: bool = False,
-    decompress: bool = True,
-    prefer_compressed: bool = True,
-) -> Iterator[str]:
+def _flatten(batches: Iterable[list[T]]) -> Iterator[T]:
+    for batch in batches:
+        yield from batch
+
+
+async def _aflatten(open_batches: Callable[[], Iterator[list[T]]]) -> AsyncIterator[T]:
+    # Opening a path and reading a batch both block, so both happen on a worker thread; the rows are handed out here.
+    batches = await asyncio.to_thread(open_batches)
+
+    while (batch := await asyncio.to_thread(next, batches, None)) is not None:
+        for row in batch:
+            yield row
+
+
+# --- text -------------------------------------------------------------------------------------------------------------
+
+
+def _text_batches(source: Source, options: Mapping[str, Any]) -> _native.TextBatches:
+    o = _merge(_TEXT_DEFAULTS, options, "read_text")
+
+    return _native.TextBatches(
+        _source(source),
+        _delimiter(o["delimiter"]),
+        o["trim"],
+        o["skip_empty"],
+        o["crlf"],
+        o["drop"],
+        o["take"],
+        o["enable_quote_handling"],
+        o["allow_unterminated_quote"],
+        o["decompress"],
+        o["prefer_compressed"],
+    )
+
+
+def read_text(source: Source, **options: Unpack[TextOptions]) -> Iterator[str]:
     """Yield the rows of a delimited text source.
 
     Each record is decoded as UTF-8 (each invalid sequence becomes U+FFFD) with one leading BOM removed. ``trim`` (on by
     default) strips the ECMAScript whitespace set, not ``str.strip``'s, and with ``skip_empty`` a row that trims to
     nothing is dropped. ``drop`` and ``take`` count the rows yielded.
     """
-    batches = _native.TextBatches(
+    yield from _flatten(_text_batches(source, options))
+
+
+def aread_text(source: Source, **options: Unpack[TextOptions]) -> AsyncIterator[str]:
+    """:func:`read_text`, reading each batch of rows on a worker thread."""
+    return _aflatten(lambda: _text_batches(source, options))
+
+
+def count_text(source: Source, **options: Unpack[TextOptions]) -> int:
+    """The number of rows :func:`read_text` would yield, without building them."""
+    o = _merge(_TEXT_DEFAULTS, options, "count_text")
+
+    return _native.count_text(
         _source(source),
-        _delimiter(delimiter),
-        trim,
-        skip_empty,
-        crlf,
-        drop,
-        take,
-        enable_quote_handling,
-        allow_unterminated_quote,
-        decompress,
-        prefer_compressed,
+        _delimiter(o["delimiter"]),
+        o["trim"],
+        o["skip_empty"],
+        o["crlf"],
+        o["drop"],
+        o["take"],
+        o["enable_quote_handling"],
+        o["allow_unterminated_quote"],
+        o["decompress"],
+        o["prefer_compressed"],
     )
 
-    for batch in batches:
-        yield from batch
+
+# --- JSONL ------------------------------------------------------------------------------------------------------------
 
 
 def _reject_constant(name: str) -> Any:
@@ -110,133 +301,153 @@ def _reject_constant(name: str) -> Any:
 _JSON_DECODER = json.JSONDecoder(parse_constant=_reject_constant)
 
 
-def read_jsonl(
-    source: Source,
-    *,
-    delimiter: Delimiter = "\n",
-    skip_empty: bool = True,
-    crlf: bool = False,
-    comment: str | list[str] | None = None,
-    drop: int = 0,
-    take: int | None = None,
-    decompress: bool = True,
-    prefer_compressed: bool = True,
-) -> Iterator[Any]:
+def _jsonl_batches(source: Source, options: Mapping[str, Any]) -> _native.JsonlRows:
+    o = _merge(_JSONL_DEFAULTS, options, "read_jsonl")
+    comment = o["comment"]
+
+    return _native.JsonlRows(
+        _source(source),
+        _delimiter(o["delimiter"]),
+        o["skip_empty"],
+        o["crlf"],
+        [comment] if isinstance(comment, str) else comment,
+        o["drop"],
+        o["take"],
+        o["decompress"],
+        o["prefer_compressed"],
+    )
+
+
+class _JSONParser:
+    """Parses rows in order, numbering them for the error a malformed row raises."""
+
+    def __init__(self) -> None:
+        self.row = 0
+
+    def __call__(self, text: str) -> Any:
+        try:
+            value = _JSON_DECODER.decode(text)
+        except ValueError as error:
+            raise JSONRowError(f"Failed to parse JSON at row {self.row}: {error}", self.row) from error
+
+        self.row += 1
+
+        return value
+
+
+def read_jsonl(source: Source, **options: Unpack[JSONLOptions]) -> Iterator[Any]:
     """Yield each row of a JSONL source, parsed.
 
     Empty and whitespace-only rows are skipped. ``comment`` prefixes skip rows whose first non-whitespace text starts
     with one. ``drop`` and ``take`` count the rows that reach the parser. A row that fails to parse raises
     :class:`JSONRowError` naming its index among those rows.
     """
-    comments = [comment] if isinstance(comment, str) else comment
-    batches = _native.JsonlRows(
+    parse = _JSONParser()
+
+    for text in _flatten(_jsonl_batches(source, options)):
+        yield parse(text)
+
+
+async def aread_jsonl(source: Source, **options: Unpack[JSONLOptions]) -> AsyncIterator[Any]:
+    """:func:`read_jsonl`, reading each batch of rows on a worker thread. Parsing happens on the event loop."""
+    parse = _JSONParser()
+
+    async for text in _aflatten(lambda: _jsonl_batches(source, options)):
+        yield parse(text)
+
+
+# --- CSV, TSV, PSV ----------------------------------------------------------------------------------------------------
+
+
+def _csv_batches(source: Source, o: Mapping[str, Any]) -> _native.CsvBatches:
+    return _native.CsvBatches(
         _source(source),
-        _delimiter(delimiter),
-        skip_empty,
-        crlf,
-        comments,
-        drop,
-        take,
-        decompress,
-        prefer_compressed,
+        _delimiter(o["delimiter"]),
+        _delimiter(o["column_delimiter"]),
+        o["enable_quote_handling"],
+        o["allow_unterminated_quote"],
+        o["crlf"],
+        o["trim"],
+        o["skip_empty"],
+        o["header"],
+        o["mode"],
+        o["normalize_keys"],
+        o["drop"],
+        o["take"],
+        o["decompress"],
+        o["prefer_compressed"],
     )
-    row = 0
-
-    for batch in batches:
-        for text in batch:
-            try:
-                value = _JSON_DECODER.decode(text)
-            except ValueError as error:
-                raise JSONRowError(f"Failed to parse JSON at row {row}: {error}", row) from error
-
-            yield value
-            row += 1
 
 
-Transformers: TypeAlias = Mapping[str, Callable[[str], Any]]
+class _Transformer:
+    """Applies transformers to object and entries rows, by header name, as `CSVSpliterator` does."""
 
+    def __init__(self, batches: _native.CsvBatches, o: Mapping[str, Any]) -> None:
+        self.batches = batches
+        self.mode = o["mode"] or ("object" if o["header"] else "array")
+        self.transformers: Transformers | None = o["transformers"] if self.mode != "array" else None
+        self.bound: dict[str, Callable[[str], Any]] | None = None
 
-def _read_delimited(
-    source: Source,
-    *,
-    column_delimiter: Delimiter,
-    delimiter: Delimiter,
-    header: bool,
-    mode: Mode | None,
-    normalize_keys: bool,
-    enable_quote_handling: bool,
-    allow_unterminated_quote: bool,
-    crlf: bool,
-    trim: bool,
-    skip_empty: bool,
-    drop: int,
-    take: int | None,
-    transformers: Transformers | None,
-    decompress: bool,
-    prefer_compressed: bool,
-) -> Iterator[Any]:
-    batches = _native.CsvBatches(
-        _source(source),
-        _delimiter(delimiter),
-        _delimiter(column_delimiter),
-        enable_quote_handling,
-        allow_unterminated_quote,
-        crlf,
-        trim,
-        skip_empty,
-        header,
-        mode,
-        normalize_keys,
-        drop,
-        take,
-        decompress,
-        prefer_compressed,
-    )
-    resolved_mode = mode or ("object" if header else "array")
+    def batch(self, rows: list[Any]) -> list[Any]:
+        if not self.transformers:
+            return rows
 
-    # Transformers bind to header names and apply to object and entries rows, as `CSVSpliterator`'s do.
-    if not transformers or resolved_mode == "array":
-        for batch in batches:
-            yield from batch
+        if self.bound is None:
+            headers = set(self.batches.headers or ())
+            self.bound = {name: fn for name, fn in self.transformers.items() if name in headers}
 
-        return
+        bound = self.bound
 
-    bound: dict[str, Callable[[str], Any]] | None = None
-
-    for batch in batches:
-        if bound is None:
-            headers = set(batches.headers or ())
-            bound = {name: transform for name, transform in transformers.items() if name in headers}
-
-        for row in batch:
-            if resolved_mode == "object":
+        if self.mode == "object":
+            for row in rows:
                 for name, transform in bound.items():
                     row[name] = transform(row[name])
-            else:
-                row = [(key, bound[key](value) if key in bound else value, index) for key, value, index in row]
 
-            yield row
+            return rows
+
+        return [
+            [(key, bound[key](value) if key in bound else value, index) for key, value, index in row] for row in rows
+        ]
 
 
-def read_csv(
-    source: Source,
-    *,
-    column_delimiter: Delimiter = ",",
-    delimiter: Delimiter = "\n",
-    header: bool = True,
-    mode: Mode | None = None,
-    normalize_keys: bool = False,
-    enable_quote_handling: bool = True,
-    allow_unterminated_quote: bool = False,
-    crlf: bool = True,
-    trim: bool = True,
-    skip_empty: bool = True,
-    drop: int = 0,
-    take: int | None = None,
-    transformers: Transformers | None = None,
-    decompress: bool = True,
-    prefer_compressed: bool = True,
-) -> Iterator[Any]:
+def _transformed(source: Source, o: Mapping[str, Any]) -> Iterator[list[Any]]:
+    batches = _csv_batches(source, o)
+    transformer = _Transformer(batches, o)
+
+    for batch in batches:
+        yield transformer.batch(batch)
+
+
+def _read_csv(source: Source, defaults: CSVOptions, options: Mapping[str, Any], reader: str) -> Iterator[Any]:
+    yield from _flatten(_transformed(source, _merge(defaults, options, reader)))
+
+
+def _aread_csv(source: Source, defaults: CSVOptions, options: Mapping[str, Any], reader: str) -> AsyncIterator[Any]:
+    o = _merge(defaults, options, reader)
+
+    return _aflatten(lambda: _transformed(source, o))
+
+
+def _count_csv(source: Source, defaults: CSVOptions, options: Mapping[str, Any], reader: str) -> int:
+    o = _merge(defaults, options, reader)
+
+    return _native.count_csv(
+        _source(source),
+        _delimiter(o["delimiter"]),
+        _delimiter(o["column_delimiter"]),
+        o["enable_quote_handling"],
+        o["allow_unterminated_quote"],
+        o["crlf"],
+        o["skip_empty"],
+        o["header"],
+        o["drop"],
+        o["take"],
+        o["decompress"],
+        o["prefer_compressed"],
+    )
+
+
+def read_csv(source: Source, **options: Unpack[CSVOptions]) -> Iterator[Any]:
     """Yield the rows of a CSV source.
 
     With a header (the default) rows are ``dict`` keyed by the header as written; without one they are ``list[str]``.
@@ -247,102 +458,46 @@ def read_csv(
     a repeated header raises :class:`DuplicateHeaderError` unless ``normalize_keys`` suffixes it. Input ending inside
     quotes raises :class:`UnterminatedQuoteError` after the rows before it. ``drop`` and ``take`` count data rows.
     """
-    return _read_delimited(
-        source,
-        column_delimiter=column_delimiter,
-        delimiter=delimiter,
-        header=header,
-        mode=mode,
-        normalize_keys=normalize_keys,
-        enable_quote_handling=enable_quote_handling,
-        allow_unterminated_quote=allow_unterminated_quote,
-        crlf=crlf,
-        trim=trim,
-        skip_empty=skip_empty,
-        drop=drop,
-        take=take,
-        transformers=transformers,
-        decompress=decompress,
-        prefer_compressed=prefer_compressed,
-    )
+    return _read_csv(source, _CSV_DEFAULTS, options, "read_csv")
 
 
-def read_tsv(
-    source: Source,
-    *,
-    column_delimiter: Delimiter = "\t",
-    delimiter: Delimiter = "\n",
-    header: bool = True,
-    mode: Mode | None = None,
-    normalize_keys: bool = False,
-    enable_quote_handling: bool = False,
-    allow_unterminated_quote: bool = False,
-    crlf: bool = True,
-    trim: bool = True,
-    skip_empty: bool = True,
-    drop: int = 0,
-    take: int | None = None,
-    transformers: Transformers | None = None,
-    decompress: bool = True,
-    prefer_compressed: bool = True,
-) -> Iterator[Any]:
+def read_tsv(source: Source, **options: Unpack[CSVOptions]) -> Iterator[Any]:
     """Yield the rows of a TSV source. As :func:`read_csv`, except that the TSV format has no quoting, so a ``"`` is
     data unless ``enable_quote_handling`` is set."""
-    return _read_delimited(
-        source,
-        column_delimiter=column_delimiter,
-        delimiter=delimiter,
-        header=header,
-        mode=mode,
-        normalize_keys=normalize_keys,
-        enable_quote_handling=enable_quote_handling,
-        allow_unterminated_quote=allow_unterminated_quote,
-        crlf=crlf,
-        trim=trim,
-        skip_empty=skip_empty,
-        drop=drop,
-        take=take,
-        transformers=transformers,
-        decompress=decompress,
-        prefer_compressed=prefer_compressed,
-    )
+    return _read_csv(source, _TSV_DEFAULTS, options, "read_tsv")
 
 
-def read_psv(
-    source: Source,
-    *,
-    column_delimiter: Delimiter = "|",
-    delimiter: Delimiter = "\n",
-    header: bool = True,
-    mode: Mode | None = None,
-    normalize_keys: bool = False,
-    enable_quote_handling: bool = True,
-    allow_unterminated_quote: bool = False,
-    crlf: bool = True,
-    trim: bool = True,
-    skip_empty: bool = True,
-    drop: int = 0,
-    take: int | None = None,
-    transformers: Transformers | None = None,
-    decompress: bool = True,
-    prefer_compressed: bool = True,
-) -> Iterator[Any]:
+def read_psv(source: Source, **options: Unpack[CSVOptions]) -> Iterator[Any]:
     """Yield the rows of a pipe-separated source. As :func:`read_csv`, split on ``|``."""
-    return _read_delimited(
-        source,
-        column_delimiter=column_delimiter,
-        delimiter=delimiter,
-        header=header,
-        mode=mode,
-        normalize_keys=normalize_keys,
-        enable_quote_handling=enable_quote_handling,
-        allow_unterminated_quote=allow_unterminated_quote,
-        crlf=crlf,
-        trim=trim,
-        skip_empty=skip_empty,
-        drop=drop,
-        take=take,
-        transformers=transformers,
-        decompress=decompress,
-        prefer_compressed=prefer_compressed,
-    )
+    return _read_csv(source, _PSV_DEFAULTS, options, "read_psv")
+
+
+def aread_csv(source: Source, **options: Unpack[CSVOptions]) -> AsyncIterator[Any]:
+    """:func:`read_csv`, reading each batch of rows on a worker thread."""
+    return _aread_csv(source, _CSV_DEFAULTS, options, "aread_csv")
+
+
+def aread_tsv(source: Source, **options: Unpack[CSVOptions]) -> AsyncIterator[Any]:
+    """:func:`read_tsv`, reading each batch of rows on a worker thread."""
+    return _aread_csv(source, _TSV_DEFAULTS, options, "aread_tsv")
+
+
+def aread_psv(source: Source, **options: Unpack[CSVOptions]) -> AsyncIterator[Any]:
+    """:func:`read_psv`, reading each batch of rows on a worker thread."""
+    return _aread_csv(source, _PSV_DEFAULTS, options, "aread_psv")
+
+
+def count_csv(source: Source, **options: Unpack[CSVOptions]) -> int:
+    """The number of data rows :func:`read_csv` would yield, without splitting cells. The header is skipped but not
+    read, so a repeated header is not an error here; ``mode``, ``normalize_keys`` and ``transformers`` are ignored."""
+    return _count_csv(source, _CSV_DEFAULTS, options, "count_csv")
+
+
+def count_tsv(source: Source, **options: Unpack[CSVOptions]) -> int:
+    """The number of data rows :func:`read_tsv` would yield."""
+    return _count_csv(source, _TSV_DEFAULTS, options, "count_tsv")
+
+
+def count_psv(source: Source, **options: Unpack[CSVOptions]) -> int:
+    """The number of data rows :func:`read_psv` would yield."""
+    return _count_csv(source, _PSV_DEFAULTS, options, "count_psv")

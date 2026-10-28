@@ -45,13 +45,17 @@ export interface TextSpliteratorInit {
 
 const ASCII_WHITESPACE = new Set([0x20, 0x09, 0x0a, 0x0b, 0x0c, 0x0d])
 
+const blankDecoder = new TextDecoder()
+
 /**
- * Whether a raw row would trim to nothing: what `count` tests so it agrees with `from` without decoding. It checks
- * ASCII whitespace, which is what a delimited text file contains; `String.prototype.trim` also strips the rarer Unicode
- * spaces, so a row made only of those is counted here and dropped there.
+ * Whether a raw row would trim to nothing, so `count` agrees exactly with what `from` yields. An ASCII row is judged on
+ * its bytes; only a row whose first non-whitespace byte is non-ASCII is decoded, since `String.prototype.trim` also
+ * strips Unicode spaces (U+00A0, U+3000, a BOM).
  */
 function isBlank(row: Uint8Array): boolean {
 	for (const byte of row) {
+		if (byte >= 0x80) return blankDecoder.decode(row).trim().length === 0
+
 		if (!ASCII_WHITESPACE.has(byte)) return false
 	}
 
@@ -179,9 +183,8 @@ export abstract class TextSpliterator {
 	/**
 	 * Count logical text rows without decoding them.
 	 *
-	 * This counts the slices {@linkcode from} would yield, including a final unterminated row and its `skipEmpty`, `drop`,
-	 * and `take` behavior. The blank test is ASCII whitespace, so a row of only Unicode spaces is counted here and
-	 * dropped by `from` after decoding.
+	 * This counts the rows {@linkcode from} would yield, including a final unterminated row and its `skipEmpty`, `drop`,
+	 * and `take` behavior.
 	 *
 	 * @see {@linkcode countAsync} for files and other asynchronous sources.
 	 */
@@ -214,9 +217,8 @@ export abstract class TextSpliterator {
 	 * Count logical text rows without decoding them.
 	 *
 	 * This counts the slices {@linkcode fromAsync} would yield, including a final unterminated row and its `skipEmpty`,
-	 * `drop`, and `take` behavior, with the same ASCII-only blank test as {@linkcode count}. A path, URL, or file handle
-	 * is opened independently and can then be passed to {@linkcode fromAsync}; an async chunk source is inherently
-	 * consumed.
+	 * `drop`, and `take` behavior, with the same blank test as {@linkcode count}. A path, URL, or file handle is opened
+	 * independently and can then be passed to {@linkcode fromAsync}; an async chunk source is inherently consumed.
 	 */
 	public static async countAsync(
 		source: AsyncDataResource,

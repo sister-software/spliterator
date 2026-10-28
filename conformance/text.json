@@ -21,6 +21,7 @@
 		{ "name": "one BOM is removed from the start of every record", "input": "\ufeffa\n\ufeffb", "options": { "trim": false }, "expect": ["a", "b"] },
 		{ "name": "only one BOM per record", "input": "\ufeff\ufeffa", "options": { "trim": false }, "expect": ["\ufeffa"] },
 		{ "name": "trim uses the ECMAScript whitespace set", "input": "\u00a0a\u3000\n\u2028b\ufeff\n\u205fc\u1680", "expect": ["a", "b", "c"] },
+		{ "name": "a row of only Unicode whitespace is blank", "input": "a\n\u00a0\u3000\ufeff\nb", "expect": ["a", "b"] },
 		{ "name": "NEL is not whitespace to trim", "input": "\u0085a\u0085", "expect": ["\u0085a\u0085"] },
 		{ "name": "information separators are not whitespace to trim", "input": "\u001ca\u001f", "expect": ["\u001ca\u001f"] },
 		{ "name": "invalid UTF-8 decodes lossily, one replacement per maximal subpart", "input": { "base64": "Yf9iCuKC" }, "expect": ["a\ufffdb", "\ufffd"] },

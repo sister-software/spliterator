@@ -219,6 +219,19 @@ fn run(format: &str, options: &Map<String, Value>, source: Source) -> (Vec<Value
     (rows, error)
 }
 
+/// Count a case's rows, for the formats that have a count. `None` for JSONL.
+fn count_rows(
+    format: &str,
+    options: &Map<String, Value>,
+    source: Source,
+) -> Option<Result<usize, Error>> {
+    match format {
+        "jsonl" => None,
+        "text" => Some(text::count(source, text_options(options))),
+        _ => Some(csv::count(source, csv_options(format, options))),
+    }
+}
+
 /// JSON equality with numbers compared by value, so `-2500` from the fixture equals serde's `-2500.0`.
 fn same(left: &Value, right: &Value) -> bool {
     match (left, right) {
@@ -277,6 +290,24 @@ fn conformance() {
 
                 let (rows, error) = run(format, &options, source());
                 let id = format!("{name}.json › {} › {label}", case["name"].as_str().unwrap());
+                let expected_error = case.get("error");
+
+                // A count must equal the rows the reader yields. It reads no header names, so a repeated header is
+                // not its error to raise.
+                let duplicate_header =
+                    expected_error.is_some_and(|e| e["type"] == "DuplicateHeader");
+
+                if let (Some(counted), false) =
+                    (count_rows(format, &options, source()), duplicate_header)
+                {
+                    checked += 1;
+
+                    match (counted, expected_error) {
+                        (Err(error), Some(expected)) if error_matches(&error, expected) => {}
+                        (Ok(n), None) if Some(n) == case["expect"].as_array().map(Vec::len) => {}
+                        (other, _) => failures.push(format!("{id} (count): got {other:?}")),
+                    }
+                }
 
                 if let Some(expected) = case.get("error") {
                     match &error {
