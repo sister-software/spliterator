@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import gzip
 import io
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -144,3 +145,14 @@ def test_counts_match_reads(tmp_path: Path) -> None:
     assert spliterator.count_text(path) == 5000
     assert spliterator.count_text(path, drop=10, take=7) == 7
     assert spliterator.count_csv(b"k,k\n1,2\n3,4\n") == 2
+
+
+def test_a_zip_member_is_a_source(tmp_path: Path) -> None:
+    archive_path = tmp_path / "data.zip"
+
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("rows.csv", "a,b\n1,2\n")
+
+    with zipfile.ZipFile(archive_path) as archive, archive.open("rows.csv") as member:
+        # `ZipFile.open` returns `IO[bytes]`, not `BinaryIO`; the source type must accept it as it is.
+        assert list(spliterator.read_csv(member)) == [{"a": "1", "b": "2"}]
