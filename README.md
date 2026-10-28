@@ -76,12 +76,13 @@ import { CSVSpliterator } from "spliterator"
 const reader = CSVSpliterator.fromAsync("people.csv")
 
 for await (const row of reader) {
-	console.log(row) // { full_name: "Morgan", occupation: "Developer", age: "30" }, etc.
+	console.log(row) // { "Full Name": "Morgan", Occupation: "Developer", Age: "30" }, etc.
 }
 ```
 
-CSV defaults to objects keyed by its header row, with normalized property names. Supply a row type when you want the
-type checker to know those keys:
+CSV defaults to objects keyed by its header row as written. Pass `normalizeKeys: true` for snake_case keys (repeats are
+suffixed `_2`, `_3`, …); without it, a header that repeats a name throws a `DuplicateHeaderError` rather than letting one
+column overwrite the other. Supply a row type when you want the type checker to know those keys:
 
 ```ts
 import { CSVSpliterator } from "spliterator"
@@ -92,7 +93,7 @@ interface Person {
 	age: number
 }
 
-const reader = CSVSpliterator.fromAsync<Person>("people.csv")
+const reader = CSVSpliterator.fromAsync<Person>("people.csv", { normalizeKeys: true })
 
 for await (const columns of reader) {
 	console.log(columns) // { full_name: "Morgan", occupation: "Developer", age: "30" }, etc.
@@ -101,7 +102,9 @@ for await (const columns of reader) {
 
 A type parameter only tells the type checker what to expect. The cells are still strings, so give `age` a `transformers` entry to turn it into a number. Cells are trimmed by default, header included; RFC 4180 counts that whitespace as part of the field, so pass `trim: false` for byte parity.
 
-For tab-separated files, reach for `TSVSpliterator`. It accepts the same options as `CSVSpliterator` and defaults `columnDelimiter` to a tab, so you can omit it for the common case:
+Quoted fields may hold delimiters and newlines. Input that ends inside an open quote throws an `UnterminatedQuoteError` once the rows before it are out, since the quote would otherwise swallow the rest of the file; pass `allowUnterminatedQuote: true` to read it anyway.
+
+For tab-separated files, reach for `TSVSpliterator`. It accepts the same options as `CSVSpliterator`, defaults `columnDelimiter` to a tab, and treats `"` as data, because the TSV format has no quoting (pass `enableQuoteHandling: true` for a source that does quote):
 
 ```ts
 import { TSVSpliterator } from "spliterator"
@@ -112,6 +115,32 @@ for await (const columns of reader) {
 	console.log(columns)
 }
 ```
+
+## Compressed files
+
+A source that begins with the zstd or gzip magic bytes is decompressed before it is split, whatever its name: a path, a stream, or bytes in memory. A path `data.jsonl` reads `data.jsonl.zst`, or failing that `data.jsonl.gz`, when one exists, so a corpus compressed one file at a time reads the same throughout.
+
+```ts
+// Reads part-0000.jsonl.zst if it exists, else part-0000.jsonl.
+for await (const row of JSONSpliterator.fromAsync("part-0000.jsonl")) {
+	// ...
+}
+```
+
+Pass `decompress: false` or `preferCompressed: false` to opt out. A compressed file cannot be split into segments for parallel parsing.
+
+## Rust and Python
+
+The same readers exist as a Rust crate ([`spliterator`](https://crates.io/crates/spliterator), in `crates/spliterator`) and a Python package ([`sister-software-spliterator`](https://pypi.org/project/sister-software-spliterator/), in `crates/spliterator-py`, imported as `spliterator`), with the same defaults, the same rows and the same errors. A shared conformance suite (`conformance/`) runs in all three languages.
+
+```python
+import spliterator
+
+for row in spliterator.read_csv("people.csv"):
+    print(row["Full Name"])
+```
+
+See [`docs/v10.md`](docs/v10.md) for the full semantics and for migrating from 9.x.
 
 ## Chaining
 
@@ -172,7 +201,7 @@ Reading mirrors `CSVSpliterator`'s options — `mode`, `header`, `normalizeKeys`
 ```ts
 import { XLSXSpliterator } from "spliterator"
 
-const reader = XLSXSpliterator.fromAsync("people.xlsx", { sheet: "Employees" })
+const reader = XLSXSpliterator.fromAsync("people.xlsx", { sheet: "Employees", normalizeKeys: true })
 
 for await (const row of reader) {
 	console.log(row) // { full_name: "Morgan", hired: Date, age: 30 }, etc.

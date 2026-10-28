@@ -8,10 +8,12 @@ import type { ReadableWritablePair, StreamPipeOptions } from "node:stream/web"
 
 import { BufferController } from "#core/BufferController"
 import { CharacterSequence, type CharacterSequenceInput, Delimiters } from "#core/CharacterSequence"
+import { UnterminatedQuoteError } from "#core/errors"
 import { IndexQueue } from "#core/IndexQueue"
 import { WASM_MAX_RESULTS } from "#core/wasm_module"
 import { loadNodeFs } from "#internal/node-modules"
 import { isPathBuilderLike, type AsyncChunkIterator, type AsyncDataResource, type ByteRange } from "#internal/shared"
+import { decompressChunks } from "#io/compression"
 import { type AsManyWorkersOptions, runSegmentWorkers } from "#parallel/segment-workers"
 import { computeSegments, type SegmentOptions } from "#parallel/segments"
 
@@ -93,6 +95,25 @@ export interface SpliteratorInit {
 	crlf?: boolean
 
 	/**
+	 * Whether input that ends inside a double-quoted region is read anyway, as one final record holding the rest of the
+	 * input. By default it throws an {@linkcode UnterminatedQuoteError} once the records before it have been yielded,
+	 * since a quote that never closes swallows every later record and the result reads like a smaller file. Only
+	 * meaningful with {@linkcode enableQuoteHandling}.
+	 *
+	 * @default false
+	 */
+	allowUnterminatedQuote?: boolean
+
+	/**
+	 * Whether a source beginning with the zstd or gzip magic bytes is decompressed before it is split. Honoured by
+	 * {@linkcode AsyncSpliterator} and by the format readers' `from` and `fromAsync`; the synchronous
+	 * {@linkcode Spliterator} engine reads its bytes as given.
+	 *
+	 * @default true
+	 */
+	decompress?: boolean
+
+	/**
 	 * Whether to emit debug information.
 	 */
 	debug?: boolean
@@ -117,6 +138,14 @@ export interface AsyncSpliteratorInit extends SpliteratorInit {
 	 * @default false
 	 */
 	autoDispose?: boolean
+
+	/**
+	 * Whether a path `p` reads `p.zst`, or failing that `p.gz`, when one exists. A path that already ends in a compressed
+	 * extension, and any source that is not a path, is read as given.
+	 *
+	 * @default true
+	 */
+	preferCompressed?: boolean
 }
 
 /**
@@ -177,8 +206,10 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 			return new AsyncSpliterator(source, init)
 		}
 
-		return loadNodeFs().then(async ({ createChunkIterator }) => {
-			const chunkIterator = await createChunkIterator(source, {
+		return loadNodeFs().then(async ({ createChunkIterator, resolveCompressedSibling }) => {
+			const resolved = init.preferCompressed === false ? source : await resolveCompressedSibling(source)
+
+			const chunkIterator = await createChunkIterator(resolved, {
 				highWaterMark: init.highWaterMark,
 			})
 
@@ -246,7 +277,10 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	 */
 	constructor(source: AsyncChunkIterator, init: AsyncSpliteratorInit = {}) {
 		this.#source = source
-		this.#chunkReader = source[Symbol.asyncIterator]()
+
+		// The original source stays in `#source` so closing can still destroy or cancel it directly.
+		this.#chunkReader =
+			init.decompress === false ? source[Symbol.asyncIterator]() : decompressChunks(source)[Symbol.asyncIterator]()
 
 		this.#autoDispose = init.autoDispose ?? false
 
@@ -260,6 +294,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 		this.#skipEmpty = init.skipEmpty ?? true
 		this.#crlf = init.crlf ?? false
 		this.#enableQuoteHandling = init.enableQuoteHandling ?? false
+		this.#allowUnterminatedQuote = init.allowUnterminatedQuote ?? false
 
 		if (this.#enableQuoteHandling && this.#needle.length !== 1) {
 			throw new RangeError(
@@ -343,6 +378,16 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 	 * Whether delimiters inside double-quoted regions are ignored.
 	 */
 	readonly #enableQuoteHandling: boolean
+
+	/**
+	 * Whether input ending inside quotes is read as one final record rather than thrown on.
+	 */
+	readonly #allowUnterminatedQuote: boolean
+
+	/**
+	 * Bytes discarded from the front of the buffer by compression, so a buffer position plus this is a stream offset.
+	 */
+	#discardedByteLength = 0
 
 	/**
 	 * The byte sequence for a double quote.
@@ -583,6 +628,14 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 			const tailStart = this.#pendingSliceStart
 			const tailEnd = this.#controller.bytesWritten
 
+			if (this.#enableQuoteHandling && this.#insideQuotes && !this.#allowUnterminatedQuote) {
+				const byteOffset = this.#discardedByteLength + tailStart
+
+				await this.#finalize()
+
+				throw new UnterminatedQuoteError(byteOffset)
+			}
+
 			if (tailStart <= tailEnd) {
 				this.#log("Inserted trailing byte range", [tailStart, tailEnd])
 				this.#indices.enqueue([tailStart, tailEnd])
@@ -601,6 +654,7 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 
 		this.#log("Compressing buffer", { nextBufferStart })
 		this.#controller.compress(nextBufferStart)
+		this.#discardedByteLength += nextBufferStart
 
 		// After compress, the buffer coordinate space has shifted — rebase the scan cursors.
 		// Quote state (`#insideQuotes`) is positionless and survives as-is.
@@ -881,7 +935,13 @@ export class AsyncSpliterator<R extends Uint8Array | DataView | ArrayBuffer = Ui
 				// `end` is exclusive here. createChunkIterator's `end` is inclusive.
 				const chunkIterator = await createChunkIterator(source, { start, end: end - 1 })
 
-				return new AsyncSpliterator(chunkIterator, { delimiter: options.delimiter, autoDispose: true })
+				// A segment starts mid-file, so its first bytes are never a stream header. `computeSegments` has already
+				// refused a compressed source.
+				return new AsyncSpliterator(chunkIterator, {
+					delimiter: options.delimiter,
+					autoDispose: true,
+					decompress: false,
+				})
 			})
 		)
 	}

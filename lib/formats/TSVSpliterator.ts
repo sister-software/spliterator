@@ -20,4 +20,13 @@ export abstract class TSVSpliterator extends CSVSpliterator {
 	 * @default Delimiters.Tab
 	 */
 	public static override ColumnDelimiter: number = Delimiters.Tab
+
+	/**
+	 * Off since 10.0.0. The TSV format has no quoting, and a `"` in a tab-separated source (a GeoNames place name such as
+	 * `Ovrag Kyzylak"on`) is data. A quote-aware reader would join every line from one such quote to the next into a
+	 * single record. Pass `enableQuoteHandling: true` for a source that does quote its fields.
+	 *
+	 * @default false
+	 */
+	public static override EnableQuoteHandling = false
 }

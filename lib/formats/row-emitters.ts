@@ -4,6 +4,8 @@
  * @copyright Sister Software
  */
 
+import { assertUniqueHeaders } from "#core/errors"
+import { normalizeColumnNames } from "#formats/casing"
 import { zipSync } from "#iterators/zip"
 
 /**
@@ -47,7 +49,10 @@ export interface RowSpliteratorInit<V> {
 	/**
 	 * Whether to normalize header keys into `snake_case` and disambiguate duplicates by suffixing `_2`, `_3`, ….
 	 *
-	 * @default `mode !== "array"`
+	 * Off by default since 10.0.0: keys are the header cells as written (after `trim`). In `"object"` mode a repeated
+	 * header then throws a `DuplicateHeaderError`, because one of the repeated columns would otherwise be lost.
+	 *
+	 * @default false
 	 */
 	normalizeKeys?: boolean
 
@@ -274,6 +279,21 @@ export function createRowEmitters<V>(missingValue: V): Record<RowOutputMode, Row
 			return record
 		},
 	}
+}
+
+/**
+ * The column names a header row binds: normalized when asked, and checked for repeats when rows are keyed by name.
+ * Normalized names are unique by construction, and array and entries rows keep every column, so only raw names in
+ * `"object"` mode can collide.
+ */
+export function headerNames(columns: string[], normalizeKeys: boolean, mode: RowOutputMode): string[] {
+	if (normalizeKeys) return normalizeColumnNames(columns)
+
+	if (mode === "object") {
+		assertUniqueHeaders(columns)
+	}
+
+	return columns
 }
 
 /**

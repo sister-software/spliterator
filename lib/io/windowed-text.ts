@@ -9,10 +9,15 @@ import { CharacterSequence, Delimiters } from "#core/CharacterSequence"
 import { Spliterator, type SpliteratorInit } from "#core/Spliterator"
 import { batched, type BatchedAsyncIterable } from "#iterators/AsyncSequence"
 
+const BOM = 0xfe_ff
+
 /**
  * Split `text` on `delimiter` into `rows`, the way the byte engine would have cut the encoded bytes: a carriage return
  * before a delimiter goes with the delimiter when `crlf` is on, one at the end of the text is data, and the piece after
  * the last delimiter is a row even when empty unless `skipEmpty` drops it, matching `String.prototype.split`.
+ *
+ * With `stripBOM`, one U+FEFF at the start of each row is removed, as a per-row `TextDecoder` would remove it.
+ * Emptiness is judged before that, so a row holding only a BOM is kept (as `""`) when `skipEmpty` is on.
  *
  * Returns the number of rows pushed. Shared by the streaming window path and the string fast path of the text and JSON
  * spliterators.
@@ -23,13 +28,13 @@ export function splitTextRows(
 	crlf: boolean,
 	skipEmpty: boolean,
 	rows: string[],
-	limit = Infinity
+	stripBOM = false
 ): number {
 	const delimiterLength = delimiter.length
 	const before = rows.length
 	let position = 0
 
-	while (rows.length - before < limit) {
+	while (true) {
 		const found = text.indexOf(delimiter, position)
 		let end = found === -1 ? text.length : found
 
@@ -38,7 +43,9 @@ export function splitTextRows(
 		}
 
 		if (!(skipEmpty && end === position)) {
-			rows.push(text.slice(position, end))
+			const start = stripBOM && end > position && text.charCodeAt(position) === BOM ? position + 1 : position
+
+			rows.push(text.slice(start, end))
 		}
 
 		if (found === -1) break
@@ -71,19 +78,31 @@ export function delimiterText(delimiter: SpliteratorInit["delimiter"]): string {
 /**
  * Every row of a string source, split as text. Measured against the byte route (encode, scan, decode per row) on a
  * 40-line string: 7.8µs → see `TextSpliterator.from`. The whole string is split before the first row is yielded, which
- * for the in-memory strings this serves (a command's output, a file read whole) is the cheap part. `drop` and `take`
- * count after `skipEmpty`, as the engine's do.
+ * for the in-memory strings this serves (a command's output, a file read whole) is the cheap part.
+ *
+ * `drop` and `take` are the caller's: they count rows after the caller's own skipping (blank rows, comments), which
+ * happens after this split.
  */
-export function* textRows(text: string, init: SpliteratorInit): Generator<string> {
+export function textRows(text: string, init: SpliteratorInit, stripBOM: boolean): string[] {
 	const rows: string[] = []
-	const drop = Math.max(0, init.drop ?? 0)
-	const take = Math.max(0, init.take ?? Infinity)
 
-	splitTextRows(text, delimiterText(init.delimiter), init.crlf ?? false, init.skipEmpty ?? true, rows, drop + take)
+	splitTextRows(text, delimiterText(init.delimiter), init.crlf ?? false, init.skipEmpty ?? true, rows, stripBOM)
 
-	for (let index = drop; index < rows.length; index++) {
-		yield rows[index]!
-	}
+	return rows
+}
+
+/**
+ * Whether a decoded row holds nothing but whitespace, in the `String.prototype.trim` sense. Most rows start with a
+ * printable ASCII character, and testing that one code unit avoids the `trim` call that would find it out.
+ */
+export function isBlankText(row: string): boolean {
+	if (!row.length) return true
+
+	const first = row.charCodeAt(0)
+
+	if (first > 0x20 && first < 0x80) return false
+
+	return row.trim().length === 0
 }
 
 export interface WindowedTextInit {
@@ -94,7 +113,15 @@ export interface WindowedTextInit {
 	delimiter: CharacterSequence
 	crlf: boolean
 	skipEmpty: boolean
+	/**
+	 * Decodes each window. Construct it with `ignoreBOM: true`: a window decoder would otherwise drop a BOM only at the
+	 * start of a window, where the per-row path drops one at the start of every row. `stripBOM` does that instead.
+	 */
 	decoder: TextDecoder
+	/**
+	 * Whether to remove one U+FEFF from the start of each row.
+	 */
+	stripBOM: boolean
 	/**
 	 * Called with the row index of a window that failed to decode, after the rows before it were handed out. The row
 	 * path's decode error names a row, so the window path finds which one by decoding that window row by row.
@@ -123,7 +150,7 @@ export function windowedTextRows(engine: AsyncSpliterator, init: WindowedTextIni
 }
 
 async function* windows(engine: AsyncSpliterator, init: WindowedTextInit): AsyncGenerator<string[]> {
-	const { crlf, skipEmpty, decoder } = init
+	const { crlf, skipEmpty, decoder, stripBOM } = init
 	const delimiter = decoder.decode(init.delimiter)
 	let rowIndex = 0
 
@@ -144,7 +171,9 @@ async function* windows(engine: AsyncSpliterator, init: WindowedTextInit): Async
 
 				for (const row of Spliterator.fromSync(window, { delimiter: init.delimiter, crlf, skipEmpty })) {
 					try {
-						rows.push(decoder.decode(row))
+						const decoded = decoder.decode(row)
+
+						rows.push(stripBOM && decoded.charCodeAt(0) === BOM ? decoded.slice(1) : decoded)
 					} catch (error) {
 						throw init.decodeError(rowIndex + rows.length, error)
 					}
@@ -162,7 +191,7 @@ async function* windows(engine: AsyncSpliterator, init: WindowedTextInit): Async
 			// The window holds whole records with the delimiters between them and none after the last, exactly as the
 			// engine cut them: the piece after the last delimiter is the last record, not a partial one, and the engine
 			// already trimmed the carriage return before the last delimiter it cut.
-			rowIndex += splitTextRows(text, delimiter, crlf, skipEmpty, rows)
+			rowIndex += splitTextRows(text, delimiter, crlf, skipEmpty, rows, stripBOM)
 
 			if (rows.length) {
 				yield rows

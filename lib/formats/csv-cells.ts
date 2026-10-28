@@ -6,6 +6,7 @@
 
 import type { AsyncSpliterator } from "#core/AsyncSpliterator"
 import { CharacterSequence, type CellScanOptions, type CellScanState } from "#core/CharacterSequence"
+import { UnterminatedQuoteError } from "#core/errors"
 import {
 	CELL_FLAG_HAS_ESCAPE,
 	CELL_FLAG_HAS_QUOTE,
@@ -24,6 +25,12 @@ export const CELL_SCAN_WINDOW = 64 * 1024
 
 const BOM = 0xfe_ff
 
+const utf8Encoder = new TextEncoder()
+
+function utf8Length(text: string): number {
+	return utf8Encoder.encode(text).byteLength
+}
+
 export interface CsvCellScanInit {
 	rowDelimiter: number
 	columnDelimiter: number
@@ -31,6 +38,13 @@ export interface CsvCellScanInit {
 	crlf: boolean
 	trim: boolean
 	skipEmpty: boolean
+	/**
+	 * Whether a source ending inside quotes yields its open row rather than throwing an
+	 * {@linkcode UnterminatedQuoteError}.
+	 *
+	 * @default false
+	 */
+	allowUnterminatedQuote?: boolean
 	/**
 	 * @default CELL_SCAN_WINDOW
 	 */
@@ -67,6 +81,7 @@ export class CellRowScanner {
 	readonly #enableQuoteHandling: boolean
 	readonly #trim: boolean
 	readonly #skipEmpty: boolean
+	readonly #allowUnterminatedQuote: boolean
 
 	#state: CellScanState = { scanCursor: 0, units: 0, insideQuotes: false, cellStartUnits: 0, cellFlags: 0 }
 
@@ -77,6 +92,10 @@ export class CellRowScanner {
 	#template: string[] = []
 	#row: string[] = []
 	#width = 0
+	/**
+	 * The UTF-16 offset in `#text` where the open row began, for the error an unterminated quote throws.
+	 */
+	#rowStart = 0
 	#done = false
 
 	constructor(source: Uint8Array, text: string, init: CsvCellScanInit) {
@@ -86,6 +105,7 @@ export class CellRowScanner {
 		this.#enableQuoteHandling = init.enableQuoteHandling
 		this.#trim = init.trim
 		this.#skipEmpty = init.skipEmpty
+		this.#allowUnterminatedQuote = init.allowUnterminatedQuote ?? false
 
 		this.#options = {
 			rowDelimiter: init.rowDelimiter,
@@ -134,6 +154,10 @@ export class CellRowScanner {
 			const start = cells[offset]! + unitBase
 			const cellEnd = cells[offset + 1]! + unitBase
 			const flags = cells[offset + 2]!
+
+			if (this.#width === 0) {
+				this.#rowStart = start
+			}
 
 			// Evaluated before the store: `row[width++] = cell(...)` would bump `width` before `cell` reads it.
 			const value = this.#cell(start, cellEnd, flags)
@@ -209,6 +233,14 @@ export class CellRowScanner {
 
 		const tailStart = this.#state.cellStartUnits
 		const tailEnd = this.#text.length
+
+		if (this.#options.quote >= 0 && this.#state.insideQuotes && !this.#allowUnterminatedQuote) {
+			const rowStart = this.#width ? this.#rowStart : tailStart
+
+			// The text is the source decoded exactly (or the caller's own string, which encodes to the source), so the
+			// UTF-8 length of the text before the row is the row's byte offset. Paid once, on the error path.
+			throw new UnterminatedQuoteError(utf8Length(this.#text.slice(0, rowStart)))
+		}
 
 		if (tailStart < tailEnd) {
 			const value = this.#cell(tailStart, tailEnd, this.#state.cellFlags)

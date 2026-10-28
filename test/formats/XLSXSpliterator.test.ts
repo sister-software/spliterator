@@ -74,18 +74,18 @@ test("Instantiation throws", ({ expect }) => {
 	expect(() => new XLSXSpliterator()).toThrowError(TypeError)
 })
 
-test("Rows emit as records with normalized keys, header consumed by default", async ({ expect }) => {
+test("Rows emit as records keyed by the header as written, header consumed by default", async ({ expect }) => {
 	const rows = await XLSXSpliterator.fromAsync(fixturePath).toArray()
 
 	expect(rows).toEqual([
-		{ full_name: "Ada", score: 42, active: true, joined },
-		{ full_name: "Grace", score: 3.5, active: false, joined: null },
-		{ full_name: "Linus", score: 7, active: true, joined: null },
+		{ "Full Name": "Ada", Score: 42, Active: true, Joined: joined },
+		{ "Full Name": "Grace", Score: 3.5, Active: false, Joined: null },
+		{ "Full Name": "Linus", Score: 7, Active: true, Joined: null },
 	])
 })
 
 test("Rows emit as records with normalized keys", async ({ expect }) => {
-	const records = XLSXSpliterator.fromAsync<TypedXLSXRow>(fixturePath, { mode: "object" })
+	const records = XLSXSpliterator.fromAsync<TypedXLSXRow>(fixturePath, { mode: "object", normalizeKeys: true })
 
 	expectTypeOf(records).toEqualTypeOf<AsyncSequence<TypedXLSXRow>>()
 
@@ -98,14 +98,14 @@ test("Rows emit as records with normalized keys", async ({ expect }) => {
 	])
 })
 
-test("Header normalization can be disabled", async ({ expect }) => {
+test("Header normalization is off by default", async ({ expect }) => {
 	const rows = await XLSXSpliterator.fromAsync(fixturePath, { mode: "object", normalizeKeys: false }).toArray()
 
 	expect(Object.keys(rows[0]!)).toEqual(["Full Name", "Score", "Active", "Joined"])
 })
 
 test("Rows emit as entries", async ({ expect }) => {
-	const rows = await XLSXSpliterator.fromAsync(fixturePath, { mode: "entries", take: 1 }).toArray()
+	const rows = await XLSXSpliterator.fromAsync(fixturePath, { mode: "entries", take: 1, normalizeKeys: true }).toArray()
 
 	expect(rows).toEqual([
 		[
@@ -126,11 +126,11 @@ test("`header: false` yields the header row as data", async ({ expect }) => {
 test("Sheet selection by name and by number", async ({ expect }) => {
 	const byName = await XLSXSpliterator.fromAsync(fixturePath, { sheet: "Extras", mode: "object" }).toArray()
 
-	expect(byName).toEqual([{ key: "answer", value: 42 }])
+	expect(byName).toEqual([{ Key: "answer", Value: 42 }])
 
 	const byNumber = await XLSXSpliterator.fromAsync(fixturePath, { sheet: 2 }).toArray()
 
-	expect(byNumber).toEqual([{ key: "answer", value: 42 }])
+	expect(byNumber).toEqual([{ Key: "answer", Value: 42 }])
 })
 
 test("Unknown sheet propagates the vendor error", async ({ expect }) => {
@@ -138,7 +138,7 @@ test("Unknown sheet propagates the vendor error", async ({ expect }) => {
 })
 
 test("`drop` and `take` bound the emitted rows", async ({ expect }) => {
-	const rows = await XLSXSpliterator.fromAsync(fixturePath, { drop: 1, take: 1 }).toArray()
+	const rows = await XLSXSpliterator.fromAsync(fixturePath, { drop: 1, take: 1, normalizeKeys: true }).toArray()
 
 	expect(rows).toEqual([{ full_name: "Grace", score: 3.5, active: false, joined: null }])
 })
@@ -148,6 +148,7 @@ test("Transformers receive typed cell values", async ({ expect }) => {
 
 	const rows = await XLSXSpliterator.fromAsync(fixturePath, {
 		mode: "object",
+		normalizeKeys: true,
 		take: 1,
 		transformers: {
 			joined: (value) => {
@@ -165,7 +166,7 @@ test("Transformers receive typed cell values", async ({ expect }) => {
 test("Reads from an in-memory byte source", async ({ expect }) => {
 	const bytes = new Uint8Array(await readFile(fixturePath))
 
-	const rows = await XLSXSpliterator.fromAsync(bytes, { mode: "object", take: 1 }).toArray()
+	const rows = await XLSXSpliterator.fromAsync(bytes, { mode: "object", take: 1, normalizeKeys: true }).toArray()
 
 	expect(rows).toEqual([{ full_name: "Ada", score: 42, active: true, joined }])
 })
@@ -188,7 +189,7 @@ test("Write: record rows round-trip through the reader", async ({ expect }) => {
 })
 
 test("Write: accepts an async iterable, composing with AsyncSequence pipelines", async ({ expect }) => {
-	const source = XLSXSpliterator.fromAsync(fixturePath, { mode: "object" }).map((row) => ({
+	const source = XLSXSpliterator.fromAsync(fixturePath, { mode: "object", normalizeKeys: true }).map((row) => ({
 		full_name: row.full_name,
 		score: typeof row.score === "number" ? row.score * 10 : row.score,
 	}))

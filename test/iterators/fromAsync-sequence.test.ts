@@ -91,7 +91,7 @@ test("TextSpliterator: drop and take compose over a real file", async () => {
 })
 
 test("CSVSpliterator: chains in object mode", async () => {
-	const names = await CSVSpliterator.fromAsync(csvPath, { mode: "object" })
+	const names = await CSVSpliterator.fromAsync(csvPath, { mode: "object", normalizeKeys: true })
 		.filter((row) => Boolean((row as Record<string, string>).item_name))
 		.map((row) => (row as Record<string, string>).item_name)
 		.take(3)

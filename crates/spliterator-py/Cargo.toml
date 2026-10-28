@@ -1,0 +1,18 @@
+[package]
+name = "spliterator-py"
+description = "Python bindings for the spliterator crate."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+spliterator = { path = "../spliterator" }
+pyo3 = { version = "0.30", features = ["abi3-py311", "extension-module"] }

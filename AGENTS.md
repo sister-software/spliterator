@@ -19,6 +19,8 @@ yarn lint
 - Use `--run` with vitest (non-watch mode).
 - Use `bulkThreshold: 0` to force streaming behavior.
 - Use `WorkerPool` when repeating worker-heavy operations.
+- A Rust crate (`crates/spliterator`) and a Python package (`crates/spliterator-py`) implement the same readers; the
+  conformance suite in `conformance/` binds all three. See "Rust and Python" below.
 
 For full details (architecture, sequence invariants, gotchas, exports, and performance notes),
 use the sections below.
@@ -47,11 +49,24 @@ yarn lint
 # Auto-fix lint issues
 yarn lint:fix
 
+# Rust crate and Python package (workspace root Cargo.toml)
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cd crates/spliterator-py && uv venv .venv && uv pip install --python .venv/bin/python maturin pytest mypy \
+  && VIRTUAL_ENV=$PWD/.venv .venv/bin/maturin develop && .venv/bin/python -m pytest -q && .venv/bin/python -m mypy
+uvx ruff check crates/spliterator-py && uvx ruff format --check crates/spliterator-py
+
 # Release — two GitHub Actions dispatches; nothing runs locally. `main` is protected, so the
 # bump lands via an auto-merging PR (mode=prepare), then the merged commit is tagged and
 # published (mode=publish). See .github/workflows/publish.yml.
+# One version for all three registries: prepare bumps package.json AND the Cargo workspace;
+# publish tags, publishes npm, then dispatches publish-cargo.yml (environment `cargo`, crate
+# `spliterator`) and publish-pypi.yml (environment `pypi`, `sister-software-spliterator`) at the tag.
 gh workflow run publish.yml -f mode=prepare -f version=minor
 gh workflow run publish.yml -f mode=publish
+# Retry one registry: both are idempotent and refuse to publish from anything but the tag.
+gh workflow run publish-pypi.yml --ref v10.0.0
+gh workflow run publish-cargo.yml --ref v10.0.0
 ```
 
 The package manager is **yarn** (v4). Node >= 22.18 is required. Compiled output goes to `out/`.
@@ -183,6 +198,46 @@ The synchronous sibling, returned by every `from`. Same design as `AsyncSequence
 - **`Symbol.dispose` closes the sequence**, so `using rows = CSVSpliterator.from(...)` releases the source on scope exit.
 - **Wrapping costs 5–9% on parsed rows, 13–16% with three operators stacked.** Measured on Node 26 over 1M rows against the bare generator `from` used to return: `TextSpliterator` 138ms → 150ms → 160ms, `JSONSpliterator` 488ms → 511ms → 550ms. Against a generator doing no work at all it is 1.58× bare and 2.87× at three operators (11ms → 18ms → 33ms over 1M items) — the same shape as `AsyncSequence`, and the same conclusion: negligible once a row is parsed, most of the cost when it is not. For scan-only work iterate `Spliterator` directly.
 
+### v10 defaults: Mailwoman's wrappers, built in
+
+Spliterator serves Mailwoman first. Options Mailwoman repeated around every call became defaults in 10.0.0; the
+semantics table and migration guide are `docs/v10.md`.
+
+- **Decompression by magic bytes** (`lib/io/compression.ts`): `AsyncSpliterator` wraps its source in
+  `decompressChunks`, the adaptive opener decompresses before its end-of-input test (a compressed file's size says
+  nothing about its content's), and the format readers' `from(bytes)` call `maybeDecompressSync`. `decompress: false`
+  opts out. The raw `Spliterator.fromSync` engine never decompresses. Worker segment engines pass `decompress: false`.
+- **Compressed siblings** (`resolveCompressedSibling` in `node/fs/reader.ts`): a path reads `p.zst`, then `p.gz`.
+  Resolved once in `openDelimitedRows`, which then passes `preferCompressed: false` down so the engine does not look for
+  a sibling of the sibling. `computeSegments` never redirects and refuses a compressed source.
+- **`UnterminatedQuoteError`**: thrown by `Spliterator.#drain`, `AsyncSpliterator.#fill`'s EOF branch (offset is
+  `#discardedByteLength + tailStart`, tracked across compressions) and `CellRowScanner.#finish` (UTF-8 length of the
+  text before the open row). `allowUnterminatedQuote` restores the v9 reading.
+- **`DuplicateHeaderError`**: `headerNames` in `row-emitters.ts`, object mode without `normalizeKeys`.
+- **Defaults**: `normalizeKeys` false (was true for object rows); `TSVSpliterator.EnableQuoteHandling` false.
+- **Text/JSONL `drop`/`take`** count after blank, empty and comment skipping, so they are applied in the generators and
+  as sequence ops after the filters, never as engine options.
+
+### Rust and Python (`crates/`)
+
+A Cargo workspace at the root holds `crates/spliterator` (the crate, `spliterator` on crates.io) and
+`crates/spliterator-py` (PyO3 bindings, built with maturin, `sister-software-spliterator` on PyPI, imported as
+`spliterator`; the PyPI name `spliterator` belongs to an unrelated project). The workspace version always equals
+`package.json`'s; CI's `ports` job fails otherwise, and a prerelease must be `-alpha.N`/`-beta.N`/`-rc.N` so PyPI can spell
+it. The WASM kernel in `wasm/` is excluded from the workspace because it targets
+`wasm32` only. The crate is its own implementation of the semantics, not a port of the WASM kernel: parity is enforced by
+the conformance suite, which each language runs over its own entry points (`test/conformance/conformance.test.ts`,
+`crates/spliterator/tests/conformance.rs`, `crates/spliterator-py/tests/test_conformance.py`). Fixture expectations are
+written by hand from the semantics table, never captured from an implementation. When behaviour changes, change
+`docs/v10.md`, the fixtures, and all three implementations together.
+
+- **The trim set is ECMAScript's.** `crates/spliterator/src/whitespace.rs` spells it out: Rust's `char::is_whitespace`
+  and Python's `str.strip` both strip U+0085 and neither strips U+FEFF.
+- **Python gets rows in batches** (`Batcher` in `crates/spliterator-py/src/lib.rs`, ≤4096 rows or ~64 KiB), read with
+  the interpreter released. Rows read before an error are returned first and the error raised on the next batch, which
+  is what `expectBeforeError` in the suite checks. JSON is parsed in Python with `NaN`/`Infinity` rejected.
+- **Header normalization is ported** (`keys.rs`): `\d` is spelled `0-9` because ECMAScript's `\d` is ASCII-only.
+
 ### Adaptive bulk parsing (`lib/io/adaptive-source.ts`)
 
 Every `fromAsync` opens its source through `openDelimitedRows`, which reads sources at or below `bulkThreshold` (default **128 KiB**) whole and parses them with the **synchronous** engine, streaming everything else. Returns a sync iterable in the first case and an async one in the second; `AsyncSequence` accepts either.
@@ -280,6 +335,10 @@ Examples import test helpers by relative path (`../test/support/utils.js`), not 
 
 ### Testing
 
+The cross-language contract is `conformance/*.json`, run by `test/conformance/conformance.test.ts` through every entry
+point (string, bytes, streams chunked at 1/3/64/whole bytes, streamed and adaptive, both `columnScan` values), by
+`cargo test` and by `pytest`.
+
 Tests use **vitest** and live in `test/`. Fixtures are in `test/fixtures/`. The `test/support/utils.ts` helper loads fixture files and pre-computes `String.prototype.split` results for parity comparisons.
 
 The parallel-parsing layers are tested bottom-up so the worker protocol is verified without spawning threads: `runSegment` (`test/parallel/segment-runtime.test.ts`) and `workerToIterable` (`test/parallel/workerToIterable.test.ts`) are pure/main-thread; `computeSegments` (`test/parallel/segments.test.ts`) and `asMany` (`test/parallel/asMany.test.ts`) run against temp fixtures and assert the boundary invariant + parity vs sequential parse. Only `test/parallel/asManyWorkers.test.ts`, `pooled-workers.test.ts`, `parallelMapWorkers.test.ts` and `worker-regressions.test.ts` spawn real workers — they use TypeScript fixture handlers in `test/fixtures/segment-handlers/` and `parallel-handlers/` (loaded by file path) and cover parity, the `Uint8Array` transfer path, the path-required `TypeError`, a throwing handler rejecting the iterator, and the lifecycle edges: an omitted delimiter, early exit from a pooled call, two calls sharing a small pool, disposal mid-spawn, a worker that exits without finishing, and an idle pooled worker that throws.
@@ -323,8 +382,30 @@ The parallel-parsing layers are tested bottom-up so the worker protocol is verif
 
 - **`Array.shift()` is O(n)**: Avoid `shift()` on large arrays in hot paths. Use a `head` pointer instead (`chunks[head++]`).
 
+- **Node's zstd decodes one frame**: `zlib.zstdDecompressSync` returns the first frame of a multi-frame stream and drops
+  the rest without an error, and `createZstdDecompress` fails on the second frame. `lib/io/zstd-frames.ts` walks frame
+  and block headers to cut the stream into frames and gives each its own decompressor. Don't hand a zstd stream to
+  `node:zlib` whole. Gzip members are fine: `createGunzip` reads them through.
+
+- **The windowed text split ignores quotes**: `windowedTextRows` re-splits each engine window as plain text, so a
+  quote-aware text or JSONL stream must keep the engine's own records (`TextSpliterator`/`JSONSpliterator.fromAsync`
+  check `enableQuoteHandling`). 9.x split quoted newlines apart on that path.
+
+- **The conformance fixtures are excluded from `oxfmt`**: formatting rewrites `\ufeff`, `\u00a0` and `\ufffd` escapes as
+  invisible literal characters. Keep one case per line and write anything invisible as an escape.
+
+- **A `#[pyclass]` cannot hold 32-byte-aligned data inline**: the readers own `memchr` searchers aligned for AVX2, and
+  Python allocates objects at 16 bytes, which aborts the interpreter (`misaligned pointer dereference` in
+  `pyclass_init.rs`). The batch state is boxed for that reason.
+
 ## Known Performance Issues
 
 Open items only — resolved work is in the git log, and the invariants it left behind are in the gotchas above.
 
-Nothing open. Add entries here as they are found, and move the invariant into the gotchas above when one is fixed.
+- **v10's added costs are unmeasured** (the lab was busy when they landed). Every `AsyncSpliterator` now reads through
+  `decompressChunks`, one async generator step per chunk, and every path open stats up to two sibling paths. Both should
+  be per-chunk and per-open costs, small against parsing, but measure a small-file loop and a large streamed file against
+  9.3.0 before release. The Rust crate and Python package make no performance claims either; they have not been
+  benchmarked.
+
+Add entries here as they are found, and move the invariant into the gotchas above when one is fixed.

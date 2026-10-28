@@ -1,0 +1,33 @@
+{
+	"$comment": "Text rows. Expected values are written from the semantics table in docs/v10.md, never captured from an implementation.",
+	"format": "text",
+	"cases": [
+		{ "name": "lines", "input": "a\nb\nc", "expect": ["a", "b", "c"] },
+		{ "name": "trailing newline adds no row", "input": "a\nb\n", "expect": ["a", "b"] },
+		{ "name": "empty input", "input": "", "expect": [] },
+		{ "name": "trim is on by default", "input": "  a  \n\tb\t", "expect": ["a", "b"] },
+		{ "name": "trim off keeps padding", "input": " a \n", "options": { "trim": false }, "expect": [" a "] },
+		{ "name": "blank rows are dropped", "input": "a\n   \n\nb", "expect": ["a", "b"] },
+		{ "name": "skipEmpty off keeps empty rows", "input": "a\n\nb\n", "options": { "skipEmpty": false, "trim": false }, "expect": ["a", "", "b", ""] },
+		{ "name": "skipEmpty off keeps blank rows, trimmed", "input": "a\n  \nb", "options": { "skipEmpty": false }, "expect": ["a", "", "b"] },
+		{ "name": "CRLF disappears under trim", "input": "a\r\nb\r\n", "expect": ["a", "b"] },
+		{ "name": "crlf off and trim off keep the carriage return", "input": "a\r\nb", "options": { "trim": false }, "expect": ["a\r", "b"] },
+		{ "name": "crlf on removes only a carriage return before a delimiter", "input": "a\r\nb\r", "options": { "trim": false, "crlf": true }, "expect": ["a", "b\r"] },
+		{ "name": "a comma delimiter makes a list parser", "input": " a, b ,,c", "options": { "delimiter": "," }, "expect": ["a", "b", "c"] },
+		{ "name": "multi-byte delimiter", "input": "a||b||||c", "options": { "delimiter": "||" }, "expect": ["a", "b", "c"] },
+		{ "name": "take counts rows after blank rows go", "input": "a\n  \nb\nc", "options": { "take": 2 }, "expect": ["a", "b"] },
+		{ "name": "drop counts rows after blank rows go", "input": "a\n  \nb\nc", "options": { "drop": 1 }, "expect": ["b", "c"] },
+		{ "name": "drop and take together", "input": "1\n2\n\n3\n4\n5", "options": { "drop": 1, "take": 2 }, "expect": ["2", "3"] },
+		{ "name": "one BOM is removed from the start of every record", "input": "\ufeffa\n\ufeffb", "options": { "trim": false }, "expect": ["a", "b"] },
+		{ "name": "only one BOM per record", "input": "\ufeff\ufeffa", "options": { "trim": false }, "expect": ["\ufeffa"] },
+		{ "name": "trim uses the ECMAScript whitespace set", "input": "\u00a0a\u3000\n\u2028b\ufeff\n\u205fc\u1680", "expect": ["a", "b", "c"] },
+		{ "name": "NEL is not whitespace to trim", "input": "\u0085a\u0085", "expect": ["\u0085a\u0085"] },
+		{ "name": "information separators are not whitespace to trim", "input": "\u001ca\u001f", "expect": ["\u001ca\u001f"] },
+		{ "name": "invalid UTF-8 decodes lossily, one replacement per maximal subpart", "input": { "base64": "Yf9iCuKC" }, "expect": ["a\ufffdb", "\ufffd"] },
+		{ "name": "overlong, surrogate and out-of-range sequences", "input": { "base64": "wK8K7aCACvSQgIA=" }, "expect": ["\ufffd\ufffd", "\ufffd\ufffd\ufffd", "\ufffd\ufffd\ufffd\ufffd"] },
+		{ "name": "quote handling keeps a quoted newline inside its record", "input": "a\n\"b\nc\"\nd", "options": { "enableQuoteHandling": true }, "expect": ["a", "\"b\nc\"", "d"] },
+		{ "name": "an unterminated quote is an error naming the record's byte offset", "input": "a\n\"b\nc", "options": { "enableQuoteHandling": true }, "error": { "type": "UnterminatedQuote", "byteOffset": 2 } },
+		{ "name": "allowUnterminatedQuote reads the rest as one record", "input": "a\n\"b\nc", "options": { "enableQuoteHandling": true, "allowUnterminatedQuote": true }, "expect": ["a", "\"b\nc"] },
+		{ "name": "non-ASCII text survives untouched", "input": "Besançon\n서울특별시\n😀 x", "expect": ["Besançon", "서울특별시", "😀 x"] }
+	]
+}

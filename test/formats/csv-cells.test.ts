@@ -13,7 +13,7 @@
  * Window and batch sizes are kept small so edge cases cross boundaries.
  */
 
-import { CharacterSequence, CSVSpliterator, Spliterator } from "spliterator"
+import { CharacterSequence, CSVSpliterator, Spliterator, UnterminatedQuoteError } from "spliterator"
 import { beforeAll, describe, expect, test } from "vitest"
 
 const encoder = new TextEncoder()
@@ -25,6 +25,7 @@ interface Case {
 	trim?: boolean
 	skipEmpty?: boolean
 	columnDelimiter?: number
+	allowUnterminatedQuote?: boolean
 }
 
 // Why dynamic import paths here:
@@ -43,6 +44,7 @@ let scanCsvCells: (
 		skipEmpty: boolean
 		windowSize?: number
 		maxCells?: number
+		allowUnterminatedQuote?: boolean
 	}
 ) => Generator<string[]>
 
@@ -58,12 +60,26 @@ let splitRowColumns: (
  * What the row path yields for `text` under the same options: the parity oracle.
  */
 function reference(text: string, opts: Case = {}): string[][] {
-	const { enableQuoteHandling = true, crlf = true, trim = false, skipEmpty = true, columnDelimiter = 0x2c } = opts
+	const {
+		enableQuoteHandling = true,
+		crlf = true,
+		trim = false,
+		skipEmpty = true,
+		columnDelimiter = 0x2c,
+		allowUnterminatedQuote = false,
+	} = opts
+
 	const bytes = encoder.encode(text)
 	const columns = new CharacterSequence(columnDelimiter)
 	const rows: string[][] = []
 
-	for (const row of Spliterator.fromSync(bytes, { delimiter: 0x0a, crlf, enableQuoteHandling, skipEmpty })) {
+	for (const row of Spliterator.fromSync(bytes, {
+		delimiter: 0x0a,
+		crlf,
+		enableQuoteHandling,
+		skipEmpty,
+		allowUnterminatedQuote,
+	})) {
 		rows.push(splitRowColumns(row, columns, lossy, enableQuoteHandling, trim))
 	}
 
@@ -71,7 +87,15 @@ function reference(text: string, opts: Case = {}): string[][] {
 }
 
 function fast(text: string, opts: Case = {}, windowSize = 7, maxCells = 3): string[][] {
-	const { enableQuoteHandling = true, crlf = true, trim = false, skipEmpty = true, columnDelimiter = 0x2c } = opts
+	const {
+		enableQuoteHandling = true,
+		crlf = true,
+		trim = false,
+		skipEmpty = true,
+		columnDelimiter = 0x2c,
+		allowUnterminatedQuote = false,
+	} = opts
+
 	const bytes = encoder.encode(text)
 	const decoded = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)
 
@@ -83,6 +107,7 @@ function fast(text: string, opts: Case = {}, windowSize = 7, maxCells = 3): stri
 			crlf,
 			trim,
 			skipEmpty,
+			allowUnterminatedQuote,
 			windowSize,
 			maxCells,
 		})
@@ -129,8 +154,8 @@ describe("scanCsvCells parity with the row path", () => {
 		["ragged widths, wider then narrower then wider", "a,b,c\nd\ne,f\ng,h,i,j\n"],
 		["quotes not at the cell edges stay", 'x"y"z,"q"w,"",""""\n'],
 		["doubled quote in a short cell and a sliced-length cell", '"a""b","a long cell with a ""quote"" inside"\n'],
-		["unmatched quote runs to eof", 'a,"b,c\nd,e\n'],
-		["unmatched quote mid-cell", '5" pipe,b\n'],
+		["unmatched quote runs to eof", 'a,"b,c\nd,e\n', { allowUnterminatedQuote: true }],
+		["unmatched quote mid-cell", '5" pipe,b\n', { allowUnterminatedQuote: true }],
 		["quotes off", 'a,"b,c"\n', { enableQuoteHandling: false }],
 		["padding outside quotes with trim", ' " Ada " , 36 \n', { trim: true }],
 		["trim", "  a , b  \n c ,d\n", { trim: true }],
@@ -154,6 +179,24 @@ describe("scanCsvCells parity with the row path", () => {
 
 	test.each(inputs)("%s, wide window and batch", (_label, text, opts) => {
 		expect(fast(text, opts, 64 * 1024, 4096)).toEqual(reference(text, opts))
+	})
+
+	const unterminated: Array<[string, string, number]> = [
+		["open quote in the first row", 'a,"b,c\nd,e\n', 0],
+		["open quote after closed rows", 'x,y\né,"b\nc\n', 4],
+		["open quote mid-cell", 'h\n5" pipe,b\n', 2],
+	]
+
+	test.each(unterminated)("%s throws on both paths with the same byte offset", (_label, text, byteOffset) => {
+		for (const run of [() => fast(text), () => fast(text, {}, 64 * 1024, 4096), () => reference(text)]) {
+			try {
+				run()
+				expect.unreachable()
+			} catch (error) {
+				expect(error).toBeInstanceOf(UnterminatedQuoteError)
+				expect((error as UnterminatedQuoteError).byteOffset).toBe(byteOffset)
+			}
+		}
 	})
 
 	test("a quoted newline straddling the window", () => {

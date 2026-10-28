@@ -1,0 +1,46 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+# The PyPI name `spliterator` belongs to an unrelated 0.0.1 project; the import name is `spliterator` regardless.
+name = "sister-software-spliterator"
+description = "Streaming readers for delimited text, CSV, TSV and JSONL with transparent zstd/gzip decompression, sharing the spliterator npm package's semantics."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Teffen Ellis", email = "teffen@sister.software" }]
+keywords = ["csv", "jsonl", "tsv", "streaming", "delimited", "zstd"]
+classifiers = [
+	"Programming Language :: Python :: 3",
+	"Programming Language :: Rust",
+	"Topic :: Text Processing",
+	"Typing :: Typed",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/sister-software/spliterator"
+Repository = "https://github.com/sister-software/spliterator"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "spliterator._native"
+features = ["pyo3/extension-module"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "PERF", "PYI", "RUF"]
+
+[tool.mypy]
+strict = true
+files = ["python", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

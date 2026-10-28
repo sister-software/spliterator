@@ -6,7 +6,8 @@
 
 import { CharacterSequence, type CharacterSequenceInput } from "#core/CharacterSequence"
 import { loadNodeFs } from "#internal/node-modules"
-import type { AsyncDataResource, ByteRange } from "#internal/shared"
+import { type AsyncDataResource, type ByteRange, isPathBuilderLike, toPathString } from "#internal/shared"
+import { COMPRESSION_SNIFF_LENGTH, sniffCompression } from "#io/compression"
 
 export interface SegmentOptions {
 	/**
@@ -21,6 +22,12 @@ export interface SegmentOptions {
 	 * Bytes read at each ideal boundary to find the next delimiter. @default 65536
 	 */
 	probeSize?: number
+}
+
+function describeSource(source: AsyncDataResource): string {
+	if (isPathBuilderLike(source)) return toPathString(source)
+
+	return source instanceof URL ? source.href : "The source"
 }
 
 /**
@@ -40,6 +47,16 @@ export async function computeSegments(source: AsyncDataResource, options: Segmen
 	const fileSize = await readFileSize(source)
 
 	if (fileSize === 0) return []
+
+	// A compressed stream has no record boundaries at byte offsets, so it cannot be cut into segments.
+	const format = sniffCompression(await readBytes(source, 0, COMPRESSION_SNIFF_LENGTH))
+
+	if (format) {
+		throw new TypeError(
+			`${describeSource(source)} is ${format}-compressed, and a compressed source cannot be segmented. ` +
+				"Decompress it to disk first, or read it sequentially."
+		)
+	}
 
 	if (concurrency === 1) return [[0, fileSize]]
 

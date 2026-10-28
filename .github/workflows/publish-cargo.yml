@@ -1,0 +1,116 @@
+# Publish the `spliterator` crate to crates.io.
+#
+# DISPATCHED BY publish.yml after it tags and publishes npm, against the tag (`--ref v<version>`), so the crate builds
+# from exactly the release commit. Dispatch it by hand with the same ref to retry: a version already on crates.io is
+# skipped, so a re-run is always safe. A dispatch from a branch is refused unless `dry_run` is set.
+#
+# AUTH: crates.io Trusted Publishing (OIDC) through `rust-lang/crates-io-auth-action`, matched by this file's path
+# (`.github/workflows/publish-cargo.yml`) and the `cargo` environment. crates.io only lets a crate that already exists
+# trust a workflow, so the very first publish needs a `CARGO_REGISTRY_TOKEN` secret in the `cargo` environment; once
+# the crate exists, configure the trusted publisher and delete the secret. The token, when present, wins.
+name: Cargo Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run — package and verify the crate, publish nothing"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-cargo
+  cancel-in-progress: false
+
+jobs:
+  # Outside the `cargo` environment, which only release tags may enter, so a dry run from a branch checks everything.
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      published: ${{ steps.version.outputs.published }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: Read and check the version
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "spliterator") | .version')"
+          NPM_VERSION="$(node -p "require('./package.json').version")"
+          echo "crate ${VERSION}, npm ${NPM_VERSION}, ref ${GITHUB_REF}"
+          if [ "${VERSION}" != "${NPM_VERSION}" ]; then
+            echo "::error::Cargo.toml says ${VERSION} but package.json says ${NPM_VERSION}"; exit 1
+          fi
+          if [ "${GITHUB_REF}" != "refs/tags/v${VERSION}" ] && [ "${{ inputs.dry_run }}" != "true" ]; then
+            echo "::error::publish from the release tag (dispatch with --ref v${VERSION}), not ${GITHUB_REF}"; exit 1
+          fi
+          if curl -sf -A "spliterator-release (github.com/sister-software/spliterator)" \
+            "https://crates.io/api/v1/crates/spliterator/${VERSION}" >/dev/null; then
+            echo "published=true" >> "${GITHUB_OUTPUT}"
+            echo "::notice::spliterator ${VERSION} is already on crates.io (recovery re-run) — nothing to publish"
+          else
+            echo "published=false" >> "${GITHUB_OUTPUT}"
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      # The conformance suite reads the repository's fixtures, so it runs here rather than from the packaged crate.
+      - name: Test
+        run: cargo test -p spliterator
+
+      - name: Package and verify
+        run: cargo publish -p spliterator --dry-run
+
+  publish:
+    needs: verify
+    if: ${{ needs.verify.outputs.published != 'true' && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: cargo
+    permissions:
+      contents: read
+      id-token: write # crates.io Trusted Publishing (OIDC)
+    env:
+      HAS_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: Authenticate with crates.io
+        id: auth
+        if: ${{ env.HAS_REGISTRY_TOKEN != 'true' }}
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || steps.auth.outputs.token }}
+        run: cargo publish -p spliterator
+
+      - name: Verify the published version
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl -sf -A "spliterator-release (github.com/sister-software/spliterator)" \
+              "https://crates.io/api/v1/crates/spliterator/${VERSION}" >/dev/null; then
+              echo "spliterator ${VERSION} is live"; exit 0
+            fi
+            echo "attempt ${attempt}: not visible yet"
+            sleep 15
+          done
+          echo "::error::spliterator ${VERSION} is not visible on crates.io after 5 minutes"
+          exit 1

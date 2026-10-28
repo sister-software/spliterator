@@ -1,0 +1,26 @@
+{
+	"$comment": "JSONL rows. Expected values are written from the semantics table in docs/v10.md, never captured from an implementation. Integers beyond ±2^53 are a documented language difference and are not exercised here.",
+	"format": "jsonl",
+	"cases": [
+		{ "name": "objects", "input": "{\"a\":1}\n{\"a\":2}\n", "expect": [{ "a": 1 }, { "a": 2 }] },
+		{ "name": "empty input", "input": "", "expect": [] },
+		{ "name": "blank and whitespace-only rows are skipped", "input": "{\"a\":1}\n\n   \n\t\n{\"a\":2}", "expect": [{ "a": 1 }, { "a": 2 }] },
+		{ "name": "CRLF", "input": "{\"a\":1}\r\n[2]\r\n", "expect": [{ "a": 1 }, [2]] },
+		{ "name": "scalars", "input": "1\n\"x\"\nnull\ntrue\n-2.5e3", "expect": [1, "x", null, true, -2500] },
+		{ "name": "a string of digits stays a string", "input": "{\"zip\":\"007\"}", "expect": [{ "zip": "007" }] },
+		{ "name": "one BOM is removed from the start of every record", "input": "\ufeff{\"a\":1}\n\ufeff{\"b\":2}", "expect": [{ "a": 1 }, { "b": 2 }] },
+		{ "name": "duplicate keys keep the last value", "input": "{\"a\":1,\"a\":2}", "expect": [{ "a": 2 }] },
+		{ "name": "nesting", "input": "{\"a\":[1,{\"b\":null}]}", "expect": [{ "a": [1, { "b": null }] }] },
+		{ "name": "escapes and astral characters", "input": "{\"e\":\"\\ud83d\\ude00\\n\\u00e9\"}", "expect": [{ "e": "😀\né" }] },
+		{ "name": "a malformed row names its index among parsed rows", "input": "{\"a\":1}\n\n{bad}\n", "error": { "type": "JSONRow", "row": 1 } },
+		{ "name": "NaN is rejected", "input": "NaN", "error": { "type": "JSONRow", "row": 0 } },
+		{ "name": "Infinity is rejected", "input": "[1]\n{\"x\":Infinity}", "error": { "type": "JSONRow", "row": 1 } },
+		{ "name": "a trailing comma is rejected", "input": "[1,]", "error": { "type": "JSONRow", "row": 0 } },
+		{ "name": "comment prefixes skip rows", "input": "// header\n{\"a\":1}\n  # note\n[1]", "options": { "comment": ["//", "#"] }, "expect": [{ "a": 1 }, [1]] },
+		{ "name": "a comment row after a BOM is still a comment", "input": "\ufeff// header\n1", "options": { "comment": "//" }, "expect": [1] },
+		{ "name": "without a comment prefix a comment row is an error", "input": "// header\n1", "error": { "type": "JSONRow", "row": 0 } },
+		{ "name": "drop and take count rows after comment and blank rows go", "input": "1\n\n2\n// c\n3\n4", "options": { "comment": "//", "drop": 1, "take": 2 }, "expect": [2, 3] },
+		{ "name": "the error index counts from after drop", "input": "1\n2\nx", "options": { "drop": 1 }, "error": { "type": "JSONRow", "row": 1 } },
+		{ "name": "take stops before a later malformed row", "input": "1\n2\nx", "options": { "take": 2 }, "expect": [1, 2] }
+	]
+}

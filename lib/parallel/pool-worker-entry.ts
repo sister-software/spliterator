@@ -124,6 +124,8 @@ async function runSegmentLease(message: SegmentLease): Promise<void> {
 		const records = new AsyncSpliterator(chunkIterator, {
 			delimiter: (message.delimiter ?? undefined) as never,
 			autoDispose: true,
+			// A segment starts mid-file, so its first bytes are never a stream header.
+			decompress: false,
 		})
 
 		await runSegment({
