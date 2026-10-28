@@ -57,3 +57,31 @@ class CsvBatches(Iterator[list[Any]]):
     @property
     def headers(self) -> list[str] | None: ...
     def __next__(self) -> list[Any]: ...
+
+def count_text(
+    source: _Source,
+    delimiter: bytes,
+    trim: bool,
+    skip_empty: bool,
+    crlf: bool,
+    drop: int,
+    take: int | None,
+    enable_quote_handling: bool,
+    allow_unterminated_quote: bool,
+    decompress: bool,
+    prefer_compressed: bool,
+) -> int: ...
+def count_csv(
+    source: _Source,
+    row_delimiter: bytes,
+    column_delimiter: bytes,
+    enable_quote_handling: bool,
+    allow_unterminated_quote: bool,
+    crlf: bool,
+    skip_empty: bool,
+    header: bool,
+    drop: int,
+    take: int | None,
+    decompress: bool,
+    prefer_compressed: bool,
+) -> int: ...

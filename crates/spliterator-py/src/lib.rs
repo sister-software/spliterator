@@ -493,8 +493,90 @@ impl CsvBatches {
     }
 }
 
+/// The number of text rows `TextBatches` would yield, counted with the interpreter released.
+#[pyfunction]
+#[pyo3(signature = (
+    source, delimiter, trim, skip_empty, crlf, drop, take, enable_quote_handling, allow_unterminated_quote,
+    decompress, prefer_compressed
+))]
+#[allow(clippy::too_many_arguments)]
+fn count_text(
+    py: Python<'_>,
+    source: &Bound<'_, PyAny>,
+    delimiter: Vec<u8>,
+    trim: bool,
+    skip_empty: bool,
+    crlf: bool,
+    drop: usize,
+    take: Option<usize>,
+    enable_quote_handling: bool,
+    allow_unterminated_quote: bool,
+    decompress: bool,
+    prefer_compressed: bool,
+) -> PyResult<usize> {
+    let options = text::Options {
+        delimiter,
+        trim,
+        skip_empty,
+        crlf,
+        drop,
+        take,
+        enable_quote_handling,
+        allow_unterminated_quote,
+        open: open_options(decompress, prefer_compressed),
+    };
+    let source = to_source(source)?;
+
+    py.detach(|| text::count(source, options))
+        .map_err(|error| to_py_error(py, error))
+}
+
+/// The number of data rows `CsvBatches` would yield, counted with the interpreter released. The header is skipped,
+/// not read.
+#[pyfunction]
+#[pyo3(signature = (
+    source, row_delimiter, column_delimiter, enable_quote_handling, allow_unterminated_quote, crlf, skip_empty,
+    header, drop, take, decompress, prefer_compressed
+))]
+#[allow(clippy::too_many_arguments)]
+fn count_csv(
+    py: Python<'_>,
+    source: &Bound<'_, PyAny>,
+    row_delimiter: Vec<u8>,
+    column_delimiter: Vec<u8>,
+    enable_quote_handling: bool,
+    allow_unterminated_quote: bool,
+    crlf: bool,
+    skip_empty: bool,
+    header: bool,
+    drop: usize,
+    take: Option<usize>,
+    decompress: bool,
+    prefer_compressed: bool,
+) -> PyResult<usize> {
+    let options = csv::Options {
+        row_delimiter,
+        column_delimiter,
+        enable_quote_handling,
+        allow_unterminated_quote,
+        crlf,
+        skip_empty,
+        header,
+        drop,
+        take,
+        open: open_options(decompress, prefer_compressed),
+        ..csv::Options::csv()
+    };
+    let source = to_source(source)?;
+
+    py.detach(|| csv::count(source, options))
+        .map_err(|error| to_py_error(py, error))
+}
+
 #[pymodule]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_function(wrap_pyfunction!(count_text, module)?)?;
+    module.add_function(wrap_pyfunction!(count_csv, module)?)?;
     module.add_class::<TextBatches>()?;
     module.add_class::<JsonlRows>()?;
     module.add_class::<CsvBatches>()?;

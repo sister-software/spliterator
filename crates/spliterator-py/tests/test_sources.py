@@ -3,9 +3,11 @@ file objects, laziness and transformers."""
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 import io
 from pathlib import Path
+from typing import Any
 
 import pytest
 import spliterator
@@ -103,3 +105,42 @@ def test_bad_options_raise_value_error() -> None:
 
     with pytest.raises(ValueError, match="mode"):
         list(spliterator.read_csv(b"a", mode="rows"))  # type: ignore[arg-type]
+
+
+def test_unknown_options_raise_type_error() -> None:
+    with pytest.raises(TypeError, match="normalise_keys"):
+        list(spliterator.read_csv(b"a\n1", normalise_keys=True))  # type: ignore[call-arg]
+
+
+def test_async_reader_over_a_compressed_path(tmp_path: Path) -> None:
+    path = tmp_path / "data.jsonl.gz"
+    path.write_bytes(gzip.compress(LINES.encode()))
+
+    async def first_three() -> list[Any]:
+        rows = []
+
+        async for row in spliterator.aread_jsonl(path):
+            rows.append(row)
+
+            if len(rows) == 3:
+                break
+
+        return rows
+
+    assert ids(asyncio.run(first_three())) == [0, 1, 2]
+
+
+def test_async_csv_applies_transformers() -> None:
+    async def collect() -> list[Any]:
+        return [row async for row in spliterator.aread_csv(b"n\n1\n2\n", transformers={"n": int})]
+
+    assert asyncio.run(collect()) == [{"n": 1}, {"n": 2}]
+
+
+def test_counts_match_reads(tmp_path: Path) -> None:
+    path = tmp_path / "part.jsonl.gz"
+    path.write_bytes(gzip.compress(LINES.encode()))
+
+    assert spliterator.count_text(path) == 5000
+    assert spliterator.count_text(path, drop=10, take=7) == 7
+    assert spliterator.count_csv(b"k,k\n1,2\n3,4\n") == 2

@@ -175,3 +175,49 @@ impl<R: Read> Iterator for Reader<R> {
         None
     }
 }
+
+/// Whether a raw record would be dropped as blank: decoded, its BOM removed and trimmed to nothing. An ASCII record is
+/// judged on its bytes, so only a record holding non-ASCII bytes is decoded.
+pub(crate) fn is_blank_record(bytes: &[u8]) -> bool {
+    for &byte in bytes {
+        if byte >= 0x80 {
+            return crate::whitespace::is_blank(&decode_record(bytes));
+        }
+
+        if !matches!(byte, b' ' | b'\t' | b'\n' | 0x0B | 0x0C | b'\r') {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// The number of rows [`Reader`] would yield for `source`, without building them.
+pub fn count(source: impl Into<Source>, options: Options) -> Result<usize> {
+    count_reader(open(source.into(), options.open)?, options)
+}
+
+/// The number of rows [`Reader::new`] would yield for an already open, already decompressed stream.
+pub fn count_reader<R: Read>(reader: R, options: Options) -> Result<usize> {
+    let drop_blank = options.trim && options.skip_empty;
+    let mut window = Window::new(options.drop, options.take);
+    let mut count = 0;
+
+    for record in RecordReader::new(reader, options.record_options())? {
+        if window.exhausted() {
+            break;
+        }
+
+        let record = record?;
+
+        if drop_blank && is_blank_record(&record.bytes) {
+            continue;
+        }
+
+        if window.admit() {
+            count += 1;
+        }
+    }
+
+    Ok(count)
+}

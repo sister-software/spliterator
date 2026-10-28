@@ -291,6 +291,50 @@ impl<R: Read> Iterator for Reader<R> {
     }
 }
 
+/// The number of data rows [`Reader`] would yield for `source`, without splitting cells. The header is skipped but not
+/// read, so a repeated header is not an error here.
+pub fn count(source: impl Into<Source>, options: Options) -> Result<usize> {
+    count_reader(open(source.into(), options.open)?, options)
+}
+
+/// The number of data rows [`Reader::new`] would yield for an already open, already decompressed stream.
+pub fn count_reader<R: Read>(reader: R, options: Options) -> Result<usize> {
+    let records = RecordReader::new(
+        reader,
+        RecordOptions {
+            delimiter: options.row_delimiter.clone(),
+            enable_quote_handling: options.enable_quote_handling,
+            allow_unterminated_quote: options.allow_unterminated_quote,
+            crlf: options.crlf,
+            skip_empty: options.skip_empty,
+        },
+    )?;
+
+    let mut header_pending = options.header;
+    let mut window = Window::new(options.drop, options.take);
+    let mut count = 0;
+
+    for record in records {
+        if window.exhausted() {
+            break;
+        }
+
+        record?;
+
+        if header_pending {
+            header_pending = false;
+
+            continue;
+        }
+
+        if window.admit() {
+            count += 1;
+        }
+    }
+
+    Ok(count)
+}
+
 /// Splits one record into cells.
 struct ColumnSplitter {
     /// The delimiter as text, when it is valid UTF-8; otherwise cells are split on the raw bytes.
