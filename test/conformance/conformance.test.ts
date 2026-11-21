@@ -1,8 +1,7 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
  * The TypeScript runner for the language-neutral conformance suite in `conformance/`. The Rust crate and the Python
  * package run the same files; their runners live beside their tests. Every case runs through every entry point a
  * caller could reach it by: a string, bytes, and streams cut at several chunk sizes, both read whole and streamed.

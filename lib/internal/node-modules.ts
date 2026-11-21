@@ -1,8 +1,7 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
  * Lazy loaders for the Node-only modules the isomorphic core reaches at call time.
  *
  * The specifier is a variable, and the call carries both ignore comments, because Vite and webpack follow a dynamic

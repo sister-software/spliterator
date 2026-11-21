@@ -1,21 +1,20 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
- * Run uDSV's benchmark harness over spliterator and a few of the parsers it ships adapters for, and write the
- * results to `benchmarks/udsv/results.json` for `render.ts`.
+ * Run uDSV's benchmark harness over spliterator and a few of the parsers it ships adapters for, and write the results
+ * to `benchmarks/udsv/results.json` for `render.ts`.
  *
  * The harness, its competitor adapters, and its timing metric (geometric mean over three-second cycles, MiB/s) are
- * uDSV's own and run unmodified; this script only spawns `bench/runone.cjs` and collects its JSON. One generated
- * copy of that runner skips reading the file into a string so the streaming count adapters can take a file past
- * V8's string limit.
+ * uDSV's own and run unmodified; this script only spawns `bench/runone.cjs` and collects its JSON. One generated copy
+ * of that runner skips reading the file into a string so the streaming count adapters can take a file past V8's string
+ * limit.
  *
  * Memory is measured here rather than taken from the harness, whose figure is the largest RSS step between timing
- * cycles and so reads zero for a parser that allocates its working set on the first parse. Each run goes through
- * GNU `time`, and the child's peak RSS less the baseline the runner reports before loading the parser is recorded.
- * For an in-memory run that includes the input string, which every parser is handed alike; for a count run it is
- * the parser's own footprint.
+ * cycles and so reads zero for a parser that allocates its working set on the first parse. Each run goes through GNU
+ * `time`, and the child's peak RSS less the baseline the runner reports before loading the parser is recorded. For an
+ * in-memory run that includes the input string, which every parser is handed alike; for a count run it is the parser's
+ * own footprint.
  *
  * Setup:
  *
@@ -25,11 +24,11 @@
  *
  * Usage: node out/benchmarks/udsv/sweep.js [--udsv=../uDSV] [--memory] [--stream] <csv path>...
  *
- * `--memory` runs the in-memory string parsers, `--stream` the file-streaming ones; both by default. A dataset
- * without an entry in uDSV's `bench/expected.json` gets one computed by uDSV itself when it fits in a string, and
- * runs with verification off when it does not. Dataset paths are resolved from the current directory and linked into
- * the harness's data directory, because the harness keys expectations on the file name. Results merge into
- * `results.json` per dataset, so a later sweep over one file refreshes only its tables.
+ * `--memory` runs the in-memory string parsers, `--stream` the file-streaming ones; both by default. A dataset without
+ * an entry in uDSV's `bench/expected.json` gets one computed by uDSV itself when it fits in a string, and runs with
+ * verification off when it does not. Dataset paths are resolved from the current directory and linked into the
+ * harness's data directory, because the harness keys expectations on the file name. Results merge into `results.json`
+ * per dataset, so a later sweep over one file refreshes only its tables.
  */
 
 import { spawnSync } from "node:child_process"

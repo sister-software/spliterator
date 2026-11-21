@@ -1,10 +1,8 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
- * Benchmark: WASM searchAll vs Spliterator for CSV column splitting.
- * Usage: node out/benchmarks/csv-columns.js
+ * Benchmark: WASM searchAll vs Spliterator for CSV column splitting. Usage: node out/benchmarks/csv-columns.js
  */
 
 import { Spliterator, CharacterSequence, Delimiters } from "spliterator"

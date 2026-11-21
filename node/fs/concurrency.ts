@@ -1,8 +1,5 @@
-/**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- */
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
 
 /**
  * Libuv's threadpool size: the real ceiling on concurrent filesystem calls in Node.

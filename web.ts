@@ -1,8 +1,7 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
  * The browser-safe surface: parsing, sequences, and casing, with nothing that touches threads or the filesystem.
  * `test/package/static-graph.test.ts` asserts this entry's static graph reaches no `node:` module.
  */

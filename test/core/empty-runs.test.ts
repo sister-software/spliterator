@@ -1,11 +1,10 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
- * A long run of consecutive delimiters enqueues many empty ranges in a single fill
- * (empty ranges don't count toward the high-water mark).
- * With `skipEmpty`, the engine must skip them without recursing once per range, or it overflows the stack.
+ * A long run of consecutive delimiters enqueues many empty ranges in a single fill (empty ranges don't count toward the
+ * high-water mark). With `skipEmpty`, the engine must skip them without recursing once per range, or it overflows the
+ * stack.
  */
 
 import { AsyncSpliterator, Spliterator } from "spliterator"

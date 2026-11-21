@@ -1,8 +1,5 @@
-/**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- */
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
 
 import { AsyncSpliterator, CSVSpliterator, JSONSpliterator, Spliterator, TextSpliterator } from "spliterator"
 import { readBytes, readFileSize } from "spliterator/node/fs"

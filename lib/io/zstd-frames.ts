@@ -1,8 +1,7 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
  * Frame boundaries of a zstd stream, found by walking frame and block headers without decompressing anything.
  *
  * A zstd stream may hold several frames back to back (`cat a.zst b.zst`, `pzstd`), and the format defines the result as

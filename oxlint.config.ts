@@ -1,15 +1,14 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
  * Oxlint configuration for spliterator.
  */
 
 import { createOxlintConfig, DefaultIgnorePatterns } from "@sister.software/oxlint-config"
 
 export default createOxlintConfig({
-	copyrightHolder: "Sister Software",
+	copyrightText: "Sister Software",
 	spdxLicenseIdentifier: "MIT",
 	ignorePatterns: [...DefaultIgnorePatterns, ".claude/**/*"],
 })

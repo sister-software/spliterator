@@ -1,11 +1,9 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
- * Tests for the WASM SIMD path only (haystacks >= WASM_THRESHOLD).
- * Protects against regressions in alignment, shared-memory cache, and silent truncation.
- * JS fallback behavior is tested in other suites.
+ * Tests for the WASM SIMD path only (haystacks >= WASM_THRESHOLD). Protects against regressions in alignment,
+ * shared-memory cache, and silent truncation. JS fallback behavior is tested in other suites.
  */
 
 import { CharacterSequence, CSVSpliterator, Delimiters } from "spliterator"

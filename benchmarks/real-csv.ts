@@ -1,8 +1,7 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
  * Benchmark Spliterator against a real CSV without materializing the input.
  *
  * Usage: node out/benchmarks/real-csv.js <path> [repetitions]

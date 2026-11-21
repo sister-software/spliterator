@@ -1,11 +1,10 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
- *   A glob pattern compiled once into per-segment matchers, with the semantics of Node's `fs.glob`: `*`, `?`, `[...]`,
- *   `{a,b}` and `**`, where a wildcard never matches a segment that begins with a dot unless the pattern segment itself
- *   begins with one.
+ * A glob pattern compiled once into per-segment matchers, with the semantics of Node's `fs.glob`: `*`, `?`, `[...]`,
+ * `{a,b}` and `**`, where a wildcard never matches a segment that begins with a dot unless the pattern segment itself
+ * begins with one.
  */
 
 /**

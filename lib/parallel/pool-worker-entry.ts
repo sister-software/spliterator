@@ -1,16 +1,13 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
  * Runs in a worker thread created by `WorkerPool`.
  *
- * This worker starts idle.
- * The parent gives it a lease.
- * It does the job, then goes idle again.
+ * This worker starts idle. The parent gives it a lease. It does the job, then goes idle again.
  *
- * Handler modules load only when needed, then stay cached.
- * That avoids reloading setup work and lets one worker handle different handlers without restarting.
+ * Handler modules load only when needed, then stay cached. That avoids reloading setup work and lets one worker handle
+ * different handlers without restarting.
  */
 
 import { parentPort, workerData } from "node:worker_threads"

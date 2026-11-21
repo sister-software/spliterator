@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
- * uDSV bench adapter: PapaParse streaming a file and counting rows and cells. The counterpart of `spliterator-count.ts`.
+ * UDSV bench adapter: PapaParse streaming a file and counting rows and cells. The counterpart of
+ * `spliterator-count.ts`.
  */
 
 import { createReadStream } from "node:fs"

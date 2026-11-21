@@ -1,8 +1,7 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
  * `smartSnakeCase` broke headers in scripts without letter case:
  *
  * - For Korean/Chinese/Japanese/Hebrew/Arabic, `toUpperCase()` changes nothing.

@@ -465,32 +465,32 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@sister.software/oxfmt-config@npm:^14.0.0":
-  version: 14.0.0
-  resolution: "@sister.software/oxfmt-config@npm:14.0.0"
+"@sister.software/oxfmt-config@npm:^15.0.0":
+  version: 15.0.0
+  resolution: "@sister.software/oxfmt-config@npm:15.0.0"
   peerDependencies:
     oxfmt: ">=0.60.0 <1"
-  checksum: 10/83e7eed77bf79e29221259d392829eb29c72d72a2ce4bef771c2b0b2397257934ea4393ff0a0b035bf4dc783d4346a76c7a6eec4d1900f9430ede1130d81fb21
+  checksum: 10/872834f8c1d537e56a5aa132ad9494e1e028befe8aeeeb19210aec6ed3968633d16c256815d822819e9b045b9ce5ba50b8c7b09b5c27994223a97b978562fcff
   languageName: node
   linkType: hard
 
-"@sister.software/oxlint-config@npm:^14.0.0":
-  version: 14.0.0
-  resolution: "@sister.software/oxlint-config@npm:14.0.0"
+"@sister.software/oxlint-config@npm:^15.0.0":
+  version: 15.0.0
+  resolution: "@sister.software/oxlint-config@npm:15.0.0"
   peerDependencies:
     oxlint: ">=1.75.0 <2"
     oxlint-tsgolint: ">=7.0.2003 <8"
   peerDependenciesMeta:
     oxlint-tsgolint:
       optional: true
-  checksum: 10/bf0ca939ec74f8ea58b9226c21d96df5ebe203078cf91cc97012d7e5629587723c2aa5f6ef92f507b3fdae88b16d9685348cc0d20270b399f37830e247741ce7
+  checksum: 10/3d109044b933a00b4fb070480a3d532e9170960ca3c707d4c0302ca8e1ea94993a8c326340ec90a8daa69a95fecc5b21e376714893f745660a2544124f27316c
   languageName: node
   linkType: hard
 
-"@sister.software/tsconfig@npm:^14.0.0":
-  version: 14.0.0
-  resolution: "@sister.software/tsconfig@npm:14.0.0"
-  checksum: 10/1784206b62f7e1a087e19d46d5001b65ced48b4784713b227693cacc7a5e37d1198aeb41c97a7eb14097f504e6515f13dc6ef9a4ae660a771bc9329267ef828a
+"@sister.software/tsconfig@npm:^15.0.0":
+  version: 15.0.0
+  resolution: "@sister.software/tsconfig@npm:15.0.0"
+  checksum: 10/9858a05c4cc8020f4462902689ab14df282fc172efe5e39a6de7bc81e319abe9baab4ceed40e37c4999a3349d19bf808fa2fa380aad2368f087cc782cf8abe7a
   languageName: node
   linkType: hard
 
@@ -2560,9 +2560,9 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "spliterator@workspace:."
   dependencies:
-    "@sister.software/oxfmt-config": "npm:^14.0.0"
-    "@sister.software/oxlint-config": "npm:^14.0.0"
-    "@sister.software/tsconfig": "npm:^14.0.0"
+    "@sister.software/oxfmt-config": "npm:^15.0.0"
+    "@sister.software/oxlint-config": "npm:^15.0.0"
+    "@sister.software/tsconfig": "npm:^15.0.0"
     "@types/node": "npm:^26.6.4"
     colorette: "npm:^2.0.20"
     npm-run-all: "npm:^4.1.5"

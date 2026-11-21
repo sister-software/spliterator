@@ -1,10 +1,9 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
- * Render `results.json` from `sweep.ts` as Markdown tables with the text bars uDSV's README uses, one table per
- * dataset and mode, ready to paste into README.md.
+ * Render `results.json` from `sweep.ts` as Markdown tables with the text bars uDSV's README uses, one table per dataset
+ * and mode, ready to paste into README.md.
  *
  * Usage: node out/benchmarks/udsv/render.js [results.json]
  */

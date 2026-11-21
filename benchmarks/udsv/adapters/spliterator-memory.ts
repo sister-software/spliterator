@@ -1,9 +1,8 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
- * uDSV bench adapter: parse an in-memory string into string arrays. Mirrors `non-streaming/untyped/uDSV.cjs` there.
+ * UDSV bench adapter: parse an in-memory string into string arrays. Mirrors `non-streaming/untyped/uDSV.cjs` there.
  */
 
 import { CharacterSequence, CSVSpliterator } from "spliterator"

@@ -1,8 +1,5 @@
-/**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- */
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
 
 import { fsConcurrency } from "spliterator/node/fs"
 import { afterEach, describe, expect, test } from "vitest"

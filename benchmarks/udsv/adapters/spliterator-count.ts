@@ -1,9 +1,8 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
- * uDSV bench adapter: stream a file and count rows and cells without retaining them. uDSV's own non-retained adapters
+ * UDSV bench adapter: stream a file and count rows and cells without retaining them. uDSV's own non-retained adapters
  * sum one numeric column, which the datasets here do not all have, so the count adapters below are the comparison.
  */
 

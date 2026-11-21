@@ -1,11 +1,10 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
- * uDSV bench adapter: stream a file and count rows only, never decoding columns. This is spliterator's scan-only
- * path (`CSVSpliterator.countAsync`) — a different workload from the full-parse count adapters, which produce every
- * cell and discard it, so it is listed as its own row rather than replacing them.
+ * UDSV bench adapter: stream a file and count rows only, never decoding columns. This is spliterator's scan-only path
+ * (`CSVSpliterator.countAsync`) — a different workload from the full-parse count adapters, which produce every cell and
+ * discard it, so it is listed as its own row rather than replacing them.
  */
 
 import { CSVSpliterator } from "spliterator"

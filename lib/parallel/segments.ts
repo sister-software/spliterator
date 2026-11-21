@@ -1,8 +1,5 @@
-/**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- */
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
 
 import { CharacterSequence, type CharacterSequenceInput } from "#core/CharacterSequence"
 import { loadNodeFs } from "#internal/node-modules"

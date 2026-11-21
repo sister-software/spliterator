@@ -1,16 +1,14 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
+ * UDSV bench adapter: count rows with one worker thread per delimiter-aligned segment (`AsyncSpliterator.segments`, the
+ * library's documented boundary primitive), each worker scanning its own range at engine speed and reporting a single
+ * number. Workers persist across the harness's cycles, so the timed parse measures the scan, not the spawn.
  *
- * uDSV bench adapter: count rows with one worker thread per delimiter-aligned segment
- * (`AsyncSpliterator.segments`, the library's documented boundary primitive), each worker scanning its own range at
- * engine speed and reporting a single number. Workers persist across the harness's cycles, so the timed parse
- * measures the scan, not the spawn.
- *
- * Segments align to the record delimiter without regard to quote state, so a file carrying the row delimiter inside
- * a quoted field can be miscounted. Every published dataset is verified against the sequential `countAsync` before
- * its numbers land in the tables (see HANDOFF.md).
+ * Segments align to the record delimiter without regard to quote state, so a file carrying the row delimiter inside a
+ * quoted field can be miscounted. Every published dataset is verified against the sequential `countAsync` before its
+ * numbers land in the tables (see HANDOFF.md).
  */
 
 import { availableParallelism } from "node:os"

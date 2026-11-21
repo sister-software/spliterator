@@ -1,9 +1,8 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
- * uDSV bench adapter: stream a file into retained string arrays. Mirrors `streaming/untyped/retained/uDSV.cjs` there.
+ * UDSV bench adapter: stream a file into retained string arrays. Mirrors `streaming/untyped/retained/uDSV.cjs` there.
  */
 
 import { CSVSpliterator } from "spliterator"

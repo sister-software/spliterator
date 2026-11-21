@@ -1,12 +1,10 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
  * Fast CSV cell scan test.
  *
- * We compare results to a trusted row-based parser:
- * `Spliterator.fromSync` rows, then `splitRowColumns`.
+ * We compare results to a trusted row-based parser: `Spliterator.fromSync` rows, then `splitRowColumns`.
  *
  * We also verify expected output shape from strings.
  *

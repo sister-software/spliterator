@@ -1,8 +1,5 @@
-/**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- */
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
 
 import type { CharacterSequence } from "#core/CharacterSequence"
 import { Spliterator } from "#core/Spliterator"

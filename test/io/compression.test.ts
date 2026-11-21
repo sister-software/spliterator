@@ -1,8 +1,7 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
  * Transparent decompression and the compressed-sibling lookup, against real files. The byte-level cases (frame
  * concatenation, chunk boundaries) are in `conformance/compression.json`; these cover what only a path exercises.
  */

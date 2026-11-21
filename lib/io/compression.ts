@@ -1,13 +1,12 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
+ * Transparent decompression of delimited sources, detected by magic bytes rather than by file extension so a stream, a
+ * buffer and a path all behave alike.
  *
- * Transparent decompression of delimited sources, detected by magic bytes rather than by file extension so a stream,
- * a buffer and a path all behave alike.
- *
- * Node's `node:zlib` handles both formats and is reached through `process.getBuiltinModule`, which keeps the root
- * entry free of a static `node:` import. Elsewhere gzip goes through the web `DecompressionStream`, and zstd, which no
+ * Node's `node:zlib` handles both formats and is reached through `process.getBuiltinModule`, which keeps the root entry
+ * free of a static `node:` import. Elsewhere gzip goes through the web `DecompressionStream`, and zstd, which no
  * browser decompresses natively, throws rather than handing compressed bytes to the parser.
  */
 

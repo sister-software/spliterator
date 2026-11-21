@@ -1,10 +1,9 @@
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
+
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
- * Benchmark: WASM SIMD vs JS Boyer-Moore-Horspool for multi-byte delimiter scanning.
- *   Usage: node out/benchmarks/wasm-delimiter.js
+ * Benchmark: WASM SIMD vs JS Boyer-Moore-Horspool for multi-byte delimiter scanning. Usage: node
+ * out/benchmarks/wasm-delimiter.js
  */
 
 import { CharacterSequence, Delimiters } from "spliterator"

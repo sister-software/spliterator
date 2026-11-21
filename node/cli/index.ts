@@ -1,10 +1,8 @@
 #!/usr/bin/env node
+// SPDX-FileCopyrightText: Sister Software
+// SPDX-License-Identifier: MIT
 
 /**
- * @license MIT
- * @author Teffen Ellis, et al.
- * @copyright Sister Software
- *
  * CLI entry point for the Spliterator library.
  */
 
